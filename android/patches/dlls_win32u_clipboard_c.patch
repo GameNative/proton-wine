@@ -1,0 +1,28 @@
+diff --git a/dlls/win32u/clipboard.c b/dlls/win32u/clipboard.c
+index 6f3e396..da5b422 100644
+--- a/dlls/win32u/clipboard.c
++++ b/dlls/win32u/clipboard.c
+@@ -280,6 +280,9 @@ INT WINAPI NtUserCountClipboardFormats(void)
+ BOOL WINAPI NtUserIsClipboardFormatAvailable( UINT format )
+ {
+     BOOL ret = FALSE;
++    int wine_from_android_clipboard;
++
++    wine_from_android_clipboard = getenv("WINE_FROM_ANDROID_CLIPBOARD") && atoi(getenv("WINE_FROM_ANDROID_CLIPBOARD"));
+ 
+     if (!format) return FALSE;
+ 
+@@ -291,7 +294,13 @@ BOOL WINAPI NtUserIsClipboardFormatAvailable( UINT format )
+         if (!wine_server_call_err( req )) ret = (reply->count > 0);
+     }
+     SERVER_END_REQ;
++
++    if (wine_from_android_clipboard && !ret && format == CF_UNICODETEXT) {
++        ret = TRUE;
++    }
++
+     TRACE( "%s -> %u\n", debugstr_format( format ), ret );
++
+     return ret;
+ }
+ 

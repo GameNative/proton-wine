@@ -1,0 +1,14 @@
+diff --git a/dlls/ntdll/unix/esync.c b/dlls/ntdll/unix/esync.c
+index 3074f7c..275d099 100644
+--- a/dlls/ntdll/unix/esync.c
++++ b/dlls/ntdll/unix/esync.c
+@@ -48,6 +48,9 @@
+ #include "unix_private.h"
+ #include "esync.h"
+ #include "fsync.h"
++#ifdef __ANDROID__
++#include "../../../android/shm_utils/shm_utils.h"
++#endif
+ 
+ WINE_DEFAULT_DEBUG_CHANNEL(esync);
+ 

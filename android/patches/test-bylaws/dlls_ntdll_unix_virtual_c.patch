@@ -1,0 +1,110 @@
+diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
+index 963ebd2..9bb6973 100644
+--- a/dlls/ntdll/unix/virtual.c
++++ b/dlls/ntdll/unix/virtual.c
+@@ -87,6 +87,10 @@
+ #include "unix_private.h"
+ #include "wine/debug.h"
+ 
++#ifdef __ANDROID__
++#include "../../android/shm_utils/shm_utils.h"
++#endif
++
+ WINE_DEFAULT_DEBUG_CHANNEL(virtual);
+ WINE_DECLARE_DEBUG_CHANNEL(module);
+ WINE_DECLARE_DEBUG_CHANNEL(virtual_ranges);
+@@ -293,9 +297,15 @@ static void *address_space_start = (void *)0x110000; /* keep DOS area clear */
+ static void *address_space_start = (void *)0x10000;
+ #endif
+ #ifdef _WIN64
++#ifdef __ANDROID__
++static void *address_space_limit = (void *)0x7fffff0000;  /* top of the total available address space */
++static void *user_space_limit    = (void *)0x7fffff0000;  /* top of the user address space */
++static void *working_set_limit   = (void *)0x7fffff0000;  /* top of the current working set */
++#else
+ static void *address_space_limit = (void *)0x7fffffff0000;  /* top of the total available address space */
+ static void *user_space_limit    = (void *)0x7fffffff0000;  /* top of the user address space */
+ static void *working_set_limit   = (void *)0x7fffffff0000;  /* top of the current working set */
++#endif
+ #else
+ static void *address_space_limit = (void *)0xc0000000;
+ static void *user_space_limit    = (void *)0x7fff0000;
+@@ -353,6 +363,9 @@ static void *preload_reserve_end;
+ static BOOL force_exec_prot;  /* whether to force PROT_EXEC on all PROT_READ mmaps */
+ static BOOL enable_write_exceptions;  /* raise exception on writes to executable memory */
+ 
++#define FEX_STATS_SHM_MAX_SIZE 0x400000
++static void *fex_stats_shm;
++
+ struct range_entry
+ {
+     void *base;
+@@ -404,6 +417,7 @@ static void kernel_writewatch_softdirty_init(void)
+ 
+ static void kernel_writewatch_init(void)
+ {
++#ifndef __ANDROID__
+     struct uffdio_api uffdio_api;
+ 
+     uffd_fd = syscall( __NR_userfaultfd, O_CLOEXEC | O_NONBLOCK | UFFD_USER_MODE_ONLY );
+@@ -429,6 +443,10 @@ static void kernel_writewatch_init(void)
+         return;
+     }
+     use_kernel_writewatch = 1;
++#else
++    TRACE( "Kernel writewatches are not supported on Android\n" );
++    use_kernel_writewatch = 0;
++#endif
+ }
+ 
+ static void kernel_writewatch_reset( void *start, SIZE_T len )
+@@ -6331,6 +6349,49 @@ static unsigned int get_memory_image_info( HANDLE process, LPCVOID addr, MEMORY_
+     return status;
+ }
+ 
++#if defined(linux) && defined(__aarch64__)
++NTSTATUS get_memory_fex_stats_shm( HANDLE process, LPCVOID addr, MEMORY_FEX_STATS_SHM_INFORMATION *info,
++                                   SIZE_T len, SIZE_T *res_len)
++{
++    char buf[0x20];
++    int fd;
++    int oflag = O_RDWR;
++
++    if (len != sizeof(*info)) return STATUS_INFO_LENGTH_MISMATCH;
++    if (process != GetCurrentProcess()) return STATUS_INVALID_HANDLE;
++
++    sprintf( buf, "fex-%d-stats", getpid() );
++
++    if (!fex_stats_shm) {
++        fex_stats_shm = mmap( NULL, FEX_STATS_SHM_MAX_SIZE, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS |
++                              MAP_NORESERVE, -1, 0 );
++        if (fex_stats_shm == MAP_FAILED) {
++            fex_stats_shm = NULL;
++            return STATUS_INTERNAL_ERROR;
++        }
++
++        oflag |= O_CREAT | O_TRUNC;
++    }
++
++    fd = shm_open( buf, oflag, S_IRWXU | S_IRWXG | S_IRWXO );
++    if (fd == -1) return STATUS_INTERNAL_ERROR;
++
++    if (ftruncate( fd, info->map_size )) goto err;
++
++    if (mmap( fex_stats_shm, info->map_size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, fd,
++              0 ) == MAP_FAILED) goto err;
++
++    close( fd );
++
++    info->shm_base = fex_stats_shm;
++    *res_len = len;
++    return STATUS_SUCCESS;
++
++    err:
++        close( fd );
++    return STATUS_INTERNAL_ERROR;
++}
++#endif
+ 
+ /***********************************************************************
+  *             NtQueryVirtualMemory   (NTDLL.@)

@@ -1,0 +1,39 @@
+diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
+index 963ebd2..7a70299 100644
+--- a/dlls/ntdll/unix/virtual.c
++++ b/dlls/ntdll/unix/virtual.c
+@@ -293,9 +293,15 @@ static void *address_space_start = (void *)0x110000; /* keep DOS area clear */
+ static void *address_space_start = (void *)0x10000;
+ #endif
+ #ifdef _WIN64
++#ifdef __ANDROID__
++static void *address_space_limit = (void *)0x7fffff0000;  /* top of the total available address space */
++static void *user_space_limit    = (void *)0x7fffff0000;  /* top of the user address space */
++static void *working_set_limit   = (void *)0x7fffff0000;  /* top of the current working set */
++#else
+ static void *address_space_limit = (void *)0x7fffffff0000;  /* top of the total available address space */
+ static void *user_space_limit    = (void *)0x7fffffff0000;  /* top of the user address space */
+ static void *working_set_limit   = (void *)0x7fffffff0000;  /* top of the current working set */
++#endif
+ #else
+ static void *address_space_limit = (void *)0xc0000000;
+ static void *user_space_limit    = (void *)0x7fff0000;
+@@ -404,6 +410,7 @@ static void kernel_writewatch_softdirty_init(void)
+ 
+ static void kernel_writewatch_init(void)
+ {
++#ifndef __ANDROID__
+     struct uffdio_api uffdio_api;
+ 
+     uffd_fd = syscall( __NR_userfaultfd, O_CLOEXEC | O_NONBLOCK | UFFD_USER_MODE_ONLY );
+@@ -429,6 +436,10 @@ static void kernel_writewatch_init(void)
+         return;
+     }
+     use_kernel_writewatch = 1;
++#else
++    TRACE( "Kernel writewatches are not supported on Android\n" );
++    use_kernel_writewatch = 0;
++#endif
+ }
+ 
+ static void kernel_writewatch_reset( void *start, SIZE_T len )

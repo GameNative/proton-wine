@@ -1,0 +1,348 @@
+diff --git a/dlls/nsiproxy.sys/ip.c b/dlls/nsiproxy.sys/ip.c
+index 3e24ba44c56..d0dd32234b4 100644
+--- a/dlls/nsiproxy.sys/ip.c
++++ b/dlls/nsiproxy.sys/ip.c
+@@ -23,9 +23,11 @@
+ #endif
+ 
+ #include "config.h"
++#include "nsi_common.h"
+ #include <stdarg.h>
+ #include <sys/types.h>
+ #include <sys/socket.h>
++#include <net/if.h>
+ 
+ #ifdef HAVE_NET_ROUTE_H
+ #include <net/route.h>
+@@ -1499,84 +1501,126 @@ static NTSTATUS ipv4_forward_enumerate_all( void *key_data, UINT key_size, void
+ 
+ #ifdef __linux__
+     {
+-        struct ifaddrs *addrs, *ifentry;
+-        char buf[512], *ptr;
+-        struct in_addr mask;
+-        UINT rtf_flags;
+-        FILE *fp;
+-
+-        /* Loopback routes are not present in /proc/net/routes, add those explicitly. */
+-        if (getifaddrs( &addrs )) return STATUS_NO_MORE_ENTRIES;
+-        for (ifentry = addrs; ifentry; ifentry = ifentry->ifa_next)
+-        {
+-            if (!(ifentry->ifa_flags & IFF_LOOPBACK)) continue;
+-            if (!convert_unix_name_to_luid( ifentry->ifa_name, &entry.luid )) continue;
+-            if (!convert_luid_to_index( &entry.luid, &entry.if_index )) continue;
+-
+-            if (num < *count)
+-            {
+-                entry.prefix.s_addr = htonl( 0x7f000000 );
+-                entry.next_hop.s_addr = 0;
+-                entry.metric = 256;
+-                entry.prefix_len = 8;
+-                entry.protocol = MIB_IPPROTO_LOCAL;
+-                entry.loopback = 1;
+-                ipv4_forward_fill_entry( &entry, key_data, rw_data, dynamic_data, static_data );
+-                key_data = (BYTE *)key_data + key_size;
+-                rw_data = (BYTE *)rw_data + rw_size;
+-                dynamic_data = (BYTE *)dynamic_data + dynamic_size;
+-                static_data = (BYTE *)static_data + static_size;
+-            }
+-            num++;
+-            if (num < *count)
++        if (wine_new_ndis) {
++            TRACE( "Using alternative ndis implementation, output will be limited\n" );
++            struct ifaddrs *ifap;
++            struct in_addr mask;
++            getifaddrs( &ifap );
++            while (ifap->ifa_next != NULL) {
++                if (!convert_unix_name_to_luid( ifap->ifa_name, &entry.luid )) {
++                    ifap = ifap->ifa_next;
++                    continue;
++                }
++                if (!convert_luid_to_index( &entry.luid, &entry.if_index )) {
++                    ifap = ifap->ifa_next;
++                    continue;
++                }
++                if (ifap->ifa_addr->sa_family != AF_INET) {
++                    ifap = ifap->ifa_next;
++                    continue;
++                }
++                struct sockaddr_in *sa = (struct sockaddr_in *)ifap->ifa_addr;
++                entry.prefix.s_addr = sa->sin_addr.s_addr;
++                entry.metric = 0;
++                struct sockaddr_in *nm = (struct sockaddr_in *)ifap->ifa_netmask;
++                mask.s_addr = nm->sin_addr.s_addr;
++                entry.next_hop.s_addr = (entry.prefix.s_addr & mask.s_addr) | htonl(1);
++                entry.prefix_len = mask_v4_to_prefix( &mask );
++                entry.protocol = MIB_IPPROTO_LOCAL;
++                entry.loopback = (ifap->ifa_flags & IFF_LOOPBACK) ? 1 : 0;
++                if (num < *count)
++                {
++                    ipv4_forward_fill_entry( &entry, key_data, rw_data, dynamic_data, static_data );
++                    key_data = (BYTE *)key_data + key_size;
++                    rw_data = (BYTE *)rw_data + rw_size;
++                    dynamic_data = (BYTE *)dynamic_data + dynamic_size;
++                    static_data = (BYTE *)static_data + static_size;
++                }
++                num++;
++                ifap = ifap->ifa_next;
++            }
++        } else {
++            struct ifaddrs *addrs, *ifentry;
++            char buf[512], *ptr;
++            struct in_addr mask;
++            UINT rtf_flags;
++            FILE *fp;
++
++            /* Loopback routes are not present in /proc/net/routes, add those explicitly. */
++            if (getifaddrs( &addrs )) return STATUS_NO_MORE_ENTRIES;
++            for (ifentry = addrs; ifentry; ifentry = ifentry->ifa_next)
+             {
+-                entry.prefix.s_addr = htonl( INADDR_LOOPBACK );
+-                entry.prefix_len = 32;
+-                ipv4_forward_fill_entry( &entry, key_data, rw_data, dynamic_data, static_data );
+-                key_data = (BYTE *)key_data + key_size;
+-                rw_data = (BYTE *)rw_data + rw_size;
+-                dynamic_data = (BYTE *)dynamic_data + dynamic_size;
+-                static_data = (BYTE *)static_data + static_size;
+-            }
+-            num++;
+-            break;
+-        }
+-        freeifaddrs( addrs );
+-
+-        if (!(fp = fopen( "/proc/net/route", "r" ))) return STATUS_NOT_SUPPORTED;
++                if (!(ifentry->ifa_flags & IFF_LOOPBACK)) continue;
++                if (!convert_unix_name_to_luid( ifentry->ifa_name, &entry.luid )) continue;
++                if (!convert_luid_to_index( &entry.luid, &entry.if_index )) continue;
+ 
+-        /* skip header line */
+-        fgets( buf, sizeof(buf), fp );
+-        while ((ptr = fgets( buf, sizeof(buf), fp )))
+-        {
+-            while (!isspace( *ptr )) ptr++;
+-            *ptr++ = '\0';
+-
+-            if (!convert_unix_name_to_luid( buf, &entry.luid )) continue;
+-            if (!convert_luid_to_index( &entry.luid, &entry.if_index )) continue;
++                if (num < *count)
++                {
++                    entry.prefix.s_addr = htonl( 0x7f000000 );
++                    entry.next_hop.s_addr = 0;
++                    entry.metric = 256;
++                    entry.prefix_len = 8;
++                    entry.protocol = MIB_IPPROTO_LOCAL;
++                    entry.loopback = 1;
++                    ipv4_forward_fill_entry( &entry, key_data, rw_data, dynamic_data, static_data );
++                    key_data = (BYTE *)key_data + key_size;
++                    rw_data = (BYTE *)rw_data + rw_size;
++                    dynamic_data = (BYTE *)dynamic_data + dynamic_size;
++                    static_data = (BYTE *)static_data + static_size;
++                }
++                num++;
++                if (num < *count)
++                {
++                    entry.prefix.s_addr = htonl( INADDR_LOOPBACK );
++                    entry.prefix_len = 32;
++                    ipv4_forward_fill_entry( &entry, key_data, rw_data, dynamic_data, static_data );
++                    key_data = (BYTE *)key_data + key_size;
++                    rw_data = (BYTE *)rw_data + rw_size;
++                    dynamic_data = (BYTE *)dynamic_data + dynamic_size;
++                    static_data = (BYTE *)static_data + static_size;
++                }
++                num++;
++                break;
++            }
++            freeifaddrs( addrs );
+ 
+-            entry.prefix.s_addr = strtoul( ptr, &ptr, 16 );
+-            entry.next_hop.s_addr = strtoul( ptr + 1, &ptr, 16 );
+-            rtf_flags = strtoul( ptr + 1, &ptr, 16 );
+-            strtoul( ptr + 1, &ptr, 16 ); /* refcount, skip */
+-            strtoul( ptr + 1, &ptr, 16 ); /* use, skip */
+-            entry.metric = strtoul( ptr + 1, &ptr, 16 );
+-            mask.s_addr = strtoul( ptr + 1, &ptr, 16 );
+-            entry.prefix_len = mask_v4_to_prefix( &mask );
+-            entry.protocol = (rtf_flags & RTF_GATEWAY) ? MIB_IPPROTO_NETMGMT : MIB_IPPROTO_LOCAL;
+-            entry.loopback = entry.protocol == MIB_IPPROTO_LOCAL && entry.prefix_len == 32;
++            if (!(fp = fopen( "/proc/net/route", "r" ))) return STATUS_NOT_SUPPORTED;
+ 
+-            if (num < *count)
++            /* skip header line */
++            fgets( buf, sizeof(buf), fp );
++            while ((ptr = fgets( buf, sizeof(buf), fp )))
+             {
+-                ipv4_forward_fill_entry( &entry, key_data, rw_data, dynamic_data, static_data );
+-                key_data = (BYTE *)key_data + key_size;
+-                rw_data = (BYTE *)rw_data + rw_size;
+-                dynamic_data = (BYTE *)dynamic_data + dynamic_size;
+-                static_data = (BYTE *)static_data + static_size;
++                while (!isspace( *ptr )) ptr++;
++                *ptr++ = '\0';
++
++                if (!convert_unix_name_to_luid( buf, &entry.luid )) continue;
++                if (!convert_luid_to_index( &entry.luid, &entry.if_index )) continue;
++
++                entry.prefix.s_addr = strtoul( ptr, &ptr, 16 );
++                entry.next_hop.s_addr = strtoul( ptr + 1, &ptr, 16 );
++                rtf_flags = strtoul( ptr + 1, &ptr, 16 );
++                strtoul( ptr + 1, &ptr, 16 ); /* refcount, skip */
++                strtoul( ptr + 1, &ptr, 16 ); /* use, skip */
++                entry.metric = strtoul( ptr + 1, &ptr, 16 );
++                mask.s_addr = strtoul( ptr + 1, &ptr, 16 );
++                entry.prefix_len = mask_v4_to_prefix( &mask );
++                entry.protocol = (rtf_flags & RTF_GATEWAY) ? MIB_IPPROTO_NETMGMT : MIB_IPPROTO_LOCAL;
++                entry.loopback = entry.protocol == MIB_IPPROTO_LOCAL && entry.prefix_len == 32;
++
++                if (num < *count)
++                {
++                    ipv4_forward_fill_entry( &entry, key_data, rw_data, dynamic_data, static_data );
++                    key_data = (BYTE *)key_data + key_size;
++                    rw_data = (BYTE *)rw_data + rw_size;
++                    dynamic_data = (BYTE *)dynamic_data + dynamic_size;
++                    static_data = (BYTE *)static_data + static_size;
++                }
++                num++;
+             }
+-            num++;
++            fclose( fp );
++
+         }
+-        fclose( fp );
++
+     }
+ #elif defined(HAVE_SYS_SYSCTL_H) && defined(NET_RT_DUMP)
+     {
+@@ -1796,50 +1840,93 @@ static NTSTATUS ipv6_forward_enumerate_all( void *key_data, UINT key_size, void
+ 
+ #ifdef __linux__
+     {
+-        struct ipv6_route_data entry;
+-        char buf[512], *ptr, *end;
+-        UINT rtf_flags;
+-        FILE *fp;
+-
+-        if (!(fp = fopen( "/proc/net/ipv6_route", "r" )))
+-        {
+-            *count = 0;
+-            return STATUS_SUCCESS;
+-        }
+-
+-        while ((ptr = fgets( buf, sizeof(buf), fp )))
+-        {
+-            entry.prefix = str_to_in6_addr( ptr, &ptr );
+-            entry.prefix_len = strtoul( ptr + 1, &ptr, 16 );
+-            str_to_in6_addr( ptr + 1, &ptr ); /* source network, skip */
+-            strtoul( ptr + 1, &ptr, 16 ); /* source prefix length, skip */
+-            entry.next_hop = str_to_in6_addr( ptr + 1, &ptr );
+-            entry.metric = strtoul( ptr + 1, &ptr, 16 );
+-            strtoul( ptr + 1, &ptr, 16 ); /* refcount, skip */
+-            strtoul( ptr + 1, &ptr, 16 ); /* use, skip */
+-            rtf_flags = strtoul( ptr + 1, &ptr, 16);
+-            if (!(rtf_flags & RTF_UP)) continue;
+-            entry.protocol = (rtf_flags & RTF_GATEWAY) ? MIB_IPPROTO_NETMGMT : MIB_IPPROTO_LOCAL;
+-            entry.loopback = entry.prefix_len == 128 && IN6_IS_ADDR_LOOPBACK(&entry.prefix);
+-
+-            while (isspace( *ptr )) ptr++;
+-            end = ptr;
+-            while (*end && !isspace(*end)) ++end;
+-            *end = 0;
+-            if (!convert_unix_name_to_luid( ptr, &entry.luid )) continue;
+-            if (!convert_luid_to_index( &entry.luid, &entry.if_index )) continue;
++        if (wine_new_ndis) {
++            TRACE( "Using alternative ndis implementation, output will be limited\n" );
++            struct ipv6_route_data entry;
++            struct ifaddrs *ifap;
++            struct in6_addr mask;
++            getifaddrs( &ifap );
++            while (ifap->ifa_next != NULL) {
++                if (!convert_unix_name_to_luid( ifap->ifa_name, &entry.luid )) {
++                    ifap = ifap->ifa_next;
++                    continue;
++                }
++                if (!convert_luid_to_index( &entry.luid, &entry.if_index )) {
++                    ifap = ifap->ifa_next;
++                    continue;
++                }
++                if (ifap->ifa_addr->sa_family != AF_INET6) {
++                    ifap = ifap->ifa_next;
++                    continue;
++                }
++
++                struct sockaddr_in6 *sa = (struct sockaddr_in6 *)ifap->ifa_addr;
++                entry.prefix = sa->sin6_addr;
++                entry.metric = 0;
++                struct sockaddr_in6 *nm = (struct sockaddr_in6 *)ifap->ifa_netmask;
++                mask = nm->sin6_addr;
++                memset(&entry.next_hop, 0, sizeof(entry.next_hop));
++                entry.prefix_len = mask_v6_to_prefix( &mask );
++                entry.protocol = MIB_IPPROTO_LOCAL;
++                entry.loopback = (ifap->ifa_flags & IFF_LOOPBACK) ? 1 : 0;
++                if (num < *count)
++                {
++                    ipv6_forward_fill_entry( &entry, key_data, rw_data, dynamic_data, static_data );
++                    key_data = (BYTE *)key_data + key_size;
++                    rw_data = (BYTE *)rw_data + rw_size;
++                    dynamic_data = (BYTE *)dynamic_data + dynamic_size;
++                    static_data = (BYTE *)static_data + static_size;
++                }
++                num++;
++                ifap = ifap->ifa_next;
++            }
++        } else {
++            struct ipv6_route_data entry;
++            char buf[512], *ptr, *end;
++            UINT rtf_flags;
++            FILE *fp;
++
++            if (!(fp = fopen( "/proc/net/ipv6_route", "r" )))
++            {
++                *count = 0;
++                return STATUS_SUCCESS;
++            }
+ 
+-            if (num < *count)
++            while ((ptr = fgets( buf, sizeof(buf), fp )))
+             {
+-                ipv6_forward_fill_entry( &entry, key_data, rw_data, dynamic_data, static_data );
+-                key_data = (BYTE *)key_data + key_size;
+-                rw_data = (BYTE *)rw_data + rw_size;
+-                dynamic_data = (BYTE *)dynamic_data + dynamic_size;
+-                static_data = (BYTE *)static_data + static_size;
++                entry.prefix = str_to_in6_addr( ptr, &ptr );
++                entry.prefix_len = strtoul( ptr + 1, &ptr, 16 );
++                str_to_in6_addr( ptr + 1, &ptr ); /* source network, skip */
++                strtoul( ptr + 1, &ptr, 16 ); /* source prefix length, skip */
++                entry.next_hop = str_to_in6_addr( ptr + 1, &ptr );
++                entry.metric = strtoul( ptr + 1, &ptr, 16 );
++                strtoul( ptr + 1, &ptr, 16 ); /* refcount, skip */
++                strtoul( ptr + 1, &ptr, 16 ); /* use, skip */
++                rtf_flags = strtoul( ptr + 1, &ptr, 16);
++                if (!(rtf_flags & RTF_UP)) continue;
++                entry.protocol = (rtf_flags & RTF_GATEWAY) ? MIB_IPPROTO_NETMGMT : MIB_IPPROTO_LOCAL;
++                entry.loopback = entry.prefix_len == 128 && IN6_IS_ADDR_LOOPBACK(&entry.prefix);
++
++                while (isspace( *ptr )) ptr++;
++                end = ptr;
++                while (*end && !isspace(*end)) ++end;
++                *end = 0;
++                if (!convert_unix_name_to_luid( ptr, &entry.luid )) continue;
++                if (!convert_luid_to_index( &entry.luid, &entry.if_index )) continue;
++
++                if (num < *count)
++                {
++                    ipv6_forward_fill_entry( &entry, key_data, rw_data, dynamic_data, static_data );
++                    key_data = (BYTE *)key_data + key_size;
++                    rw_data = (BYTE *)rw_data + rw_size;
++                    dynamic_data = (BYTE *)dynamic_data + dynamic_size;
++                    static_data = (BYTE *)static_data + static_size;
++                }
++                num++;
+             }
+-            num++;
++            fclose(fp);
+         }
+-        fclose(fp);
++
+     }
+ #else
+     FIXME( "not implemented\n" );

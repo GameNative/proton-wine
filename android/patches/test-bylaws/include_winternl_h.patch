@@ -1,0 +1,90 @@
+diff --git a/include/winternl.h b/include/winternl.h
+index 4ae1177..7eb63a9 100644
+--- a/include/winternl.h
++++ b/include/winternl.h
+@@ -599,7 +599,27 @@ typedef struct _TEB
+     PVOID                        MergedPrefLanguages;               /* fc0/17e0 */
+     ULONG                        MuiImpersonation;                  /* fc4/17e8 */
+     USHORT                       CrossTebFlags;                     /* fc8/17ec */
+-    USHORT                       SameTebFlags;                      /* fca/17ee */
++    union {
++        USHORT SameTebFlags;                                        /* fca/17ee */
++        struct {
++            USHORT SafeThunkCall : 1;
++            USHORT InDebugPrint : 1;
++            USHORT HasFiberData : 1;
++            USHORT SkipThreadAttach : 1;
++            USHORT WerInShipAssertCode : 1;
++            USHORT RanProcessInit : 1;
++            USHORT ClonedThread : 1;
++            USHORT SuppressDebugMsg : 1;
++            USHORT DisableUserStackWalk : 1;
++            USHORT RtlExceptionAttached : 1;
++            USHORT InitialThread : 1;
++            USHORT SessionAware : 1;
++            USHORT LoadOwner : 1;
++            USHORT LoaderWorker : 1;
++            USHORT SkipLoaderInit : 1;
++            USHORT SkipFileAPIBrokering : 1;
++        } DUMMYSTRUCTNAME;
++    } DUMMYUNIONNAME1;
+     PVOID                        TxnScopeEnterCallback;             /* fcc/17f0 */
+     PVOID                        TxnScopeExitCallback;              /* fd0/17f8 */
+     PVOID                        TxnScopeContext;                   /* fd4/1800 */
+@@ -1900,8 +1920,15 @@ typedef enum _PROCESSINFOCLASS {
+     ProcessWineGrantAdminToken,
+     ProcessWineUnixDebuggerPid = 1100,
+ #endif
++    ProcessFexHardwareTso = 2000,
++    ProcessFexUnalignAtomic,
+ } PROCESSINFOCLASS;
+ 
++// These match the prctl flag values
++#define FEX_UNALIGN_ATOMIC_EMULATE       (1ULL << 0)
++#define FEX_UNALIGN_ATOMIC_BACKPATCH     (1ULL << 1)
++#define FEX_UNALIGN_ATOMIC_STRICT_SPLIT_LOCKS    (1ULL << 2)
++
+ #define MEM_EXECUTE_OPTION_DISABLE   0x01
+ #define MEM_EXECUTE_OPTION_ENABLE    0x02
+ #define MEM_EXECUTE_OPTION_DISABLE_THUNK_EMULATION 0x04
+@@ -2303,6 +2330,7 @@ typedef enum _MEMORY_INFORMATION_CLASS {
+     MemoryWineUnixFuncs = 1000,
+     MemoryWineUnixWow64Funcs,
+ #endif
++    MemoryFexStatsShm = 2000,
+ } MEMORY_INFORMATION_CLASS;
+ 
+ typedef struct _MEMORY_SECTION_NAME
+@@ -2352,6 +2380,12 @@ typedef struct _MEMORY_REGION_INFORMATION
+     ULONG_PTR NodePreference;
+ } MEMORY_REGION_INFORMATION, *PMEMORY_REGION_INFORMATION;
+ 
++typedef struct _MEMORY_FEX_STATS_SHM_INFORMATION
++{
++    void *shm_base;
++    SIZE_T map_size;
++} MEMORY_FEX_STATS_SHM_INFORMATION, *PMEMORY_FEX_STATS_SHM_INFORMATION;
++
+ typedef struct _MEMORY_IMAGE_INFORMATION
+ {
+     PVOID ImageBase;
+@@ -4015,8 +4049,9 @@ typedef struct _RTL_PROCESS_MODULE_INFORMATION_EX
+ #define THREAD_CREATE_FLAGS_CREATE_SUSPENDED        0x00000001
+ #define THREAD_CREATE_FLAGS_SKIP_THREAD_ATTACH      0x00000002
+ #define THREAD_CREATE_FLAGS_HIDE_FROM_DEBUGGER      0x00000004
+-#define THREAD_CREATE_FLAGS_HAS_SECURITY_DESCRIPTOR 0x00000010
+-#define THREAD_CREATE_FLAGS_ACCESS_CHECK_IN_TARGET  0x00000020
++#define THREAD_CREATE_FLAGS_LOADER_WORKER           0x00000010
++#define THREAD_CREATE_FLAGS_SKIP_LOADER_INIT        0x00000020
++#define THREAD_CREATE_FLAGS_BYPASS_PROCESS_FREEZE   0x00000040
+ #define THREAD_CREATE_FLAGS_INITIAL_THREAD          0x00000080
+ 
+ #ifdef __WINESRC__
+@@ -5186,6 +5221,7 @@ NTSYSAPI USHORT    WINAPI RtlWow64GetCurrentMachine(void);
+ NTSYSAPI NTSTATUS  WINAPI RtlWow64GetProcessMachines(HANDLE,USHORT*,USHORT*);
+ NTSYSAPI NTSTATUS  WINAPI RtlWow64GetSharedInfoProcess(HANDLE,BOOLEAN*,WOW64INFO*);
+ NTSYSAPI NTSTATUS  WINAPI RtlWow64IsWowGuestMachineSupported(USHORT,BOOLEAN*);
++NTSYSAPI NTSTATUS  WINAPI RtlWow64SuspendThread(HANDLE,ULONG*);
+ NTSYSAPI NTSTATUS  WINAPI RtlWriteRegistryValue(ULONG,PCWSTR,PCWSTR,ULONG,PVOID,ULONG);
+ NTSYSAPI NTSTATUS  WINAPI RtlZombifyActivationContext(HANDLE);
+ NTSYSAPI NTSTATUS  WINAPI RtlpNtCreateKey(PHANDLE,ACCESS_MASK,const OBJECT_ATTRIBUTES*,ULONG,const UNICODE_STRING*,ULONG,PULONG);

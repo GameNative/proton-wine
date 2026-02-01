@@ -1,0 +1,401 @@
+diff --git a/dlls/dnsapi/libresolv.c b/dlls/dnsapi/libresolv.c
+index 9034651..65ec125 100644
+--- a/dlls/dnsapi/libresolv.c
++++ b/dlls/dnsapi/libresolv.c
+@@ -24,7 +24,7 @@
+ 
+ #include "config.h"
+ 
+-#ifdef HAVE_RESOLV
++#if defined(HAVE_RESOLV) || defined(__ANDROID__)
+ #include <stdarg.h>
+ #include <string.h>
+ #include <stdio.h>
+@@ -44,6 +44,8 @@
+ # include <netdb.h>
+ #endif
+ 
++#include <arpa/inet.h>
++
+ #include "ntstatus.h"
+ #define WIN32_NO_STATUS
+ #include "windef.h"
+@@ -53,12 +55,75 @@
+ #define USE_WS_PREFIX
+ #include "ws2def.h"
+ #include "ws2ipdef.h"
+-
+ #include "wine/debug.h"
+ #include "dnsapi.h"
+ 
+ WINE_DEFAULT_DEBUG_CHANNEL(dnsapi);
+ 
++#ifdef __ANDROID__
++
++#define LIBANDROID_HANDLE "/system/lib64/libandroid.so"
++
++#include <dlfcn.h>
++enum ResNsendFlags : uint32_t {
++    ANDROID_RESOLV_NO_RETRY = 1 << 0,
++    ANDROID_RESOLV_NO_CACHE_STORE = 1 << 1,
++    ANDROID_RESOLV_NO_CACHE_LOOKUP = 1 << 2,
++};
++
++typedef uint64_t net_handle_t;
++
++#define NETWORK_UNSPECIFIED ((net_handle_t)0)
++
++static void *libandroid_handle;
++static int (*p_android_res_nquery)(net_handle_t network, const char *dname, int ns_class, int ns_type, uint32_t flags);
++static int (*p_android_res_nresult)(int fd, int *rcode, uint8_t *answer, size_t anslen);
++
++static void init_resolver( void ) {
++    if (!libandroid_handle)
++        libandroid_handle = dlopen(LIBANDROID_HANDLE, RTLD_LOCAL | RTLD_NOW);
++    if (!p_android_res_nquery)
++        p_android_res_nquery = dlsym(libandroid_handle, "android_res_nquery");
++    if (!p_android_res_nresult)
++        p_android_res_nresult = dlsym(libandroid_handle, "android_res_nresult");
++}
++
++static DNS_STATUS map_h_errno( int error )
++{
++    switch (error) {
++        case ns_r_formerr:
++            return DNS_ERROR_RCODE_FORMAT_ERROR;
++        case ns_r_servfail:
++            return DNS_ERROR_RCODE_SERVER_FAILURE;
++        case ns_r_nxdomain:
++            return DNS_ERROR_RCODE_NAME_ERROR;
++        case ns_r_notimpl:
++            return DNS_ERROR_RCODE_NOT_IMPLEMENTED;
++        case ns_r_refused:
++            return DNS_ERROR_RCODE_REFUSED;
++        case ns_r_yxdomain:
++            return DNS_ERROR_RCODE_YXDOMAIN;
++        case ns_r_yxrrset:
++            return DNS_ERROR_RCODE_YXRRSET;
++        case ns_r_nxrrset:
++            return DNS_ERROR_RCODE_NXRRSET;
++        case ns_r_notauth:
++            return DNS_ERROR_RCODE_NOTAUTH;
++        case ns_r_notzone:
++            return DNS_ERROR_RCODE_NOTZONE;
++        case ns_r_badsig:
++            return DNS_ERROR_RCODE_BADSIG;
++        case ns_r_badkey:
++            return DNS_ERROR_RCODE_BADKEY;
++        case ns_r_badtime:
++            return DNS_ERROR_RCODE_BADTIME;
++        default:
++            return DNS_ERROR_RCODE_NOT_IMPLEMENTED;
++    }
++}
++
++#else
++
+ /* call res_init() just once because of a bug in Mac OS X 10.4 */
+ /* call once per thread on systems that have per-thread _res */
+ static void init_resolver( void )
+@@ -66,6 +131,8 @@ static void init_resolver( void )
+     if (!(_res.options & RES_INIT)) res_init();
+ }
+ 
++
++
+ static unsigned long map_options( DWORD options )
+ {
+     unsigned long ret = 0;
+@@ -122,6 +189,29 @@ static DNS_STATUS map_h_errno( int error )
+     }
+ }
+ 
++#endif
++
++#ifdef __ANDROID__
++
++static NTSTATUS resolv_get_searchlist( void *args )
++{
++    const struct get_searchlist_params *params = args;
++    WCHAR *list = params->list;
++
++    if (!list || *params->len < sizeof(WCHAR))
++    {
++        *params->len = sizeof(WCHAR);
++        return !list ? ERROR_SUCCESS : ERROR_MORE_DATA;
++    }
++
++    *list = 0;
++    *params->len = sizeof(WCHAR);
++
++    return ERROR_SUCCESS;
++}
++
++#else
++
+ static NTSTATUS resolv_get_searchlist( void *args )
+ {
+     const struct get_searchlist_params *params = args;
+@@ -151,6 +241,7 @@ static NTSTATUS resolv_get_searchlist( void *args )
+     return ERROR_SUCCESS;
+ }
+ 
++#endif
+ 
+ static inline int filter( unsigned short sin_family, USHORT family )
+ {
+@@ -238,10 +329,10 @@ static NTSTATUS resolv_get_serverlist( void *args )
+ 
+ static NTSTATUS resolv_get_serverlist( void *args )
+ {
+-    const struct get_serverlist_params *params = args;
++    const struct get_serverlist_params *params = args;
+     DNS_ADDR_ARRAY *addrs = params->addrs;
+     DWORD needed, found, i;
+-
++#ifndef __ANDROID__
+     init_resolver();
+ 
+     if (!_res.nscount) return DNS_ERROR_NO_DNS_SERVERS;
+@@ -300,11 +391,29 @@ static NTSTATUS resolv_get_serverlist( void *args )
+     }
+ 
+     return ERROR_SUCCESS;
++#else
++    char *dns = getenv("ANDROID_RESOLV_DNS") ? getenv("ANDROID_RESOLV_DNS") : "8.8.4.4";
++    TRACE( "resolv_get_serverlist not supported on Android, attempting to hardcode\n" );
++    memset(addrs, 0, sizeof(DNS_ADDR_ARRAY));
++
++    found = 0;
++
++    addrs->MaxCount = addrs->AddrCount = 1;
++
++    SOCKADDR_IN *sa = (SOCKADDR_IN *)addrs->AddrArray[0].MaxSa;
++    sa->sin_family = WS_AF_INET;
++    inet_pton(WS_AF_INET, dns, &sa->sin_addr);
++    addrs->AddrArray[0].Data.DnsAddrUserDword[0] = sizeof(*sa);
++    found++;
++    *params->len = FIELD_OFFSET(DNS_ADDR_ARRAY, AddrArray[found]);
++    return ERROR_SUCCESS;
++#endif
+ }
+ #endif
+ 
+ static NTSTATUS resolv_set_serverlist( void *args )
+ {
++#ifndef __ANDROID__
+     const IP4_ARRAY *addrs = args;
+     int i;
+ 
+@@ -321,8 +430,10 @@ static NTSTATUS resolv_set_serverlist( void *args )
+ 
+     for (i = 0; i < _res.nscount; i++)
+         _res.nsaddr_list[i].sin_addr.s_addr = addrs->AddrArray[i];
+-
+-    return ERROR_SUCCESS;
++#else
++    TRACE( "resolv_set_serverlist not supported on Android\n" );
++#endif
++    return ERROR_SUCCESS;
+ }
+ 
+ static NTSTATUS resolv_query( void *args )
+@@ -330,17 +441,33 @@ static NTSTATUS resolv_query( void *args )
+     const struct query_params *params = args;
+     DNS_STATUS ret = ERROR_SUCCESS;
+     int len;
+-
++#ifdef __ANDROID__
++    uint32_t flags = 0;
++    int fd = 0;
++    int rcode = 0;
++#endif
+     init_resolver();
++#ifndef __ANDROID__
+     _res.options |= map_options( params->options );
+-
+     if ((len = res_query( params->name, ns_c_in, params->type, params->buf, *params->len )) < 0)
+-        ret = map_h_errno( h_errno );
++        ret = map_h_errno( h_errno );
+     else
+         *params->len = len;
++#else
++    if (params->options & DNS_QUERY_BYPASS_CACHE)
++        flags = ANDROID_RESOLV_NO_CACHE_STORE | ANDROID_RESOLV_NO_CACHE_LOOKUP;
++
++     if ((fd = p_android_res_nquery( NETWORK_UNSPECIFIED, params->name, ns_c_in, params->type, flags)) < 0)
++        return DNS_ERROR_RCODE_REFUSED;
++
++    if ((len = p_android_res_nresult(fd, &rcode, params->buf, *params->len)) < 0)
++        ret = map_h_errno( rcode );
++    else
++        *params->len = len;
++#endif
+     return ret;
+ }
+-
++
+ const unixlib_entry_t __wine_unix_call_funcs[] =
+ {
+     resolv_get_searchlist,
+@@ -426,4 +553,4 @@ C_ASSERT( ARRAYSIZE(__wine_unix_call_wow64_funcs) == unix_funcs_count );
+ 
+ #endif  /* _WIN64 */
+ 
+-#endif /* HAVE_RESOLV */
++#endif /* HAVE_RESOLV || __ANDROID__ */
+diff --git a/dlls/dnsapi/record.c b/dlls/dnsapi/record.c
+index 1b4cbfe..29b6533 100644
+--- a/dlls/dnsapi/record.c
++++ b/dlls/dnsapi/record.c
+@@ -1144,7 +1144,7 @@ static DNS_STATUS extract_message_records( const DNS_MESSAGE_BUFFER *buffer, WOR
+     const BYTE *ptr = (const BYTE *)buffer->MessageBody;
+     unsigned int num;
+ 
+-    if (hdr->IsResponse && !hdr->AnswerCount) return DNS_ERROR_BAD_PACKET;
++    if (hdr->IsResponse && !hdr->AnswerCount) ret = DNS_INFO_NO_RECORDS;
+ 
+     for (num = 0; num < hdr->QuestionCount; num++)
+         if (!(ptr = skip_record( ptr, end, DnsSectionQuestion ))) return DNS_ERROR_BAD_PACKET;
+diff --git a/dlls/nsiproxy.sys/ndis.c b/dlls/nsiproxy.sys/ndis.c
+index 158a39e..35cab14 100644
+--- a/dlls/nsiproxy.sys/ndis.c
++++ b/dlls/nsiproxy.sys/ndis.c
+@@ -23,7 +23,8 @@
+ #endif
+ 
+ #include "config.h"
+-
++#include <ifaddrs.h>
++#include "nsi_common.h"
+ #include <stdarg.h>
+ #include <sys/types.h>
+ #include <sys/socket.h>
+@@ -104,7 +105,8 @@ struct if_entry
+ 
+ static struct list if_list = LIST_INIT( if_list );
+ static pthread_mutex_t if_list_lock = PTHREAD_MUTEX_INITIALIZER;
+-
++static int do_not_update = -1;
++int wine_new_ndis = -1;
+ static BOOL have_ethernet_iface;
+ 
+ static struct if_entry *find_entry_from_index( UINT index )
+@@ -309,6 +311,16 @@ static struct if_entry *add_entry( UINT index, const char *name )
+         free( entry );
+         return NULL;
+     }
++#ifndef __ANDROID__
++    if_get_physical( name, &entry->if_type, &entry->if_phys_addr );
++#else
++    if (strstr(name, "wlan") || strstr(name, "en") || strstr(name, "eth") || strstr(name, "dummy"))
++        entry->if_type = MIB_IF_TYPE_ETHERNET;
++    else if (strstr(name, "lo"))
++        entry->if_type = MIB_IF_TYPE_LOOPBACK;
++    else if (strstr(name, "rmnet"))
++        entry->if_type = MIB_IF_TYPE_PPP;
++#endif
+ 
+     if_get_physical( name, &entry->if_type, &entry->if_phys_addr );
+ 
+@@ -330,9 +342,35 @@ static struct if_entry *add_entry( UINT index, const char *name )
+ 
+ static unsigned int update_if_table( void )
+ {
+-    struct if_nameindex *indices = if_nameindex(), *entry;
++    struct if_nameindex *indices, *entry;
+     unsigned int append_count = 0;
+     struct if_entry *if_entry;
++    if (do_not_update == -1)
++        do_not_update = getenv("WINE_DO_NOT_UPDATE_IF_TABLE") && atoi(getenv("WINE_DO_NOT_UPDATE_IF_TABLE"));
++
++    if (wine_new_ndis == -1)
++        wine_new_ndis = getenv("WINE_NEW_NDIS") && atoi(getenv("WINE_NEW_NDIS"));
++
++    if (do_not_update)
++           return 0;
++
++    if (wine_new_ndis) {
++        struct ifaddrs *ifap;
++        int res;
++
++           TRACE( "Using alternative ndis implementation, output will be limited\n" );
++
++        if ((res = getifaddrs( &ifap )) == -1)
++            return 0;
++        while (ifap->ifa_next != NULL) {
++            int index = if_nametoindex( ifap->ifa_name );
++            if (index && !find_entry_from_index( index ) && add_entry( index, ifap->ifa_name ))
++                ++append_count;
++            ifap = ifap->ifa_next;
++        }
++        return append_count;
++    }
++    indices = if_nameindex();
+ 
+     for (entry = indices; entry->if_index; entry++)
+     {
+@@ -532,7 +570,10 @@ static NTSTATUS ifinfo_enumerate_all( void *key_data, UINT key_size, void *rw_da
+     pthread_mutex_lock( &if_list_lock );
+ 
+     update_if_table();
+-
++    if (do_not_update) {
++        pthread_mutex_unlock( &if_list_lock );
++        return STATUS_UNSUCCESSFUL;
++    }
+     LIST_FOR_EACH_ENTRY( entry, &if_list, struct if_entry, entry )
+     {
+         if (num < *count)
+diff --git a/dlls/nsiproxy.sys/nsi_common.h b/dlls/nsiproxy.sys/nsi_common.h
+new file mode 100644
+index 0000000..7c1bfbc
+--- /dev/null
++++ b/dlls/nsiproxy.sys/nsi_common.h
+@@ -0,0 +1,26 @@
++/*
++ * nsiproxy.sys
++ *
++ * Copyright 2021 Huw Davies
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
++ */
++
++ #ifndef __NSI_COMMON_H
++ #define __NSI_COMMON_H
++
++ extern int wine_new_ndis;
++
++ #endif
+diff --git a/server/unicode.c b/server/unicode.c
+index b486431..8da12dd 100644
+--- a/server/unicode.c
++++ b/server/unicode.c
+@@ -334,6 +334,15 @@ struct fd *load_intl_file(void)
+                            FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT ))) break;
+         free( path );
+     }
++    if (!fd && getenv("XDG_DATA_DIRS")) {
++        char *share_dir = getenv("XDG_DATA_DIRS");
++        char *path = malloc(strlen(share_dir) + strlen("/l_intl.nls") + 1);
++        sprintf(path, "%s/%s", share_dir, "wine/nls/l_intl.nls");
++        fd = open_fd( NULL, path, nt_name, O_RDONLY, &mode, FILE_READ_DATA,
++                      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
++                      FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT );
++        free ( path );
++    }
+     if (!fd) fatal_error( "failed to load l_intl.nls\n" );
+     unix_fd = get_unix_fd( fd );
+     /* read initial offset */

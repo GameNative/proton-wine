@@ -1,0 +1,252 @@
+name: Build Proton Wine
+
+on:
+  push:
+    branches: [ main, master, proton_10.0 ]
+  pull_request:
+    branches: [ main, master, proton_10.0 ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        arch: [x86_64, aarch64]
+      fail-fast: false
+    
+    steps:
+      - name: Free up disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          df -h
+      
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      
+      - name: Set up build environment
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            git \
+            wget \
+            curl \
+            unzip \
+            flex \
+            bison \
+            gettext \
+            autoconf \
+            automake \
+            libtool \
+            pkg-config \
+            mingw-w64 \
+            gcc-multilib \
+            g++-multilib \
+            libfreetype6-dev \
+            libfreetype6-dev:i386 \
+            libpng-dev \
+            libpng-dev:i386 \
+            zlib1g-dev \
+            zlib1g-dev:i386
+      
+      - name: Download and extract termuxfs for ${{ matrix.arch }}
+        run: |
+          mkdir -p $HOME/termuxfs/${{ matrix.arch }}
+          cd $HOME/termuxfs/${{ matrix.arch }}
+          wget https://github.com/GameNative/termux-on-gha/releases/download/build-20260218/termuxfs-${{ matrix.arch }}.tar
+          tar -xf termuxfs-${{ matrix.arch }}.tar
+          ls -la $HOME/termuxfs/${{ matrix.arch }}/
+      
+      - name: Cache Android NDK
+        id: cache-ndk
+        uses: actions/cache@v4
+        with:
+          path: ~/Android/Sdk/ndk/27.3.13750724
+          key: android-ndk-r27d
+      
+      - name: Set up Android NDK
+        if: steps.cache-ndk.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p $HOME/Android/Sdk/ndk
+          cd $HOME/Android/Sdk/ndk
+          wget https://dl.google.com/android/repository/android-ndk-r27d-linux.zip
+          unzip -q android-ndk-r27d-linux.zip
+          mv android-ndk-r27d 27.3.13750724
+      
+      - name: Cache LLVM MinGW toolchain
+        id: cache-llvm-mingw
+        uses: actions/cache@v4
+        with:
+          path: ~/toolchains/llvm-mingw-20250920-ucrt-ubuntu-22.04-x86_64
+          key: bylaws-llvm-mingw-20250920
+      
+      - name: Set up LLVM MinGW toolchain
+        if: steps.cache-llvm-mingw.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p $HOME/toolchains
+          cd $HOME/toolchains
+          wget https://github.com/bylaws/llvm-mingw/releases/download/20250920/llvm-mingw-20250920-ucrt-ubuntu-22.04-x86_64.tar.xz
+          tar -xf llvm-mingw-20250920-ucrt-ubuntu-22.04-x86_64.tar.xz
+      
+      - name: Run autogen.sh
+        run: |
+          bash autogen.sh
+      
+      - name: Cache wine-tools
+        id: cache-wine-tools
+        uses: actions/cache@v4
+        with:
+          path: wine-tools
+          key: wine-tools-${{ hashFiles('configure.ac', 'configure') }}
+      
+      - name: Build wine-tools (step 0)
+        if: steps.cache-wine-tools.outputs.cache-hit != 'true'
+        run: |
+          bash build-scripts/build-step0.sh
+      
+      - name: Build sysvshm library for ${{ matrix.arch }}
+        if: matrix.arch == 'aarch64'
+        run: |
+          if [ "${{ matrix.arch }}" == "x86_64" ]; then
+            bash build-scripts/build-step-x86_64.sh --build-sysvshm
+          else
+            bash build-scripts/build-step-arm64ec.sh --build-sysvshm
+          fi
+      
+      - name: Configure build for ${{ matrix.arch }}
+        run: |
+          if [ "${{ matrix.arch }}" == "x86_64" ]; then
+            bash build-scripts/build-step-x86_64.sh --configure
+          else
+            bash build-scripts/build-step-arm64ec.sh --configure
+          fi
+      
+      - name: Build Proton for ${{ matrix.arch }}
+        run: |
+          if [ "${{ matrix.arch }}" == "x86_64" ]; then
+            bash build-scripts/build-step-x86_64.sh --build
+          else
+            bash build-scripts/build-step-arm64ec.sh --build
+          fi
+      
+      - name: Install Proton for ${{ matrix.arch }}
+        run: |
+          if [ "${{ matrix.arch }}" == "x86_64" ]; then
+            bash build-scripts/build-step-x86_64.sh --install
+          else
+            bash build-scripts/build-step-arm64ec.sh --install
+          fi
+      
+      - name: Download prefixPack.txz for ${{ matrix.arch }}
+        run: |
+          if [ "${{ matrix.arch }}" == "x86_64" ]; then
+            wget https://github.com/GameNative/bionic-prefix-files/raw/main/prefixPack-x86_64.txz -O $GITHUB_WORKSPACE/prefixPack.txz
+          else
+            wget https://github.com/GameNative/bionic-prefix-files/raw/main/prefixPack-arm64ec.txz -O $GITHUB_WORKSPACE/prefixPack.txz
+          fi
+      
+      - name: Generate profile.json
+        run: |
+          if [ "${{ matrix.arch }}" == "x86_64" ]; then
+            ARCH_NAME="x86_64"
+          else
+            ARCH_NAME="arm64ec"
+          fi
+          
+          cat > $GITHUB_WORKSPACE/profile.json << EOF
+          {
+            "type": "Proton",
+            "versionName": "10.0-4-${ARCH_NAME}",
+            "versionCode": 1,
+            "description": "Proton 10.0-4 ${ARCH_NAME} - Windows compatibility layer with improved gaming support",
+            "files": [],
+            "wine": {
+              "binPath": "bin",
+              "libPath": "lib",
+              "prefixPack": "prefixPack.txz"
+            }
+          }
+          EOF
+      
+      - name: Package build artifacts
+        run: |
+          if [ "${{ matrix.arch }}" == "x86_64" ]; then
+            OUTPUT_DIR="$HOME/compiled-files-x86_64"
+            ARCH_NAME="x86_64"
+          else
+            OUTPUT_DIR="$HOME/compiled-files-aarch64"
+            ARCH_NAME="arm64ec"
+          fi
+          
+          cd $OUTPUT_DIR
+          
+          # Create WCP (Winlator Compatible Package) - txz format
+          cp $GITHUB_WORKSPACE/prefixPack.txz .
+          cp $GITHUB_WORKSPACE/profile.json .
+          tar cJf proton-10.0-4-$ARCH_NAME.wcp bin lib share prefixPack.txz profile.json
+          mv proton-10.0-4-$ARCH_NAME.wcp $GITHUB_WORKSPACE/
+      
+      - name: Upload build artifacts
+        run: |
+          if [ "${{ matrix.arch }}" == "x86_64" ]; then
+            ARCH_NAME="x86_64"
+          else
+            ARCH_NAME="arm64ec"
+          fi
+          echo "ARCH_NAME=$ARCH_NAME" >> $GITHUB_ENV
+      
+      - name: Upload build artifacts for ${{ matrix.arch }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: proton-wine-${{ env.ARCH_NAME }}
+          path: proton-10.0-4-${{ env.ARCH_NAME }}.wcp
+          retention-days: 30
+  
+  release:
+    needs: build
+    runs-on: ubuntu-24.04
+    if: (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/proton_10.0')) || github.event_name == 'workflow_dispatch'
+    
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      
+      - name: Prepare release files
+        run: |
+          mkdir -p release
+          find artifacts -name "*.wcp" -exec cp {} release/ \;
+          ls -lah release/
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: release-${{ github.sha }}
+          name: Proton Wine 10.0-4 (Build ${{ github.run_number }})
+          files: release/*
+          draft: false
+          prerelease: false
+          body: |
+            ## Proton Wine Build based on Valve [Wine](https://github.com/ValveSoftware/wine/tree/proton_10.0)
+            
+            ### Proton Version: 10.0-4
+            
+            Built from commit: ${{ github.sha }}
+            
+            ### Architectures
+            - x86_64 (Intel/AMD 64-bit)
+            - arm64ec (ARM64EC)
+            
+            ### WCP Files
+            - `proton-10.0-4-x86_64.wcp` - For GameNative & Winlator fork (txz format)
+            - `proton-10.0-4-arm64ec.wcp` - For GameNative & Winlator fork (txz format)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
