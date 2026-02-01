@@ -1,0 +1,14 @@
+diff --git a/server/esync.c b/server/esync.c
+index a516443..c40b4ad 100644
+--- a/server/esync.c
++++ b/server/esync.c
+@@ -44,6 +44,9 @@
+ #include "file.h"
+ #include "esync.h"
+ #include "fsync.h"
++#ifdef __ANDROID__
++#include "../android/shm_utils/shm_utils.h"
++#endif
+ 
+ int do_esync(void)
+ {

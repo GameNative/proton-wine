@@ -1,0 +1,15 @@
+diff --git a/dlls/winex11.drv/desktop.c b/dlls/winex11.drv/desktop.c
+index d9d306e..7fa56b0 100644
+--- a/dlls/winex11.drv/desktop.c
++++ b/dlls/winex11.drv/desktop.c
+@@ -90,8 +90,9 @@ BOOL X11DRV_CreateDesktop( const WCHAR *name, UINT width, UINT height )
+                          0, 0, width, height, 0, default_visual.depth, InputOutput,
+                          default_visual.visual, CWEventMask | CWCursor | CWColormap, &win_attr );
+     if (!win) return FALSE;
+-
++#ifdef HAVE_X11_EXTENSIONS_XINPUT2_H
+     x11drv_xinput2_enable( display, win );
++#endif
+     XFlush( display );
+ 
+     X11DRV_init_desktop( win );

@@ -1,0 +1,23 @@
+diff --git a/server/fsync.c b/server/fsync.c
+index 8097b86..7da0aa5 100644
+--- a/server/fsync.c
++++ b/server/fsync.c
+@@ -43,6 +43,9 @@
+ #include "handle.h"
+ #include "request.h"
+ #include "fsync.h"
++#ifdef __ANDROID__
++#include "../android/shm_utils/shm_utils.h"
++#endif
+ 
+ #include "pshpack4.h"
+ #include "poppack.h"
+@@ -53,7 +56,7 @@
+ 
+ int do_fsync(void)
+ {
+-#ifdef __linux__
++#if defined(__linux__) && !defined(__ANDROID__)
+     static int do_fsync_cached = -1;
+ 
+     if (do_fsync_cached == -1)

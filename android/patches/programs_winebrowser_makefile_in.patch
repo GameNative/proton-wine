@@ -1,0 +1,11 @@
+diff --git a/programs/winebrowser/Makefile.in b/programs/winebrowser/Makefile.in
+index 328f75a..4aaf53a 100644
+--- a/programs/winebrowser/Makefile.in
++++ b/programs/winebrowser/Makefile.in
+@@ -1,5 +1,5 @@
+ MODULE    = winebrowser.exe
+-IMPORTS   = urlmon oleaut32 shell32 user32 advapi32
++IMPORTS   = urlmon oleaut32 shell32 user32 advapi32 ws2_32
+ 
+ EXTRADLLFLAGS = -mwindows -municode
+ 

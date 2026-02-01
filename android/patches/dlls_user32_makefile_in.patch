@@ -1,0 +1,13 @@
+diff --git a/dlls/user32/Makefile.in b/dlls/user32/Makefile.in
+index 69e1fa2..d629905 100644
+--- a/dlls/user32/Makefile.in
++++ b/dlls/user32/Makefile.in
+@@ -1,7 +1,7 @@
+ EXTRADEFS = -D_USER32_
+ MODULE    = user32.dll
+ IMPORTLIB = user32
+-IMPORTS   = $(PNG_PE_LIBS) gdi32 sechost advapi32 kernelbase win32u uuid
++IMPORTS   = $(PNG_PE_LIBS) gdi32 sechost advapi32 kernelbase win32u uuid ws2_32
+ EXTRAINCL = $(PNG_PE_CFLAGS)
+ DELAYIMPORTS = imm32 combase
+ 

@@ -1,0 +1,162 @@
+diff --git a/programs/winebrowser/main.c b/programs/winebrowser/main.c
+index 738930e..94988b9 100644
+--- a/programs/winebrowser/main.c
++++ b/programs/winebrowser/main.c
+@@ -49,11 +49,102 @@
+ #include <shellapi.h>
+ #include <urlmon.h>
+ #include <ddeml.h>
++#include <winsock2.h>
+ 
+ #include "wine/debug.h"
+ 
+ WINE_DEFAULT_DEBUG_CHANNEL(winebrowser);
+ 
++typedef struct {
++    int request_code;
++    char *data;
++} android_message_t;
++
++static int send_android_message(android_message_t message) {
++    WSADATA data;
++    int ret;
++
++    if ((ret = WSAStartup(MAKEWORD(2,2), &data)) != 0) {
++        TRACE( "WSAStartup failed with error %d\n", ret );
++        return 0;
++    };
++    SOCKET sock_fd = socket(AF_INET, SOCK_STREAM, 0);
++    if (sock_fd == INVALID_SOCKET) {
++        TRACE( "Failed to create client socket\n" );
++        return 0;
++    }
++    struct sockaddr_in addr;
++    ZeroMemory(&addr, sizeof(addr));
++    addr.sin_addr.s_addr = inet_addr("127.0.0.1");
++    addr.sin_family = AF_INET;
++    addr.sin_port = htons(20000);
++    ret = connect(sock_fd, (struct sockaddr *)&addr, sizeof(addr));
++    if (ret == SOCKET_ERROR) {
++        TRACE( "Failed to connect to server\n" );
++        return 0;
++    }
++    int net_requestcode = htonl(message.request_code);
++    int net_data_length = htonl(strlen(message.data));
++    ret = send(sock_fd, &net_requestcode, sizeof(net_requestcode), 0);
++    if (ret == SOCKET_ERROR) {
++        TRACE( "Failed to send request code to server\n" );
++        return 0;
++    }
++    ret = send(sock_fd, &net_data_length, sizeof(net_data_length), 0);
++    if (ret == SOCKET_ERROR) {
++        TRACE( "Failed to send data length to server\n" );
++        return 0;
++    }
++    ret = send(sock_fd, message.data, strlen(message.data), 0);
++    if (ret == SOCKET_ERROR) {
++        TRACE( "Failed to send data to server\n" );
++        return 0;
++    }
++
++    ret = closesocket(sock_fd);
++    if (ret == SOCKET_ERROR) {
++        TRACE( "Failed to close socket\n" );
++        return 0;
++    }
++
++    WSACleanup();
++
++    return 1;
++}
++
++static char *from_unix_to_dos_path(const char *url) {
++    char *path = url + 7;
++    char *temp = strdup(path);
++    char *token = strtok(temp, "/");
++    char *new_url = NULL;
++
++    while (token != NULL) {
++        if (strcmp("dosdevices", token) == 0) {
++            token = strtok(NULL, "/");
++            new_url = strstr(path, token);
++            TRACE( "New URL is %s\n", new_url );
++            break;
++        }
++        token = strtok(NULL, "/");
++    }
++
++    free(temp);
++
++    return new_url;
++}
++
++static int launch_url_with_internet_explorer(const char *url) {
++    STARTUPINFOA si;
++    PROCESS_INFORMATION pi;
++    ZeroMemory(&si, sizeof(si));
++    si.cb = sizeof(si);
++    ZeroMemory(&pi, sizeof(pi));
++    char command[1024];
++    snprintf(command, sizeof(command), "iexplore.exe %s", url);
++    return CreateProcessA(NULL, command, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
++}
++
++
+ static char *strdup_unixcp( const WCHAR *str )
+ {
+     char *ret;
+@@ -106,7 +197,12 @@ static int launch_app( const WCHAR *candidates, const WCHAR *argv1 )
+         free( argv_new );
+         candidates += lstrlenW( candidates ) + 1;  /* grab the next app */
+     }
+-    WINE_ERR( "could not find a suitable app to open %s\n", debugstr_w( argv1 ));
++
++    if (strstr(cmdline, "file://")) {
++        cmdline = from_unix_to_dos_path(cmdline);
++     }
++
++    if (!launch_url_with_internet_explorer(cmdline)) WINE_ERR( "could not find a suitable app to open %s\n", debugstr_w( argv1 ));
+ 
+     free( cmdline );
+     return 1;
+@@ -141,6 +237,7 @@ static int open_http_url( const WCHAR *url )
+     WCHAR browsers[256];
+     HKEY key;
+     LONG r;
++    int wine_open_with_android_browser;
+ 
+     /* @@ Wine registry key: HKCU\Software\Wine\WineBrowser */
+     if  (!(r = RegOpenKeyW( HKEY_CURRENT_USER, L"Software\\Wine\\WineBrowser", &key )))
+@@ -151,6 +248,24 @@ static int open_http_url( const WCHAR *url )
+     if (r != ERROR_SUCCESS)
+         memcpy( browsers, defaultbrowsers, sizeof(defaultbrowsers) );
+ 
++    wine_open_with_android_browser = getenv("WINE_OPEN_WITH_ANDROID_BROwSER") && atoi(getenv("WINE_OPEN_WITH_ANDROID_BROWSER"));
++
++    if (wine_open_with_android_browser) {
++        char *p = strdup_unixcp(url);
++           if (strstr(p, "file://")) {
++            if (launch_url_with_internet_explorer(from_unix_to_dos_path(p)))
++                   return 0;
++        }
++        else {
++            android_message_t message;
++            ZeroMemory(&message, sizeof(message));
++            message.request_code = 1;
++            message.data = p;
++               if (send_android_message(message))
++                  return 0;
++        }
++    }
++
+     return launch_app( browsers, url );
+ }
+ 
+@@ -165,6 +280,7 @@ static int open_mailto_url( const WCHAR *url )
+     WCHAR mailers[256];
+     HKEY key;
+     LONG r;
++    int wine_open_with_android_browser;
+ 
+     /* @@ Wine registry key: HKCU\Software\Wine\WineBrowser */
+     if (!(r = RegOpenKeyW( HKEY_CURRENT_USER, L"Software\\Wine\\WineBrowser", &key )))

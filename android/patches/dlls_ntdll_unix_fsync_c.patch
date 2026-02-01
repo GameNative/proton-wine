@@ -1,0 +1,23 @@
+diff --git a/dlls/ntdll/unix/fsync.c b/dlls/ntdll/unix/fsync.c
+index 4d9f5cd..b3c738e 100644
+--- a/dlls/ntdll/unix/fsync.c
++++ b/dlls/ntdll/unix/fsync.c
+@@ -53,6 +53,9 @@
+ 
+ #include "unix_private.h"
+ #include "fsync.h"
++#ifdef __ANDROID__
++#include "../../../android/shm_utils/shm_utils.h"
++#endif
+ 
+ WINE_DEFAULT_DEBUG_CHANNEL(fsync);
+ 
+@@ -165,7 +168,7 @@ static inline int futex_wake( int *addr, int val )
+ 
+ int do_fsync(void)
+ {
+-#ifdef __linux__
++#if defined(__linux__) && !defined(__ANDROID__)
+     static int do_fsync_cached = -1;
+ 
+     if (do_fsync_cached == -1)

@@ -1,0 +1,21 @@
+diff --git a/dlls/ntdll/unix/server.c b/dlls/ntdll/unix/server.c
+index 30fc6fc..a508915 100644
+--- a/dlls/ntdll/unix/server.c
++++ b/dlls/ntdll/unix/server.c
+@@ -1307,9 +1307,16 @@ static int setup_config_dir(void)
+ 
+     if (!mkdir( "dosdevices", 0777 ))
+     {
++#ifdef __ANDROID__
++        mkdir( "drive_d", 0777 );
++        symlink( "../drive_c", "dosdevices/c:" );
++        symlink( "/storage/emulated/0/", "dosdevices/d:" );
++        symlink( "/data/data/app.gamenative/files/imagefs/", "dosdevices/z:" );
++#else
+         mkdir( "drive_c", 0777 );
+         symlink( "../drive_c", "dosdevices/c:" );
+         symlink( "/", "dosdevices/z:" );
++#endif
+     }
+     else if (errno != EEXIST) fatal_perror( "cannot create %s/dosdevices", config_dir );
+ 

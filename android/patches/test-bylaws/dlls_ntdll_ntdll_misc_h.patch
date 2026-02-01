@@ -1,0 +1,12 @@
+diff --git a/dlls/ntdll/ntdll_misc.h b/dlls/ntdll/ntdll_misc.h
+index 4c62304..c4a7a9d 100644
+--- a/dlls/ntdll/ntdll_misc.h
++++ b/dlls/ntdll/ntdll_misc.h
+@@ -82,6 +82,7 @@ extern void WINAPI KiUserApcDispatcher(CONTEXT*,ULONG_PTR,ULONG_PTR,ULONG_PTR,PN
+ extern void WINAPI KiUserCallbackDispatcher(ULONG,void*,ULONG);
+ extern void WINAPI KiUserCallbackDispatcherReturn(void);
+ extern void (WINAPI *pWow64PrepareForException)( EXCEPTION_RECORD *rec, CONTEXT *context );
++extern NTSTATUS (WINAPI *pWow64SuspendLocalThread)( HANDLE thread, ULONG *count );
+ 
+ /* debug helpers */
+ extern LPCSTR debugstr_us( const UNICODE_STRING *str );

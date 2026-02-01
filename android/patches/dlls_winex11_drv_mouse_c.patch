@@ -1,0 +1,19 @@
+diff --git a/dlls/winex11.drv/mouse.c b/dlls/winex11.drv/mouse.c
+index 2ba4960..74cdb87 100644
+--- a/dlls/winex11.drv/mouse.c
++++ b/dlls/winex11.drv/mouse.c
+@@ -1488,10 +1488,14 @@ BOOL X11DRV_SetCursorPos( INT x, INT y )
+         return FALSE;
+     }
+ 
++#ifndef __ANDROID__
+     pXFixesHideCursor( data->display, root_window );
++#endif
+     XWarpPointer( data->display, root_window, root_window, 0, 0, 0, 0, pos.x, pos.y );
+     data->warp_serial = NextRequest( data->display );
++#ifndef __ANDROID__
+     pXFixesShowCursor( data->display, root_window );
++#endif
+     XFlush( data->display ); /* avoids bad mouse lag in games that do their own mouse warping */
+     TRACE( "warped to %d,%d serial %lu\n", x, y, data->warp_serial );
+     return TRUE;

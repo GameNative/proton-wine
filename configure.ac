@@ -3653,7 +3653,12 @@ WINE_IGNORE_FILE(compile_commands.json)
 WINE_IGNORE_FILE(config.log)
 WINE_IGNORE_FILE(config.status)
 WINE_IGNORE_FILE(include/config.h)
+WINE_IGNORE_FILE(include/config.h.in~)
 WINE_IGNORE_FILE(include/stamp-h)
+WINE_IGNORE_FILE(configure)
+WINE_IGNORE_FILE(configure~)
+WINE_IGNORE_FILE(wine-tools/*)
+WINE_IGNORE_FILE(.idea)
 test "$wine_binary" = wine || WINE_IGNORE_FILE(loader/wine)
 
 if test "x$enable_tools" != xno

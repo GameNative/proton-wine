@@ -1,0 +1,14 @@
+diff --git a/dlls/winex11.drv/x11drv.h b/dlls/winex11.drv/x11drv.h
+index 27d1af1..585c035 100644
+--- a/dlls/winex11.drv/x11drv.h
++++ b/dlls/winex11.drv/x11drv.h
+@@ -572,6 +572,9 @@ enum x11drv_atoms
+     XATOM_text_rtf,
+     XATOM_text_richtext,
+     XATOM_text_uri_list,
++#ifdef __ANDROID__
++    XATOM__NET_WM_HWND,
++#endif
+     XATOM_GAMESCOPE_DISPLAY_EDID_PATH,
+     XATOM_GAMESCOPE_XALIA_OVERLAY,
+     NB_XATOMS
