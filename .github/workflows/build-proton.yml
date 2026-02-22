@@ -181,7 +181,7 @@ jobs:
           {
             "type": "Wine",
             "versionName": "10.0-4-${ARCH_NAME}",
-            "versionCode": 1,
+            "versionCode": 0,
             "description": "Proton 10.0-4 ${ARCH_NAME} - Windows compatibility layer with improved gaming support",
             "files": [],
             "wine": {
