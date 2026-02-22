@@ -165,7 +165,7 @@ jobs:
           {
             "type": "Proton",
             "versionName": "10.0-4-${ARCH_NAME}",
-            "versionCode": 1,
+            "versionCode": 0,
             "description": "Proton 10.0-4 ${ARCH_NAME} - Windows compatibility layer with improved gaming support",
             "files": [],
             "wine": {
@@ -181,7 +181,7 @@ jobs:
           {
             "type": "Wine",
             "versionName": "10.0-4-${ARCH_NAME}",
-            "versionCode": 1,
+            "versionCode": 0,
             "description": "Proton 10.0-4 ${ARCH_NAME} - Windows compatibility layer with improved gaming support",
             "files": [],
             "wine": {
@@ -280,7 +280,7 @@ jobs:
             - `proton-10.0-4-arm64ec.wcp` - For GameNative
             
             **Wine Type:**
-            - `proton-wine-10.0-4-x86_64.wcp` - For Winlator fork
-            - `proton-wine-10.0-4-arm64ec.wcp` - For Winlator fork
+            - `proton-wine-10.0-4-x86_64.wcp` - For Winlator fork Ludashi
+            - `proton-wine-10.0-4-arm64ec.wcp` - For Winlator fork Ludashi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
