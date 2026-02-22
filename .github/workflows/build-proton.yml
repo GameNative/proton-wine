@@ -164,7 +164,7 @@ jobs:
           {
             "type": "Proton",
             "versionName": "10.0-4-${ARCH_NAME}",
-            "versionCode": ${{ github.run_number }},
+            "versionCode": 0,
             "description": "Proton 10.0-4 ${ARCH_NAME} - Windows compatibility layer with improved gaming support",
             "files": [],
             "wine": {
