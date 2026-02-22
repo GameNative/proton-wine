@@ -39,13 +39,18 @@ The build follows these steps for each architecture:
 
 5. **Artifact Packaging**
    - Downloads `prefixPack.txz` from [GameNative/bionic-prefix-files](https://github.com/GameNative/bionic-prefix-files)
-   - Generates `profile.json` with build metadata
-   - Creates **WCP (Winlator Compatible Package)** in txz format containing:
+   - Generates two `profile.json` files with build metadata:
+     - `profile.json` - Proton type for GameNative
+     - `profile-wine.json` - Wine type for Winlator for CMOD & Ludashi
+   - Creates two output files:
+     - **Proton WCP**: Contains Proton-type profile for GameNative (wcp format)
+     - **Wine WCP**: Contains Wine-type profile for Winlator for CMOD & Ludashi (wcp.xz format)
+   - Each WCP contains:
      - `bin/` - Wine binaries
      - `lib/` - Wine libraries
      - `share/` - Wine data files
      - `prefixPack.txz` - Bionic prefix files
-     - `profile.json` - Build metadata
+     - `profile.json` - Build metadata (type varies)
 
 ## Triggers
 
@@ -69,9 +74,15 @@ Build artifacts are:
 
 ### Artifact Names
 
-**WCP Files (Winlator Compatible Package)**
-- `proton-10.0-4-x86_64.wcp` - x86_64 WCP (xz compressed, txz format)
-- `proton-10.0-4-arm64ec.wcp` - arm64ec WCP (xz compressed, txz format)
+**Output Files**
+
+**Proton Type (for GameNative):**
+- `proton-10.0-4-x86_64.wcp` - x86_64 Proton wcp
+- `proton-10.0-4-arm64ec.wcp` - arm64ec Proton wcp
+
+**Wine Type (for Winlator CMOD & Ludashi):**
+- `proton-wine-10.0-4-x86_64.wcp.xz` - x86_64 Wine wcp.xz
+- `proton-wine-10.0-4-arm64ec.wcp.xz` - arm64ec Wine wcp.xz
 
 ## Build Scripts Used
 
