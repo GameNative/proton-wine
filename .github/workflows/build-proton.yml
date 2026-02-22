@@ -152,7 +152,7 @@ jobs:
             wget https://github.com/GameNative/bionic-prefix-files/raw/main/prefixPack-arm64ec.txz -O $GITHUB_WORKSPACE/prefixPack.txz
           fi
       
-      - name: Generate profile.json
+      - name: Generate profile.json files
         run: |
           if [ "${{ matrix.arch }}" == "x86_64" ]; then
             ARCH_NAME="x86_64"
@@ -160,9 +160,26 @@ jobs:
             ARCH_NAME="arm64ec"
           fi
           
+          # Generate Proton profile.json
           cat > $GITHUB_WORKSPACE/profile.json << EOF
           {
             "type": "Proton",
+            "versionName": "10.0-4-${ARCH_NAME}",
+            "versionCode": 1,
+            "description": "Proton 10.0-4 ${ARCH_NAME} - Windows compatibility layer with improved gaming support",
+            "files": [],
+            "wine": {
+              "binPath": "bin",
+              "libPath": "lib",
+              "prefixPack": "prefixPack.txz"
+            }
+          }
+          EOF
+          
+          # Generate Wine profile.json
+          cat > $GITHUB_WORKSPACE/profile-wine.json << EOF
+          {
+            "type": "Wine",
             "versionName": "10.0-4-${ARCH_NAME}",
             "versionCode": 1,
             "description": "Proton 10.0-4 ${ARCH_NAME} - Windows compatibility layer with improved gaming support",
@@ -187,11 +204,16 @@ jobs:
           
           cd $OUTPUT_DIR
           
-          # Create WCP (Winlator Compatible Package) - txz format
+          # Create Proton WCP (Winlator Compatible Package) - txz format
           cp $GITHUB_WORKSPACE/prefixPack.txz .
           cp $GITHUB_WORKSPACE/profile.json .
           tar cJf proton-10.0-4-$ARCH_NAME.wcp bin lib share prefixPack.txz profile.json
           mv proton-10.0-4-$ARCH_NAME.wcp $GITHUB_WORKSPACE/
+          
+          # Create Wine WCP (Winlator Compatible Package) - txz format
+          cp $GITHUB_WORKSPACE/profile-wine.json profile.json
+          tar cJf proton-wine-10.0-4-$ARCH_NAME.wcp bin lib share prefixPack.txz profile.json
+          mv proton-wine-10.0-4-$ARCH_NAME.wcp $GITHUB_WORKSPACE/
       
       - name: Upload build artifacts
         run: |
@@ -202,11 +224,18 @@ jobs:
           fi
           echo "ARCH_NAME=$ARCH_NAME" >> $GITHUB_ENV
       
-      - name: Upload build artifacts for ${{ matrix.arch }}
+      - name: Upload Proton build artifacts for ${{ matrix.arch }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: proton-${{ env.ARCH_NAME }}
+          path: proton-10.0-4-${{ env.ARCH_NAME }}.wcp
+          retention-days: 30
+      
+      - name: Upload Wine build artifacts for ${{ matrix.arch }}
         uses: actions/upload-artifact@v4
         with:
           name: proton-wine-${{ env.ARCH_NAME }}
-          path: proton-10.0-4-${{ env.ARCH_NAME }}.wcp
+          path: proton-wine-10.0-4-${{ env.ARCH_NAME }}.wcp
           retention-days: 30
   
   release:
@@ -246,7 +275,12 @@ jobs:
             - arm64ec (ARM64EC)
             
             ### WCP Files
-            - `proton-10.0-4-x86_64.wcp` - For GameNative & Winlator fork (txz format)
-            - `proton-10.0-4-arm64ec.wcp` - For GameNative & Winlator fork (txz format)
+            **Proton Type:**
+            - `proton-10.0-4-x86_64.wcp` - For GameNative
+            - `proton-10.0-4-arm64ec.wcp` - For GameNative
+            
+            **Wine Type:**
+            - `proton-wine-10.0-4-x86_64.wcp` - For Winlator fork
+            - `proton-wine-10.0-4-arm64ec.wcp` - For Winlator fork
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

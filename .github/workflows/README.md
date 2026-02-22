@@ -39,13 +39,18 @@ The build follows these steps for each architecture:
 
 5. **Artifact Packaging**
    - Downloads `prefixPack.txz` from [GameNative/bionic-prefix-files](https://github.com/GameNative/bionic-prefix-files)
-   - Generates `profile.json` with build metadata
-   - Creates **WCP (Winlator Compatible Package)** in txz format containing:
+   - Generates two `profile.json` files with build metadata:
+     - `profile.json` - Proton type for GameNative
+     - `profile-wine.json` - Wine type for Winlator fork
+   - Creates two **WCP (Winlator Compatible Package)** files in txz format:
+     - **Proton WCP**: Contains Proton-type profile for GameNative
+     - **Wine WCP**: Contains Wine-type profile for Winlator fork
+   - Each WCP contains:
      - `bin/` - Wine binaries
      - `lib/` - Wine libraries
      - `share/` - Wine data files
      - `prefixPack.txz` - Bionic prefix files
-     - `profile.json` - Build metadata
+     - `profile.json` - Build metadata (type varies)
 
 ## Triggers
 
@@ -70,8 +75,14 @@ Build artifacts are:
 ### Artifact Names
 
 **WCP Files (Winlator Compatible Package)**
-- `proton-10.0-4-x86_64.wcp` - x86_64 WCP (xz compressed, txz format)
-- `proton-10.0-4-arm64ec.wcp` - arm64ec WCP (xz compressed, txz format)
+
+**Proton Type (for GameNative):**
+- `proton-10.0-4-x86_64.wcp` - x86_64 Proton WCP
+- `proton-10.0-4-arm64ec.wcp` - arm64ec Proton WCP
+
+**Wine Type (for Winlator fork):**
+- `proton-wine-10.0-4-x86_64.wcp` - x86_64 Wine WCP
+- `proton-wine-10.0-4-arm64ec.wcp` - arm64ec Wine WCP
 
 ## Build Scripts Used
 
