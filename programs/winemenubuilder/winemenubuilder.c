@@ -1148,7 +1148,7 @@ static WCHAR *extract_icon(LPCWSTR icoPathW, int index, const WCHAR *destFilenam
     WCHAR fullPathW[MAX_PATH];
     DWORD len;
 
-    WINE_TRACE("=[%s] index=%d destFilename=[%s]\n", wine_dbgstr_w(icoPathW), index, wine_dbgstr_w(destFilename));
+    WINE_TRACE("path=[%s] index=%d destFilename=[%s]\n", wine_dbgstr_w(icoPathW), index, wine_dbgstr_w(destFilename));
 
     len = GetFullPathNameW(icoPathW, MAX_PATH, fullPathW, NULL);
     if (len == 0 || len > MAX_PATH)
