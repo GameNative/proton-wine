@@ -1293,7 +1293,7 @@ static BOOL write_desktop_entry(const WCHAR *link, const WCHAR *location, const 
         heap_free( path );
     }
 
-    fprintf(file, "%s", escape(path));
+    fprintf(file, "wine %s", escape(path));
     if (args) fprintf(file, " %s", escape(args) );
     fputc( '\n', file );
     fprintf(file, "Type=Application\n");
