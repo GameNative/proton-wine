@@ -1148,7 +1148,7 @@ static WCHAR *extract_icon(LPCWSTR icoPathW, int index, const WCHAR *destFilenam
     WCHAR fullPathW[MAX_PATH];
     DWORD len;
 
-    WINE_TRACE("path=[%s] index=%d destFilename=[%s]\n", wine_dbgstr_w(icoPathW), index, wine_dbgstr_w(destFilename));
+    WINE_TRACE("=[%s] index=%d destFilename=[%s]\n", wine_dbgstr_w(icoPathW), index, wine_dbgstr_w(destFilename));
 
     len = GetFullPathNameW(icoPathW, MAX_PATH, fullPathW, NULL);
     if (len == 0 || len > MAX_PATH)
@@ -1265,7 +1265,7 @@ static BOOL write_desktop_entry(const WCHAR *link, const WCHAR *location, const 
     char *workdir_unix;
     int needs_chmod = FALSE;
     const WCHAR *name;
-    WCHAR *shortcuts_dir;
+    const WCHAR *prefix = _wgetenv( L"WINECONFIGDIR" );
 
     WINE_TRACE("(%s,%s,%s,%s,%s,%s,%s,%s,%s)\n", wine_dbgstr_w(link), wine_dbgstr_w(location),
                wine_dbgstr_w(linkname), wine_dbgstr_w(path), wine_dbgstr_w(args),
@@ -1273,12 +1273,11 @@ static BOOL write_desktop_entry(const WCHAR *link, const WCHAR *location, const 
                wine_dbgstr_w(wmclass));
 
     name = PathFindFileNameW( linkname );
-
-    shortcuts_dir = heap_wprintf(L"%s", L"c:\\proton_shortcuts");
-    create_directories(shortcuts_dir);
-    location = heap_wprintf(L"%s\\%s.desktop", shortcuts_dir, name);
-    heap_free(shortcuts_dir);
-    needs_chmod = TRUE;
+    if(!location)
+    {
+        location = heap_wprintf(L"%s\\%s.desktop", xdg_desktop_dir, name);
+        needs_chmod = TRUE;
+    }
 
     file = _wfopen( location, L"wb" );
     if (file == NULL)
@@ -1287,6 +1286,12 @@ static BOOL write_desktop_entry(const WCHAR *link, const WCHAR *location, const 
     fprintf(file, "[Desktop Entry]\n");
     fprintf(file, "Name=%s\n", wchars_to_utf8_chars(name));
     fprintf(file, "Exec=" );
+    if (prefix)
+    {
+        char *path = wine_get_unix_file_name( prefix );
+        fprintf(file, "env WINEPREFIX=\"%s\" ", path);
+        heap_free( path );
+    }
 
     fprintf(file, "%s", escape(path));
     if (args) fprintf(file, " %s", escape(args) );
