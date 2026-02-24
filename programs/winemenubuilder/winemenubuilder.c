@@ -1082,7 +1082,8 @@ static HRESULT platform_write_icon(IStream *icoStream, ICONDIRENTRY *iconDirEntr
     LARGE_INTEGER zero;
 
     *nativeIdentifier = compute_native_identifier(exeIndex, icoPathW, destFilename);
-    iconsDir = heap_wprintf(L"%s\\icons\\hicolor", xdg_data_dir);
+    iconsDir = heap_wprintf(L"%s", L"c:\\proton_shortcuts\\icons");
+    create_directories(iconsDir);
 
     for (i = 0; i < numEntries; i++)
     {
@@ -1264,7 +1265,7 @@ static BOOL write_desktop_entry(const WCHAR *link, const WCHAR *location, const 
     char *workdir_unix;
     int needs_chmod = FALSE;
     const WCHAR *name;
-    const WCHAR *prefix = _wgetenv( L"WINECONFIGDIR" );
+    WCHAR *shortcuts_dir;
 
     WINE_TRACE("(%s,%s,%s,%s,%s,%s,%s,%s,%s)\n", wine_dbgstr_w(link), wine_dbgstr_w(location),
                wine_dbgstr_w(linkname), wine_dbgstr_w(path), wine_dbgstr_w(args),
@@ -1272,11 +1273,12 @@ static BOOL write_desktop_entry(const WCHAR *link, const WCHAR *location, const 
                wine_dbgstr_w(wmclass));
 
     name = PathFindFileNameW( linkname );
-    if(!location)
-    {
-        location = heap_wprintf(L"%s\\%s.desktop", xdg_desktop_dir, name);
-        needs_chmod = TRUE;
-    }
+
+    shortcuts_dir = heap_wprintf(L"%s", L"c:\\proton_shortcuts");
+    create_directories(shortcuts_dir);
+    location = heap_wprintf(L"%s\\%s.desktop", shortcuts_dir, name);
+    heap_free(shortcuts_dir);
+    needs_chmod = TRUE;
 
     file = _wfopen( location, L"wb" );
     if (file == NULL)
@@ -1285,14 +1287,8 @@ static BOOL write_desktop_entry(const WCHAR *link, const WCHAR *location, const 
     fprintf(file, "[Desktop Entry]\n");
     fprintf(file, "Name=%s\n", wchars_to_utf8_chars(name));
     fprintf(file, "Exec=" );
-    if (prefix)
-    {
-        char *path = wine_get_unix_file_name( prefix );
-        fprintf(file, "env WINEPREFIX=\"%s\" ", path);
-        heap_free( path );
-    }
 
-    fprintf(file, "wine %s", escape(path));
+    fprintf(file, "%s", escape(path));
     if (args) fprintf(file, " %s", escape(args) );
     fputc( '\n', file );
     fprintf(file, "Type=Application\n");

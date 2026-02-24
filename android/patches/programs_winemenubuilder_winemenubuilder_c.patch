@@ -1,0 +1,147 @@
+From 26f805adfd901872280825db6e86890c80cc1551 Mon Sep 17 00:00:00 2001
+From: sidaodomorro <danilaferrari77@gmail.com>
+Date: Mon, 23 Feb 2026 18:36:43 -0300
+Subject: [PATCH 1/4] winemenubuilder: Delete proton_shortcuts, patch .desktop
+ creation and change its location so Winlator can recognize it.
+
+---
+ programs/winemenubuilder/winemenubuilder.c | 21 +++++++++++++--------
+ 1 file changed, 13 insertions(+), 8 deletions(-)
+
+diff --git a/programs/winemenubuilder/winemenubuilder.c b/programs/winemenubuilder/winemenubuilder.c
+index 6d34fa687ad..8468abcdd38 100644
+--- a/programs/winemenubuilder/winemenubuilder.c
++++ b/programs/winemenubuilder/winemenubuilder.c
+@@ -1148,7 +1148,7 @@ static WCHAR *extract_icon(LPCWSTR icoPathW, int index, const WCHAR *destFilenam
+     WCHAR fullPathW[MAX_PATH];
+     DWORD len;
+ 
+-    WINE_TRACE("path=[%s] index=%d destFilename=[%s]\n", wine_dbgstr_w(icoPathW), index, wine_dbgstr_w(destFilename));
++    WINE_TRACE("=[%s] index=%d destFilename=[%s]\n", wine_dbgstr_w(icoPathW), index, wine_dbgstr_w(destFilename));
+ 
+     len = GetFullPathNameW(icoPathW, MAX_PATH, fullPathW, NULL);
+     if (len == 0 || len > MAX_PATH)
+@@ -1265,7 +1265,7 @@ static BOOL write_desktop_entry(const WCHAR *link, const WCHAR *location, const
+     char *workdir_unix;
+     int needs_chmod = FALSE;
+     const WCHAR *name;
+-    WCHAR *shortcuts_dir;
++    const WCHAR *prefix = _wgetenv( L"WINECONFIGDIR" );
+ 
+     WINE_TRACE("(%s,%s,%s,%s,%s,%s,%s,%s,%s)\n", wine_dbgstr_w(link), wine_dbgstr_w(location),
+                wine_dbgstr_w(linkname), wine_dbgstr_w(path), wine_dbgstr_w(args),
+@@ -1273,12 +1273,11 @@ static BOOL write_desktop_entry(const WCHAR *link, const WCHAR *location, const
+                wine_dbgstr_w(wmclass));
+ 
+     name = PathFindFileNameW( linkname );
+-
+-    shortcuts_dir = heap_wprintf(L"%s", L"c:\\proton_shortcuts");
+-    create_directories(shortcuts_dir);
+-    location = heap_wprintf(L"%s\\%s.desktop", shortcuts_dir, name);
+-    heap_free(shortcuts_dir);
+-    needs_chmod = TRUE;
++    if(!location)
++    {
++        location = heap_wprintf(L"%s\\%s.desktop", xdg_desktop_dir, name);
++        needs_chmod = TRUE;
++    }
+ 
+     file = _wfopen( location, L"wb" );
+     if (file == NULL)
+@@ -1287,6 +1286,12 @@ static BOOL write_desktop_entry(const WCHAR *link, const WCHAR *location, const
+     fprintf(file, "[Desktop Entry]\n");
+     fprintf(file, "Name=%s\n", wchars_to_utf8_chars(name));
+     fprintf(file, "Exec=" );
++    if (prefix)
++    {
++        char *path = wine_get_unix_file_name( prefix );
++        fprintf(file, "env WINEPREFIX=\"%s\" ", path);
++        heap_free( path );
++    }
+ 
+     fprintf(file, "%s", escape(path));
+     if (args) fprintf(file, " %s", escape(args) );
+-- 
+2.43.0
+
+
+From 9ffa7d0d7b5ca50348208fa969ff5e7465095b08 Mon Sep 17 00:00:00 2001
+From: sidaodomorro <danilaferrari77@gmail.com>
+Date: Mon, 23 Feb 2026 18:47:01 -0300
+Subject: [PATCH 2/4] winemenubuilder: Fix my mistake
+
+---
+ programs/winemenubuilder/winemenubuilder.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/programs/winemenubuilder/winemenubuilder.c b/programs/winemenubuilder/winemenubuilder.c
+index 8468abcdd38..d7d2739566c 100644
+--- a/programs/winemenubuilder/winemenubuilder.c
++++ b/programs/winemenubuilder/winemenubuilder.c
+@@ -1148,7 +1148,7 @@ static WCHAR *extract_icon(LPCWSTR icoPathW, int index, const WCHAR *destFilenam
+     WCHAR fullPathW[MAX_PATH];
+     DWORD len;
+ 
+-    WINE_TRACE("=[%s] index=%d destFilename=[%s]\n", wine_dbgstr_w(icoPathW), index, wine_dbgstr_w(destFilename));
++    WINE_TRACE("path=[%s] index=%d destFilename=[%s]\n", wine_dbgstr_w(icoPathW), index, wine_dbgstr_w(destFilename));
+ 
+     len = GetFullPathNameW(icoPathW, MAX_PATH, fullPathW, NULL);
+     if (len == 0 || len > MAX_PATH)
+-- 
+2.43.0
+
+
+From 15d82b9b208046e8affea1dd03e41ff7b201476e Mon Sep 17 00:00:00 2001
+From: sidaodomorro <danilaferrari77@gmail.com>
+Date: Mon, 23 Feb 2026 19:41:37 -0300
+Subject: [PATCH 3/4] winemenubuilder: Add wine before path so shortcuts can
+ finally work
+
+---
+ programs/winemenubuilder/winemenubuilder.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/programs/winemenubuilder/winemenubuilder.c b/programs/winemenubuilder/winemenubuilder.c
+index d7d2739566c..9b682c30816 100644
+--- a/programs/winemenubuilder/winemenubuilder.c
++++ b/programs/winemenubuilder/winemenubuilder.c
+@@ -1293,7 +1293,7 @@ static BOOL write_desktop_entry(const WCHAR *link, const WCHAR *location, const
+         heap_free( path );
+     }
+ 
+-    fprintf(file, "%s", escape(path));
++    fprintf(file, "wine %s", escape(path));
+     if (args) fprintf(file, " %s", escape(args) );
+     fputc( '\n', file );
+     fprintf(file, "Type=Application\n");
+-- 
+2.43.0
+
+
+From 6accbcfa2f207f4b6f18061e477d0d0abad9831e Mon Sep 17 00:00:00 2001
+From: sidaodomorro <danilaferrari77@gmail.com>
+Date: Mon, 23 Feb 2026 20:20:51 -0300
+Subject: [PATCH 4/4] winemenubuilder: change icon directory so Winlator can
+ recognize it
+
+---
+ programs/winemenubuilder/winemenubuilder.c | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/programs/winemenubuilder/winemenubuilder.c b/programs/winemenubuilder/winemenubuilder.c
+index 9b682c30816..e0b86675b3f 100644
+--- a/programs/winemenubuilder/winemenubuilder.c
++++ b/programs/winemenubuilder/winemenubuilder.c
+@@ -1082,8 +1082,7 @@ static HRESULT platform_write_icon(IStream *icoStream, ICONDIRENTRY *iconDirEntr
+     LARGE_INTEGER zero;
+ 
+     *nativeIdentifier = compute_native_identifier(exeIndex, icoPathW, destFilename);
+-    iconsDir = heap_wprintf(L"%s", L"c:\\proton_shortcuts\\icons");
+-    create_directories(iconsDir);
++    iconsDir = heap_wprintf(L"%s\\icons\\hicolor", xdg_data_dir);
+ 
+     for (i = 0; i < numEntries; i++)
+     {
+-- 
+2.43.0
+

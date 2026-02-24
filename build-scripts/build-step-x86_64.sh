@@ -181,6 +181,9 @@ do
       "dlls_amd_ags_x64_unixlib_c.patch"
       "dlls_winex11_drv_opengl_c.patch"
 
+      # shortcut patch
+      "programs_winemenubuilder_winemenubuilder_c.patch"
+
       # advapi32 patches
       "dlls_advapi32_advapi_c.patch"
 
