@@ -1,0 +1,19 @@
+diff --git a/dlls/ntdll/unix/loader.c b/dlls/ntdll/unix/loader.c
+index 2f978520af6..b07b6a980b2 100644
+--- a/dlls/ntdll/unix/loader.c
++++ b/dlls/ntdll/unix/loader.c
+@@ -1184,7 +1184,14 @@ static NTSTATUS steamclient_setup_trampolines( void *args )
+     int i;
+ 
+     if (noexec_cached == -1)
++    {
+         noexec_cached = (wsne = getenv("WINESTEAMNOEXEC")) && atoi(wsne);
++#ifdef __ANDROID__
++        /* W+X mprotect silently fails on Android 10+ (W^X enforcement).
++         * Default to noexec mode unless the caller has explicitly opted out. */
++        if (!noexec_cached) noexec_cached = 1;
++#endif
++    }
+ 
+     virtual_get_system_info( &info, !!NtCurrentTeb()->WowTebOffset );
+     page_mask = info.PageSize - 1;

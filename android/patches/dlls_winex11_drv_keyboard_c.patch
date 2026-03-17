@@ -1,0 +1,139 @@
+diff --git a/dlls/winex11.drv/keyboard.c b/dlls/winex11.drv/keyboard.c
+index 0456d819bc8..c8a3b11fc0b 100644
+--- a/dlls/winex11.drv/keyboard.c
++++ b/dlls/winex11.drv/keyboard.c
+@@ -1490,10 +1490,17 @@ X11DRV_KEYBOARD_DetectLayout( Display *display )
+   }
+ 
+   memset( ckey, 0, sizeof(ckey) );
++  XKeyEvent det;
++  memset(&det, 0, sizeof(det));
++  det.display = display;
++  det.type = KeyPress;
+   for (keyc = min_keycode; keyc <= max_keycode; keyc++) {
+       /* get data for keycode from X server */
++      det.keycode = (KeyCode)keyc;
+       for (i = 0; i < syms; i++) {
+-        if (!(keysym = XkbKeycodeToKeysym( display, keyc, 0, i ))) continue;
++        keysym = XkbKeycodeToKeysym( display, keyc, 0, i );
++        if (!keysym) { det.state = (i == 1) ? ShiftMask : 0; keysym = XLookupKeysym(&det, i); }
++        if (!keysym) continue;
+         ckey[keyc][i] = keysym_to_char(keysym);
+         if (TRACE_ON(keyboard))
+         {
+@@ -1624,16 +1631,20 @@ void X11DRV_InitKeyboard( Display *display )
+ 		int k;
+ 
+ 		for (k = 0; k < keysyms_per_keycode; k += 1)
+-                    if (XkbKeycodeToKeysym( display, *kcp, 0, k ) == XK_Num_Lock)
++		{
++                    KeySym ksym = XkbKeycodeToKeysym( display, *kcp, 0, k );
++                    if (!ksym) { XKeyEvent tmpev = {0}; tmpev.display = display; tmpev.keycode = *kcp; tmpev.type = KeyPress; ksym = XLookupKeysym(&tmpev, k); }
++                    if (ksym == XK_Num_Lock)
+ 		    {
+                         NumLockMask = 1 << i;
+                         TRACE_(key)("NumLockMask is %x\n", NumLockMask);
+ 		    }
+-                    else if (XkbKeycodeToKeysym( display, *kcp, 0, k ) == XK_Scroll_Lock)
++                    else if (ksym == XK_Scroll_Lock)
+ 		    {
+                         ScrollLockMask = 1 << i;
+                         TRACE_(key)("ScrollLockMask is %x\n", ScrollLockMask);
+ 		    }
++		}
+             }
+     }
+     XFreeModifiermap(mmp);
+@@ -1682,6 +1693,7 @@ void X11DRV_InitKeyboard( Display *display )
+ 	      int maxlen=0,maxval=-1,ok;
+ 	      for (i=0; i<syms; i++) {
+     keysym = XkbKeycodeToKeysym( display, keyc, 0, i );
++    if (!keysym) keysym = XLookupKeysym(&e2, i);
+                 ckey[i] = keysym_to_char(keysym);
+ 	      }
+ 	      /* find key with longest match streak */
+@@ -1815,17 +1827,54 @@ void X11DRV_InitKeyboard( Display *display )
+     } /* for */
+ #undef VKEY_IF_NOT_USED
+ 
+-    /* If some keys still lack scancodes, assign some arbitrary ones to them now */
++    /* Assign QWERTY scancodes as fallback for any keycode that has a vkey
++     * but was not matched in the layout table (e.g. embedded X servers
++     * where XkbKeycodeToKeysym returns 0 for letter keys). */
++    for (keyc = min_keycode; keyc <= max_keycode; keyc++)
++    {
++        if (keyc2scan[keyc])
++            continue;
++        if (!keyc2vkey[keyc])
++            continue;
++        e2.keycode = (KeyCode)keyc;
++        keysym = XLookupKeysym(&e2, 0);
++        if (!keysym)
++            keysym = XkbKeycodeToKeysym( display, keyc, 0, 0 );
++        if (!keysym)
++            continue;
++        if (keysym >= 'a' && keysym <= 'z')
++        {
++            static const WORD letter_scan[] = {
++                0x1E,0x30,0x2E,0x20,0x12,0x21,0x22,0x23,0x17,0x24,0x25,0x26,0x32,
++                0x31,0x18,0x19,0x10,0x13,0x1F,0x14,0x16,0x2F,0x11,0x2D,0x15,0x2C
++            };
++            keyc2scan[keyc] = letter_scan[keysym - 'a'];
++            TRACE_(key)("assigning QWERTY scancode %02x to keycode %u (letter '%c')\n",
++                        keyc2scan[keyc], keyc, (char)keysym);
++        }
++        else if (keysym >= '1' && keysym <= '9')
++        {
++            keyc2scan[keyc] = keysym - '1' + 0x02;
++            TRACE_(key)("assigning QWERTY scancode %02x to keycode %u (digit '%c')\n",
++                        keyc2scan[keyc], keyc, (char)keysym);
++        }
++        else if (keysym == '0')
++        {
++            keyc2scan[keyc] = 0x0B;
++            TRACE_(key)("assigning QWERTY scancode %02x to keycode %u (digit '0')\n",
++                        keyc2scan[keyc], keyc);
++        }
++        else
++        {
++            /* Fall back to sequential scancodes for remaining unmapped keys */
++            const char *ksname = XKeysymToString(keysym);
++            if (!ksname) ksname = "NoSymbol";
++            TRACE_(key)("no QWERTY scancode for keycode %u (%s)\n", keyc, ksname);
++        }
++    }
++    /* Assign sequential scancodes to anything still unmapped */
+     for (scan = 0x60, keyc = min_keycode; keyc <= max_keycode; keyc++)
+       if (keyc2vkey[keyc]&&!keyc2scan[keyc]) {
+-	const char *ksname;
+-	keysym = XkbKeycodeToKeysym( display, keyc, 0, 0 );
+-	ksname = XKeysymToString(keysym);
+-	if (!ksname) ksname = "NoSymbol";
+-
+-	/* should make sure the scancode is unassigned here, but >=0x60 currently always is */
+-
+-	TRACE_(key)("assigning scancode %02x to unidentified keycode %u (%s)\n",scan,keyc,ksname);
+ 	keyc2scan[keyc]=scan++;
+       }
+ 
+@@ -1941,7 +1990,11 @@ SHORT X11DRV_VkKeyScanEx( WCHAR wChar, HKL hkl )
+     }
+ 
+     for (index = 0; index < 4; index++) /* find shift state */
+-        if (XkbKeycodeToKeysym( display, keycode, 0, index ) == keysym) break;
++    {
++        KeySym ks = XkbKeycodeToKeysym( display, keycode, 0, index );
++        if (!ks) { XKeyEvent tmpev = {0}; tmpev.display = display; tmpev.keycode = keycode; tmpev.type = KeyPress; ks = XLookupKeysym(&tmpev, index); }
++        if (ks == keysym) break;
++    }
+ 
+     pthread_mutex_unlock( &kbd_mutex );
+ 
+@@ -2192,6 +2245,7 @@ INT X11DRV_GetKeyNameText( LONG lParam, LPWSTR lpBuffer, INT nSize )
+ 
+       keyc = (KeyCode) keyi;
+       keys = XkbKeycodeToKeysym( display, keyc, 0, 0 );
++      if (!keys) { XKeyEvent tmpev = {0}; tmpev.display = display; tmpev.keycode = keyc; tmpev.type = KeyPress; keys = XLookupKeysym(&tmpev, 0); }
+       name = XKeysymToString(keys);
+ 
+       if (name && (vkey == VK_SHIFT || vkey == VK_CONTROL || vkey == VK_MENU))

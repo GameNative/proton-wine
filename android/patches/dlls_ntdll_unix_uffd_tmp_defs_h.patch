@@ -1,0 +1,49 @@
+diff --git a/dlls/ntdll/unix/uffd_tmp_defs.h b/dlls/ntdll/unix/uffd_tmp_defs.h
+index d9f7a286c58..25114732d2a 100644
+--- a/dlls/ntdll/unix/uffd_tmp_defs.h
++++ b/dlls/ntdll/unix/uffd_tmp_defs.h
+@@ -14,6 +14,44 @@
+ #define UFFD_FEATURE_WP_ASYNC			(1<<15)
+ #endif
+ 
++/* Fallback definitions for the userfaultfd write-protect API (Linux 5.7).
++ * Android NDK kernel headers older than NDK r26 (kernel 5.10) lack these. */
++#ifndef UFFDIO_REGISTER_MODE_WP
++
++# ifndef UFFDIO
++#  define UFFDIO 0xaa
++# endif
++
++/* uffdio_range / uffdio_register exist since kernel 4.3 but may be absent
++ * from very old or stripped NDK sysroots. */
++# ifndef UFFDIO_REGISTER
++struct uffdio_range {
++	__u64 start;
++	__u64 len;
++};
++struct uffdio_register {
++	struct uffdio_range range;
++	__u64 mode;
++	__u64 ioctls;
++};
++#  define _UFFDIO_REGISTER             0x00
++#  define UFFDIO_REGISTER              _IOWR(UFFDIO, _UFFDIO_REGISTER, struct uffdio_register)
++#  define UFFDIO_REGISTER_MODE_MISSING ((__u64)1<<0)
++# endif /* UFFDIO_REGISTER */
++
++/* write-protect structs and ioctls — only in kernel 5.7+ */
++struct uffdio_writeprotect {
++	struct uffdio_range range;
++	__u64 mode;
++};
++# define _UFFDIO_WRITEPROTECT              0x06
++# define UFFDIO_WRITEPROTECT               _IOWR(UFFDIO, _UFFDIO_WRITEPROTECT, struct uffdio_writeprotect)
++# define UFFDIO_REGISTER_MODE_WP           ((__u64)1<<1)
++# define UFFDIO_WRITEPROTECT_MODE_WP       ((__u64)1<<0)
++# define UFFDIO_WRITEPROTECT_MODE_DONTWAKE ((__u64)1<<1)
++
++#endif /* UFFDIO_REGISTER_MODE_WP */
++
+ #ifndef PAGEMAP_SCAN
+ /* Pagemap ioctl */
+ #define PAGEMAP_SCAN	_IOWR('f', 16, struct pm_scan_arg)

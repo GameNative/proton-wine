@@ -6,8 +6,8 @@ index 69e1fa2..d629905 100644
  EXTRADEFS = -D_USER32_
  MODULE    = user32.dll
  IMPORTLIB = user32
--IMPORTS   = $(PNG_PE_LIBS) gdi32 sechost advapi32 kernelbase win32u uuid
-+IMPORTS   = $(PNG_PE_LIBS) gdi32 sechost advapi32 kernelbase win32u uuid ws2_32
+ IMPORTS   = $(PNG_PE_LIBS) gdi32 sechost advapi32 kernelbase win32u uuid
  EXTRAINCL = $(PNG_PE_CFLAGS)
- DELAYIMPORTS = imm32 combase
+-DELAYIMPORTS = imm32 combase
++DELAYIMPORTS = imm32 combase ws2_32
  

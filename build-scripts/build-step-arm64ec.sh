@@ -140,6 +140,8 @@ do
       # android network patch
       "android_network.patch"
       "dlls_nsiproxy_sys_ip_c.patch"
+      "dlls_ws2_32_socket_c.patch"
+      "server_token_c_machine_id.patch"
 
       # midi support
       "midi_support.patch"
@@ -161,8 +163,13 @@ do
       "dlls_winex11_drv_window_c.patch"
       "dlls_winex11_drv_x11drv_main_c.patch"
 
+      # Keyboard patches
+      "dlls_winex11_drv_keyboard_c.patch"
+
       # address space patches
+      "dlls_ntdll_unix_uffd_tmp_defs_h.patch"
       "dlls_ntdll_unix_virtual_c.patch"
+      "dlls_ntdll_unix_virtual_c_android.patch"
       "loader_preloader_c.patch"
 
       # syscall Patches
@@ -180,6 +187,7 @@ do
       # winlator patches
       "dlls_amd_ags_x64_unixlib_c.patch"
       "dlls_winex11_drv_opengl_c.patch"
+      "dlls_ntdll_unix_loader_c_steamclient.patch"
 
       # shortcut patch
       "programs_winemenubuilder_winemenubuilder_c.patch"
@@ -236,11 +244,23 @@ do
 #      "test-bylaws/tools_makedep_c.patch"
     )
 
+    PATCH_FAILED=0
     for patch in "${PATCHES[@]}"; do
-#      if git apply --check ./android/patches/$patch 2>/dev/null; then
-        git apply ./android/patches/$patch
-#      fi
+      if [ ! -f "./android/patches/$patch" ]; then
+        echo "ERROR: Patch file not found: $patch"
+        PATCH_FAILED=1
+        continue
+      fi
+      if ! git apply ./android/patches/$patch; then
+        echo "ERROR: Failed to apply patch: $patch"
+        PATCH_FAILED=1
+      else
+        echo "Applied: $patch"
+      fi
     done
+    if [ "$PATCH_FAILED" -eq 1 ]; then
+      echo "WARNING: Some patches failed to apply. Build may be incomplete."
+    fi
   fi
 
   if [ "$arg" == "--build" ]

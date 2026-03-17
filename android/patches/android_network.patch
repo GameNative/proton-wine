@@ -281,7 +281,7 @@ index 158a39e..35cab14 100644
  static BOOL have_ethernet_iface;
  
  static struct if_entry *find_entry_from_index( UINT index )
-@@ -309,6 +311,16 @@ static struct if_entry *add_entry( UINT index, const char *name )
+@@ -309,6 +311,15 @@ static struct if_entry *add_entry( UINT index, const char *name )
          free( entry );
          return NULL;
      }
@@ -296,7 +296,7 @@ index 158a39e..35cab14 100644
 +        entry->if_type = MIB_IF_TYPE_PPP;
 +#endif
  
-     if_get_physical( name, &entry->if_type, &entry->if_phys_addr );
+-    if_get_physical( name, &entry->if_type, &entry->if_phys_addr );
  
 @@ -330,9 +342,35 @@ static struct if_entry *add_entry( UINT index, const char *name )
  

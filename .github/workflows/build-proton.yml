@@ -120,6 +120,27 @@ jobs:
             bash build-scripts/build-step-arm64ec.sh --build-sysvshm
           fi
       
+      - name: Validate all patches
+        run: |
+          echo "Checking all patch files for validity..."
+          FAILED=0
+          for patch in android/patches/*.patch; do
+            if ! git apply --check "$patch" 2>/dev/null; then
+              echo "FAIL: $patch"
+              git apply --check "$patch" 2>&1 | head -5
+              FAILED=1
+            else
+              echo "  OK: $patch"
+            fi
+          done
+          if [ "$FAILED" -eq 1 ]; then
+            echo ""
+            echo "Some patches are invalid or do not apply cleanly."
+            echo "Check for missing trailing newlines or context mismatches."
+            exit 1
+          fi
+          echo "All patches valid."
+
       - name: Configure build for ${{ matrix.arch }}
         run: |
           if [ "${{ matrix.arch }}" == "x86_64" ]; then
@@ -144,6 +165,61 @@ jobs:
             bash build-scripts/build-step-arm64ec.sh --install
           fi
       
+      - name: Verify build output contains critical PE binaries
+        run: |
+          if [ "${{ matrix.arch }}" == "x86_64" ]; then
+            OUTPUT_DIR="$HOME/compiled-files-x86_64"
+            PE_DIR="$OUTPUT_DIR/lib/wine/x86_64-windows"
+          else
+            OUTPUT_DIR="$HOME/compiled-files-aarch64"
+            PE_DIR="$OUTPUT_DIR/lib/wine/aarch64-windows"
+          fi
+
+          MISSING=0
+          for f in \
+            "$PE_DIR/wineboot.exe" \
+            "$PE_DIR/start.exe" \
+            "$PE_DIR/explorer.exe" \
+            "$PE_DIR/winedevice.exe" \
+            "$PE_DIR/kernel32.dll" \
+            "$PE_DIR/ntdll.dll" \
+            "$PE_DIR/user32.dll" \
+            "$PE_DIR/gdi32.dll" \
+            "$PE_DIR/advapi32.dll" \
+            "$PE_DIR/ws2_32.dll" \
+            "$PE_DIR/shell32.dll" \
+            "$PE_DIR/msvcrt.dll" \
+            "$OUTPUT_DIR/bin/wine" \
+            "$OUTPUT_DIR/bin/wineserver"
+          do
+            if [ ! -f "$f" ]; then
+              echo "MISSING: $f"
+              MISSING=1
+            fi
+          done
+
+          if [ "$MISSING" -eq 1 ]; then
+            echo ""
+            echo "Build output is incomplete — critical PE binaries are missing."
+            echo ""
+            echo "=== All .exe files in $PE_DIR ==="
+            ls "$PE_DIR"/*.exe 2>/dev/null || echo "(none)"
+            echo ""
+            echo "=== All .dll files in $PE_DIR ==="
+            ls "$PE_DIR"/*.dll 2>/dev/null | head -30 || echo "(none)"
+            echo ""
+            echo "=== Contents of install dir ==="
+            ls "$OUTPUT_DIR/" 2>/dev/null
+            echo ""
+            echo "=== Contents of bin/ ==="
+            ls "$OUTPUT_DIR/bin/" 2>/dev/null || echo "(empty or missing)"
+            exit 1
+          fi
+
+          EXE_COUNT=$(ls "$PE_DIR"/*.exe 2>/dev/null | wc -l)
+          DLL_COUNT=$(ls "$PE_DIR"/*.dll 2>/dev/null | wc -l)
+          echo "Build verified: $EXE_COUNT .exe files, $DLL_COUNT .dll files in $PE_DIR"
+
       - name: Download prefixPack.txz for ${{ matrix.arch }}
         run: |
           if [ "${{ matrix.arch }}" == "x86_64" ]; then
