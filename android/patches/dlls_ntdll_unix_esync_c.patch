@@ -1,5 +1,5 @@
 diff --git a/dlls/ntdll/unix/esync.c b/dlls/ntdll/unix/esync.c
-index 3074f7c..275d099 100644
+index 3074f7c..483f086 100644
 --- a/dlls/ntdll/unix/esync.c
 +++ b/dlls/ntdll/unix/esync.c
 @@ -48,6 +48,9 @@
@@ -12,3 +12,21 @@ index 3074f7c..275d099 100644
  
  WINE_DEFAULT_DEBUG_CHANNEL(esync);
  
+@@ -124,7 +127,7 @@ static void *get_shm( unsigned int idx )
+ 
+     if (!shm_addrs[entry])
+     {
+-        void *addr = mmap( NULL, pagesize, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, entry * pagesize );
++        void *addr = mmap_virtual( NULL, pagesize, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, entry * pagesize );
+         if (addr == (void *)-1)
+             ERR("Failed to map page %d (offset %#lx).\n", entry, entry * pagesize);
+ 
+@@ -1337,7 +1340,7 @@ void esync_init(void)
+     else
+         sprintf( shm_name, "/wine-%lx-esync", (unsigned long)st.st_ino );
+ 
+-    if ((shm_fd = shm_open( shm_name, O_RDWR, 0644 )) == -1)
++    if ((shm_fd = shm_open_virtual( shm_name, O_RDWR, 0644 )) == -1)
+     {
+         /* probably the server isn't running with WINEESYNC, tell the user and bail */
+         if (errno == ENOENT)

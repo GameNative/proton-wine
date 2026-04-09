@@ -1,5 +1,5 @@
 diff --git a/server/esync.c b/server/esync.c
-index a516443..c40b4ad 100644
+index a516443..e1a303f 100644
 --- a/server/esync.c
 +++ b/server/esync.c
 @@ -44,6 +44,9 @@
@@ -12,3 +12,51 @@ index a516443..c40b4ad 100644
  
  int do_esync(void)
  {
+@@ -69,7 +72,7 @@ static long pagesize;
+ static void shm_cleanup(void)
+ {
+     close( shm_fd );
+-    if (shm_unlink( shm_name ) == -1)
++    if (shm_unlink_virtual( shm_name ) == -1)
+         perror( "shm_unlink" );
+ }
+ 
+@@ -85,9 +88,9 @@ void esync_init(void)
+     else
+         sprintf( shm_name, "/wine-%lx-esync", (unsigned long)st.st_ino );
+ 
+-    shm_unlink( shm_name );
++    shm_unlink_virtual( shm_name );
+ 
+-    shm_fd = shm_open( shm_name, O_RDWR | O_CREAT | O_EXCL, 0644 );
++    shm_fd = shm_open_virtual( shm_name, O_RDWR | O_CREAT | O_EXCL, 0644 );
+     if (shm_fd == -1)
+         perror( "shm_open" );
+ 
+@@ -97,7 +100,7 @@ void esync_init(void)
+     shm_addrs_size = 128;
+ 
+     shm_size = pagesize;
+-    if (ftruncate( shm_fd, shm_size ) == -1)
++    if (ftruncate_virtual( shm_fd, shm_size ) == -1)
+         perror( "ftruncate" );
+ 
+     fprintf( stderr, "esync: up and running.\n" );
+@@ -205,7 +208,7 @@ static void *get_shm( unsigned int idx )
+ 
+     if (!shm_addrs[entry])
+     {
+-        void *addr = mmap( NULL, pagesize, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, entry * pagesize );
++        void *addr = mmap_virtual( NULL, pagesize, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, entry * pagesize );
+         if (addr == (void *)-1)
+         {
+             fprintf( stderr, "esync: failed to map page %d (offset %#lx): ", entry, entry * pagesize );
+@@ -277,7 +280,7 @@ struct esync *create_esync( struct object *root, const struct unicode_str *name,
+             {
+                 /* Better expand the shm section. */
+                 shm_size += pagesize;
+-                if (ftruncate( shm_fd, shm_size ) == -1)
++                if (ftruncate_virtual( shm_fd, shm_size ) == -1)
+                 {
+                     fprintf( stderr, "esync: couldn't expand %s to size %ld: ",
+                              shm_name, (long)shm_size );
