@@ -153,6 +153,7 @@ do
       "dlls_nsiproxy_sys_ndis_c.patch"
       "dlls_nsiproxy_sys_nsi_common_h.patch"
       "dlls_ws2_32_socket_c.patch"
+      "server_token_c.patch"
 
       # midi support
       "midi_support.patch"

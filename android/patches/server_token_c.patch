@@ -1,0 +1,38 @@
+diff --git a/server/token.c b/server/token.c
+index 31fc4b8..48c15ce 100644
+--- a/server/token.c
++++ b/server/token.c
+@@ -221,12 +221,33 @@ void init_user_sid(void)
+     size_t n;
+     FILE *f;
+ 
++#ifdef __ANDROID__
++    /* /etc/machine-id is absent on Android.  Fall back to a per-prefix
++     * file so the machine SID stays stable across reboots/restarts. */
++    const char *prefix = getenv("WINEPREFIX");
++    if (prefix)
++    {
++        char path[4096];
++        snprintf(path, sizeof(path), "%s/.machine-id", prefix);
++        f = fopen(path, "r");
++        if (!f) {
++            /* First run: seed from uid and persist for next time. */
++            FILE *wf = fopen(path, "w");
++            if (wf) {
++                fprintf(wf, "%08x%08x\n", 0x414e4452u, (unsigned int) getuid());
++                fclose(wf);
++                f = fopen(path, "r");
++            }
++        }
++    }
++#else
+     f = fopen( "/etc/machine-id", "r" );
+     if (!f)
+     {
+         fprintf( stderr, "Failed to open /etc/machine-id, error %s.\n", strerror( errno ));
+         return;
+     }
++#endif
+ 
+     n = fread( machine_id, sizeof(*machine_id), 16, f );
+     fclose(f);
