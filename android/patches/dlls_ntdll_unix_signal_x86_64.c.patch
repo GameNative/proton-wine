@@ -1,0 +1,13 @@
+diff --git a/dlls/ntdll/unix/signal_x86_64.c b/dlls/ntdll/unix/signal_x86_64.c
+index 110404c274c..b4663697889 100644
+--- a/dlls/ntdll/unix/signal_x86_64.c
++++ b/dlls/ntdll/unix/signal_x86_64.c
+@@ -2279,7 +2279,7 @@ __ASM_GLOBAL_FUNC( dump_syscall_fault_return,
+                    "movq %rdi,%rsp\n\t"
+                    "movq %rsi,%rax\n\t"
+                    "movq %rdx,%r13\n\t"
+-                   "jmp %rcx")
++                   "jmp *%rcx")
+ 
+ 
+ static void dump_syscall_fault( CONTEXT *context, DWORD exc_code )

@@ -1,0 +1,58 @@
+diff --git a/dlls/winex11.drv/window.c b/dlls/winex11.drv/window.c
+index cc0538d5117..05304740bfe 100644
+--- a/dlls/winex11.drv/window.c
++++ b/dlls/winex11.drv/window.c
+@@ -1228,6 +1228,10 @@ static void set_initial_wm_hints( Display *display, Window window )
+     /* class hints */
+     if ((class_hints = XAllocClassHint()))
+     {
++#ifdef __ANDROID__
++        class_hints->res_name = process_name;
++        class_hints->res_class = process_name;
++#else
+         static char steam_proton[] = "steam_proton";
+         const char *app_id = getenv("SteamAppId");
+         char proton_app_class[128];
+@@ -1241,16 +1245,20 @@ static void set_initial_wm_hints( Display *display, Window window )
+             class_hints->res_class = steam_proton;
+         }
+
++#endif
+         XSetClassHint( display, window, class_hints );
+         XFree( class_hints );
+     }
+
+     /* set the WM_CLIENT_MACHINE and WM_LOCALE_NAME properties */
+     XSetWMProperties(display, window, NULL, NULL, NULL, 0, NULL, NULL, NULL);
++
++#ifndef __ANDROID__
+     /* set the pid. together, these properties are needed so the window manager can kill us if we freeze */
+     i = getpid();
+     XChangeProperty(display, window, x11drv_atom(_NET_WM_PID),
+                     XA_CARDINAL, 32, PropModeReplace, (unsigned char *)&i, 1);
++#endif
+
+     XChangeProperty( display, window, x11drv_atom(XdndAware),
+                      XA_ATOM, 32, PropModeReplace, (unsigned char*)&dndVersion, 1 );
+@@ -2776,6 +2784,21 @@ static void create_whole_window( struct x11drv_win_data *data )
+                                         cx, cy, 0, data->vis.depth, InputOutput,
+                                         data->vis.visual, mask, &attr );
+     if (!data->whole_window) goto done;
++#ifdef __ANDROID__
++    DWORD pid = 0;
++
++    NtUserGetWindowThread( data->hwnd, &pid );
++
++    XChangeProperty( data->display, data->whole_window, x11drv_atom(_NET_WM_PID),
++                     XA_CARDINAL, 32, PropModeReplace,
++                     (unsigned char *)&pid, 1 );
++
++    UINT_PTR xhwnd = (UINT_PTR)data->hwnd;
++    XChangeProperty( data->display, data->whole_window, x11drv_atom(_NET_WM_HWND),
++                     XA_CARDINAL, 32, PropModeReplace,
++                     (unsigned char *)&xhwnd, sizeof(xhwnd)/4 );
++#endif
++
+     set_wine_allow_flip( data->whole_window, 0 );
+
+     SetRect( &data->current_state.rect, pos.x, pos.y, pos.x + cx, pos.y + cy );

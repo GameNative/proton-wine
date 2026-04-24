@@ -1,0 +1,34 @@
+diff --git a/dlls/ntdll/unix/fsync.c b/dlls/ntdll/unix/fsync.c
+index 25d41cac793..4d4d0dc288a 100644
+--- a/dlls/ntdll/unix/fsync.c
++++ b/dlls/ntdll/unix/fsync.c
+@@ -54,6 +54,9 @@
+
+ #include "unix_private.h"
+ #include "fsync.h"
++#ifdef __ANDROID__
++#include "../../../android/shm_utils/shm_utils.h"
++#endif
+
+ WINE_DEFAULT_DEBUG_CHANNEL(fsync);
+
+@@ -390,7 +393,7 @@ static NTSTATUS get_object( HANDLE handle, struct fsync *obj )
+         req->handle = wine_server_obj_handle( handle );
+         if (!(ret = wine_server_call( req )))
+         {
+-            shm_idx = reply->fsync_shm_idx;
++            shm_idx = reply->sync_shm_idx;
+             type = reply->type;
+         }
+     }
+@@ -454,6 +457,10 @@ void fsync_init( DWORD pid )
+ {
+     struct stat st;
+
++#if defined(__ANDROID__)
++	fsync_enabled = 0;
++	return;
++#endif
+
+     fsync_enabled = 1;
+     syscall( __NR_futex_waitv, NULL, 0, 0, NULL, 0 );

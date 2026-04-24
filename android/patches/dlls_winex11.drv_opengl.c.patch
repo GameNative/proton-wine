@@ -1,0 +1,30 @@
+diff --git a/dlls/winex11.drv/opengl.c b/dlls/winex11.drv/opengl.c
+index 05f6522e5f6..b4d86aa9f44 100644
+--- a/dlls/winex11.drv/opengl.c
++++ b/dlls/winex11.drv/opengl.c
+@@ -564,6 +564,9 @@ static BOOL x11drv_egl_surface_create( HWND hwnd, BOOL raw, int format, struct o
+ UINT X11DRV_OpenGLInit( UINT version, const struct opengl_funcs *opengl_funcs, const struct opengl_driver_funcs **driver_funcs )
+ {
+     int error_base, event_base;
++#ifdef __ANDROID__
++    int wine_x11forceglx = 0;
++#endif
+ 
+     if (version != WINE_OPENGL_DRIVER_VERSION)
+     {
+@@ -666,7 +669,15 @@ UINT X11DRV_OpenGLInit( UINT version, const struct opengl_funcs *opengl_funcs, c
+ 
+     if(!X11DRV_WineGL_InitOpenglInfo()) goto failed;
+ 
++#ifdef __ANDROID__
++    const char *val = getenv("WINE_X11FORCEGLX");
++    if (val)
++        wine_x11forceglx = atoi(val);
++
++    if (XQueryExtension( gdi_display, "GLX", &glx_opcode, &event_base, &error_base ) || wine_x11forceglx)
++#else
+     if (XQueryExtension( gdi_display, "GLX", &glx_opcode, &event_base, &error_base ))
++#endif
+     {
+         TRACE("GLX is up and running error_base = %d\n", error_base);
+     } else {

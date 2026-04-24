@@ -1,0 +1,41 @@
+diff --git a/server/protocol.def b/server/protocol.def
+index 03565fe4d53..c3f23a85119 100644
+--- a/server/protocol.def
++++ b/server/protocol.def
+@@ -4214,6 +4214,18 @@ struct handle_info
+     int enable;                /* previous state of auto-repeat enable */
+ @END
+
++#define ESYNC_USED_BY_SERVER 0x7eadeeee
++
++enum esync_type
++{
++    ESYNC_SEMAPHORE = 1,
++    ESYNC_AUTO_EVENT,
++    ESYNC_MANUAL_EVENT,
++    ESYNC_MUTEX,
++    ESYNC_AUTO_SERVER,
++    ESYNC_MANUAL_SERVER,
++    ESYNC_QUEUE,
++};
+
+ enum inproc_sync_type
+ {
+@@ -4230,7 +4242,7 @@ enum inproc_sync_type
+ @REPLY
+     int           type;         /* inproc sync type */
+     unsigned int access;        /* handle access rights */
+-    unsigned int fsync_shm_idx;
++    unsigned int sync_shm_idx;
+ @END
+
+
+@@ -4238,7 +4250,7 @@ enum inproc_sync_type
+ @REQ(get_inproc_alert_fd)
+ @REPLY
+     obj_handle_t handle;        /* alert fd is in flight with this handle */
+-    unsigned int fsync_shm_idx;
++    unsigned int sync_shm_idx;
+ @END
+
+

@@ -1,0 +1,34 @@
+diff --git a/server/thread.c b/server/thread.c
+index 7caf39b1d50..1938eb7566c 100644
+--- a/server/thread.c
++++ b/server/thread.c
+@@ -61,6 +61,8 @@
+ #include "user.h"
+ #include "security.h"
+
++#include "esync.h"
++#include <sys/eventfd.h>
+ #include "fsync.h"
+
+ /* thread queues */
+@@ -1825,6 +1827,11 @@ DECL_HANDLER(init_first_thread)
+     if (do_fsync())
+     {
+         reply->inproc_device = FSYNC_USED_BY_SERVER;
++    }
++	else if (do_esync())
++    {
++        reply->inproc_device = ESYNC_USED_BY_SERVER;
++		send_client_fd(process, esync_get_shm_fd(), reply->inproc_device);
+     }
+     else if ((fd = get_inproc_device_fd()) >= 0)
+     {
+@@ -2468,7 +2475,7 @@ DECL_HANDLER(get_inproc_alert_fd)
+     int fd;
+
+     if ((fd = get_inproc_sync_fd( current->alert_sync )) < 0) set_error( STATUS_INVALID_PARAMETER );
+-    else if (do_fsync()) reply->fsync_shm_idx = fd;
++    else if (do_fsync()) reply->sync_shm_idx = fd;
+     else
+     {
+         reply->handle = get_thread_id( current ) | 1; /* arbitrary token */
