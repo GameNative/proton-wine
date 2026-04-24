@@ -167,6 +167,7 @@ do
       "dlls_winex11_drv_x11drv_main_c.patch"
 
       # address space patches
+      "dlls_ntdll_unix_unix_private_h.patch"
       "x86_64/dlls_ntdll_unix_virtual_c.patch"
       "loader_preloader_c.patch"
 

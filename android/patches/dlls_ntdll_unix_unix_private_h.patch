@@ -1,0 +1,16 @@
+diff --git a/dlls/ntdll/unix/unix_private.h b/dlls/ntdll/unix/unix_private.h
+index ad73f83..3e79386 100644
+--- a/dlls/ntdll/unix/unix_private.h
++++ b/dlls/ntdll/unix/unix_private.h
+@@ -133,7 +133,11 @@ struct async_fileio
+     HANDLE               handle;
+ };
+ 
++#ifdef ANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES
++extern SIZE_T page_size;
++#else
+ static const SIZE_T page_size = 0x1000;
++#endif
+ static const SIZE_T teb_size = 0x3800;  /* TEB64 + TEB32 + debug info */
+ static const SIZE_T signal_stack_mask = 0xffff;
+ static const SIZE_T signal_stack_size = 0x10000 - 0x3800;
