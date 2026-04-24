@@ -11,7 +11,7 @@ export install_dir=$deps/../opt/wine
 #export TOOLCHAIN="$HOME/Android/android-ndk-r27d/toolchains/llvm/prebuilt/linux-x86_64/bin"
 export TOOLCHAIN="$HOME/Android/Sdk/ndk/27.3.13750724/toolchains/llvm/prebuilt/linux-x86_64/bin"
 export LLVM_MINGW_TOOLCHAIN="$HOME/toolchains/llvm-mingw-20250920-ucrt-ubuntu-22.04-x86_64/bin"
-export TARGET=aarch64-linux-android28
+export TARGET=aarch64-linux-android35
 export PATH=$LLVM_MINGW_TOOLCHAIN:$PATH
 
 export CC=$TOOLCHAIN/$TARGET-clang
@@ -27,10 +27,10 @@ export PKG_CONFIG_LIBDIR=$deps/lib/pkgconfig:$deps/share/pkgconfig
 export ACLOCAL_PATH=$deps/lib/aclocal:$deps/share/aclocal
 export CPPFLAGS="-I$deps/include --sysroot=$TOOLCHAIN/../sysroot"
 
-export C_OPTS="-Wno-declaration-after-statement -Wno-implicit-function-declaration -Wno-int-conversion"
+export C_OPTS="-Wno-declaration-after-statement -Wno-implicit-function-declaration -Wno-int-conversion -DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON"
 export CFLAGS=$C_OPTS
 export CXXFLAGS=$C_OPTS
-export LDFLAGS="-L$deps/lib -Wl,-rpath=$RUNTIME_PATH/lib"
+export LDFLAGS="-L$deps/lib -Wl,-rpath=$RUNTIME_PATH/lib -Wl,-z,max-page-size=16384"
 
 export FREETYPE_CFLAGS="-I$deps/include/freetype2"
 export PULSE_CFLAGS="-I$deps/include/pulse"
@@ -46,17 +46,6 @@ export FFMPEG_LIBS="-L$deps/lib -lavutil -lavcodec -lavformat"
 
 for arg in "$@"
 do
-  if [ "$arg" == "--enable-16kb-pages" ];
-  then
-    echo "Enabling 16KB page size support..."
-    export TARGET=aarch64-linux-android35
-    export C_OPTS="$C_OPTS -DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES"
-    export CFLAGS="$C_OPTS"
-    export CXXFLAGS="$C_OPTS"
-    export LDFLAGS="$LDFLAGS -Wl,-z,max-page-size=16384"
-    echo "16KB page size support enabled"
-  fi
-
   if [ "$arg" == "--build-sysvshm" ];
   then
     # Build android_sysvshm library
