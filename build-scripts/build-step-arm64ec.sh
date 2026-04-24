@@ -147,8 +147,11 @@ do
 
     PATCHES=(
       # android network patch
-      "android_network.patch"
+      "dlls_dnsapi_libresolv_c.patch"
+      "dlls_dnsapi_record_c.patch"
       "dlls_nsiproxy_sys_ip_c.patch"
+      "dlls_nsiproxy_sys_ndis_c.patch"
+      "dlls_nsiproxy_sys_nsi_common_h.patch"
 
       # midi support
       "midi_support.patch"

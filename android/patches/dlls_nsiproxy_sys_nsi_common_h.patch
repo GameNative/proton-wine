@@ -1,0 +1,32 @@
+diff --git a/dlls/nsiproxy.sys/nsi_common.h b/dlls/nsiproxy.sys/nsi_common.h
+new file mode 100644
+index 0000000..7c1bfbc
+--- /dev/null
++++ b/dlls/nsiproxy.sys/nsi_common.h
+@@ -0,0 +1,26 @@
++/*
++ * nsiproxy.sys
++ *
++ * Copyright 2021 Huw Davies
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
++ */
++
++ #ifndef __NSI_COMMON_H
++ #define __NSI_COMMON_H
++
++ extern int wine_new_ndis;
++
++ #endif
