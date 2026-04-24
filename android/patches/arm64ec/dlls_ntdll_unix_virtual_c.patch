@@ -1,5 +1,5 @@
 diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
-index 963ebd2..9032428 100644
+index 963ebd2..2602543 100644
 --- a/dlls/ntdll/unix/virtual.c
 +++ b/dlls/ntdll/unix/virtual.c
 @@ -404,6 +404,7 @@ static void kernel_writewatch_softdirty_init(void)
@@ -35,3 +35,25 @@ index 963ebd2..9032428 100644
              if (prot & PROT_EXEC) WARN( "failed to set PROT_EXEC on file map, noexec filesystem?\n" );
              break;
          default:
+@@ -6986,6 +6993,21 @@ NTSTATUS WINAPI NtReadVirtualMemory( HANDLE process, const void *addr, void *buf
+ 
+         if (ret == -1)
+         {
++#ifdef __ANDROID__
++            if (errno == EACCES || errno == EPERM)
++            {
++                /* Android SELinux blocks process_vm_readv between processes.
++                 * Fall back to the wineserver-mediated path. */
++                SERVER_START_REQ( read_process_memory ) {
++                    req->handle = wine_server_obj_handle( process );
++                    req->addr   = wine_server_client_ptr( addr );
++                    wine_server_set_reply( req, buffer, size );
++                    if ((status = wine_server_call( req ))) size = 0;
++                }
++                SERVER_END_REQ;
++                goto done;
++            }
++#endif
+             status = errno == ESRCH ? STATUS_PARTIAL_COPY : errno_to_status( errno );
+             size = 0;
+         }
