@@ -49,7 +49,7 @@ do
   if [ "$arg" == "--enable-16kb-pages" ];
   then
     echo "Enabling 16KB page size support..."
-    export TARGET=x86_64-linux-android34
+    export TARGET=x86_64-linux-android35
     export C_OPTS="$C_OPTS -DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES"
     export CFLAGS="$C_OPTS"
     export CXXFLAGS="$C_OPTS"
@@ -154,6 +154,7 @@ do
       "dlls_nsiproxy_sys_nsi_common_h.patch"
       "dlls_ws2_32_socket_c.patch"
       "server_token_c.patch"
+      "server_unicode_c.patch"
 
       # midi support
       "midi_support.patch"
