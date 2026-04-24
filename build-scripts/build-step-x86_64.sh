@@ -152,6 +152,7 @@ do
       "dlls_nsiproxy_sys_ip_c.patch"
       "dlls_nsiproxy_sys_ndis_c.patch"
       "dlls_nsiproxy_sys_nsi_common_h.patch"
+      "dlls_ws2_32_socket_c.patch"
 
       # midi support
       "midi_support.patch"
@@ -205,9 +206,11 @@ do
       "programs_winebrowser_main_c.patch"
 
       # clipboard patches
-      "dlls_user32_makefile_in.patch"
       "dlls_user32_clipboard_c.patch"
       "dlls_win32u_clipboard_c.patch"
+
+      # user32 patches
+      "dlls_user32_makefile_in.patch"
     )
 
     for patch in "${PATCHES[@]}"; do
