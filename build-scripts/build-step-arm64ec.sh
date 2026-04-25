@@ -181,10 +181,10 @@ do
 
       # address space patches
       "common/loader_preloader_c.patch"
-#      "arm64ec/dlls_ntdll_unix_virtual_c.patch"
+      "arm64ec/dlls_ntdll_unix_virtual_c.patch"
 
       # syscall Patches
-      # None
+      "arm64ec/dlls_wow64_syscall_c.patch"
 
       # pulse Patches
       "common/dlls_winepulse_drv_pulse_c.patch"
@@ -213,20 +213,19 @@ do
       "common/dlls_win32u_clipboard_c.patch"
 
       # fexcore patch
-#      "arm64ec/dlls_ntdll_loader_c.patch"
-#      "arm64ec/dlls_ntdll_unix_loader_c.patch"
-#      "arm64ec/dlls_wow64_syscall_c.patch"
-#      "arm64ec/loader_wine_inf_in.patch"
-#
-#      # fix build
-#      "arm64ec/programs_wineboot_wineboot_c.patch"
-#      "arm64ec/dlls_wdscore_wdscore_spec.patch"
-#
-#      # 1. Extended State (XSTATE/YMM) Support Patches
+      "arm64ec/dlls_ntdll_loader_c.patch"
+      "arm64ec/dlls_ntdll_unix_loader_c.patch"
+      "arm64ec/loader_wine_inf_in.patch"
+
+      # fix build
+      "arm64ec/dlls_wdscore_wdscore_spec.patch"
+      "arm64ec/programs_wineboot_wineboot_c.patch"
+
+      # 1. Extended State (XSTATE/YMM) Support Patches
 #      "test-bylaws/dlls_ntdll_unwind_h.patch"
 #      "test-bylaws/include_winnt_h.patch"
-#
-#      # 2. Thread Suspension Patches
+
+      # 2. Thread Suspension Patches
 #      "test-bylaws/dlls_ntdll_signal_arm64_c.patch"
 #      "test-bylaws/dlls_ntdll_signal_arm64ec_c.patch"
 #      "test-bylaws/dlls_ntdll_signal_x86_64_c.patch"
@@ -234,18 +233,18 @@ do
 #      "test-bylaws/dlls_ntdll_ntdll_misc_h.patch"
 #      "test-bylaws/dlls_wow64_process_c.patch"
 #      "test-bylaws/dlls_wow64_wow64_spec.patch"
-#
-#      # 3. Process and Virtual Memory Management
+
+      # 3. Process and Virtual Memory Management
 #      "test-bylaws/dlls_wow64_virtual_c.patch"
 #      "test-bylaws/server_process_c.patch"
 #      "test-bylaws/dlls_ntdll_unix_process_c.patch"
-#
-#      # 4. Server and Threading Infrastructure
+
+      # 4. Server and Threading Infrastructure
 #      "test-bylaws/server_thread_h.patch"
 #      "test-bylaws/server_thread_c.patch"
 #      "test-bylaws/dlls_ntdll_unix_thread_c.patch"
-#
-#      # 5. Internal Headers
+
+      # 5. Internal Headers
 #      "test-bylaws/include_winternl_h.patch"
 
       # 6. Build System (Optional)
