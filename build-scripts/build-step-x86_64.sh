@@ -180,11 +180,11 @@ do
       "common/dlls_winex11_drv_x11drv_main_c.patch"
 
       # address space patches
-      "x86_64/dlls_ntdll_unix_virtual_c.patch"
       "common/loader_preloader_c.patch"
+      "x86_64/dlls_ntdll_unix_virtual_c.patch"
 
       # syscall Patches
-      "common/dlls_ntdll_unix_signal_x86_64_c.patch"
+      "x86_64/dlls_ntdll_unix_signal_x86_64_c.patch"
 
       # pulse Patches
       "common/dlls_winepulse_drv_pulse_c.patch"
