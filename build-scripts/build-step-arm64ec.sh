@@ -47,6 +47,17 @@ export FFMPEG_LIBS="-L$deps/lib -lavutil -lavcodec -lavformat"
 
 for arg in "$@"
 do
+  if [ "$arg" == "--enable-16kb-pages" ];
+  then
+    echo "Enabling 16KB page size support..."
+    export TARGET=aarch64-linux-android35
+    export C_OPTS="$C_OPTS -DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES"
+    export CFLAGS="$C_OPTS"
+    export CXXFLAGS="$C_OPTS"
+    export LDFLAGS="$LDFLAGS -Wl,-z,max-page-size=16384"
+    echo "16KB page size support enabled"
+  fi
+
   if [ "$arg" == "--build-sysvshm" ];
   then
     # Build android_sysvshm library
