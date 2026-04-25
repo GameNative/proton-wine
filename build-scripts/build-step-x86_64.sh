@@ -50,7 +50,7 @@ do
   if [ "$arg" == "--enable-16kb-pages" ];
   then
     echo "Enabling 16KB page size support..."
-    export TARGET=aarch64-linux-android35
+    export TARGET=x86_64-linux-android35
     export C_OPTS="$C_OPTS -DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES"
     export CFLAGS="$C_OPTS"
     export CXXFLAGS="$C_OPTS"
