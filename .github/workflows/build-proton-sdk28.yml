@@ -95,6 +95,10 @@ jobs:
           wget https://github.com/bylaws/llvm-mingw/releases/download/20250920/llvm-mingw-20250920-ucrt-ubuntu-22.04-x86_64.tar.xz
           tar -xf llvm-mingw-20250920-ucrt-ubuntu-22.04-x86_64.tar.xz
       
+      - name: Autogen
+        run: |
+          bash build-scripts/build-step0-autogen.sh
+      
       - name: Cache wine-tools
         id: cache-wine-tools
         uses: actions/cache@v4
