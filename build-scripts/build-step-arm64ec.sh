@@ -218,6 +218,7 @@ do
 	  # esync
 	  "dlls_ntdll_unix_esync.c.patch"
 	  "dlls_ntdll_unix_esync.h.patch"
+	  "dlls_ntdll_unix_sync.h.patch"
 	  "server_esync.c.patch"
 	  "server_esync.h.patch"
     )

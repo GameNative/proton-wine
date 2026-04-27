@@ -1,9 +1,9 @@
 diff --git a/server/esync.c b/server/esync.c
 new file mode 100644
-index 00000000000..12f07ab7bb5
+index 00000000000..60801878483
 --- /dev/null
 +++ b/server/esync.c
-@@ -0,0 +1,222 @@
+@@ -0,0 +1,238 @@
 +#include "config.h"
 +#include <fcntl.h>
 +#include <stdio.h>
@@ -30,12 +30,12 @@ index 00000000000..12f07ab7bb5
 +#include "thread.h"
 +#include "esync.h"
 +#include "fsync.h"
-+#include "ntsync_tmp.h" /* For inproc_sync_type */
 +
 +#ifdef __linux__
 +#include <sys/mman.h>
 +#include <sys/syscall.h>
 +#include <linux/memfd.h>
++#include <linux/futex.h>
 +#endif
 +
 +#ifndef MFD_CLOEXEC
@@ -170,12 +170,27 @@ index 00000000000..12f07ab7bb5
 +    return shm_idx;
 +}
 +
-+static inline void small_pause(void) {
-+#ifdef __i386__
-+    __asm__ __volatile__( "rep;nop" : : : "memory" );
-+#else
-+    __asm__ __volatile__( "" : : : "memory" );
-+#endif
++static void event_lock( struct event *event )
++{
++    int val;
++    /* 0 = unlocked, 1 = locked no waiters, 2 = locked with waiters */
++    while ((val = __sync_val_compare_and_swap( &event->locked, 0, 1 )) != 0)
++    {
++        /* if someone else already set it to 2, or we just failed the CAS,
++         * go to sleep — but first ensure the value is 2 so the unlocker
++         * knows to wake us */
++        if (val == 1)
++            __atomic_compare_exchange_n( &event->locked, &val, 2, 0,
++                                         __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST );
++        syscall( __NR_futex, &event->locked, FUTEX_WAIT, 2, NULL, NULL, 0 );
++    }
++}
++
++static void event_unlock( struct event *event )
++{
++    /* if locked field was 2 (waiters exist), wake one */
++    if (__atomic_exchange_n( &event->locked, 0, __ATOMIC_SEQ_CST ) == 2)
++        syscall( __NR_futex, &event->locked, FUTEX_WAKE, 1, NULL, NULL, 0 );
 +}
 +
 +void esync_set_event( int fd, unsigned int shm_idx, enum inproc_sync_type type )
@@ -185,7 +200,7 @@ index 00000000000..12f07ab7bb5
 +    if (!event) fatal_error( "esync: failed to map shm for event\n" );
 +
 +    if (type == ESYNC_MANUAL_EVENT || type == ESYNC_MANUAL_SERVER)
-+        while (__sync_val_compare_and_swap( &event->locked, 0, 1 )) small_pause();
++        event_lock( event );
 +
 +    if (!__atomic_exchange_n( &event->signaled, 1, __ATOMIC_SEQ_CST )) {
 +        if (write( fd, &value, sizeof(value) ) == -1)
@@ -193,7 +208,7 @@ index 00000000000..12f07ab7bb5
 +	}
 +
 +    if (type == ESYNC_MANUAL_EVENT || type == ESYNC_MANUAL_SERVER)
-+        __atomic_store_n( &event->locked, 0, __ATOMIC_RELEASE );
++        event_unlock( event );
 +}
 +
 +void esync_reset_event( int fd, unsigned int shm_idx, enum inproc_sync_type type )
@@ -203,13 +218,14 @@ index 00000000000..12f07ab7bb5
 +    if (!event) fatal_error( "esync: failed to map shm for event\n" );
 +
 +    if (type == ESYNC_MANUAL_EVENT || type == ESYNC_MANUAL_SERVER)
-+        while (__sync_val_compare_and_swap( &event->locked, 0, 1 )) small_pause();
++        event_lock( event );
 +
 +    if (__atomic_exchange_n( &event->signaled, 0, __ATOMIC_SEQ_CST ))
-+        read( fd, &value, sizeof(value) );
++        if (read( fd, &value, sizeof(value) ) == -1)
++            perror( "esync: read" );
 +
 +    if (type == ESYNC_MANUAL_EVENT || type == ESYNC_MANUAL_SERVER)
-+        __atomic_store_n( &event->locked, 0, __ATOMIC_RELEASE );
++        event_unlock( event );
 +}
 +
 +void esync_abandon_mutex( int fd, unsigned int shm_idx, thread_id_t tid )
