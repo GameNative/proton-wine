@@ -1,0 +1,14 @@
+diff --git a/dlls/winex11.drv/x11drv_main.c b/dlls/winex11.drv/x11drv_main.c
+index 81008f45c33..3c4ce5f57f8 100644
+--- a/dlls/winex11.drv/x11drv_main.c
++++ b/dlls/winex11.drv/x11drv_main.c
+@@ -204,6 +204,9 @@ const char * const X11DRV_atom_names[NB_XATOMS - FIRST_XATOM] =
+     "text/rtf",
+     "text/richtext",
+     "text/uri-list",
++#ifdef __ANDROID__
++    "_NET_WM_HWND",
++#endif
+     "GAMESCOPE_XALIA_OVERLAY",
+     "GAMESCOPE_DISPLAY_EDID_PATH",
+ };

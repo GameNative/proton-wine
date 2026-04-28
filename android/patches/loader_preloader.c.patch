@@ -1,0 +1,13 @@
+diff --git a/loader/preloader.c b/loader/preloader.c
+index 115821337bf..c53a9b6f9f0 100644
+--- a/loader/preloader.c
++++ b/loader/preloader.c
+@@ -1491,6 +1491,8 @@ void* wld_start( void **stack )
+             if (preload_info[i].addr >= (void *)0x10000
+ #ifdef __aarch64__
+                 && preload_info[i].addr < (void *)0x7fffffffff /* ARM64 address space might end here*/
++# elif __ANDROID__
++                && preload_info[i].addr < (void *)0x7fffffffff /* ARM64 address space might end here*/
+ #endif
+             )
+                 wld_printf( "preloader: Warning: failed to reserve range %p-%p\n",

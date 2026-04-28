@@ -1,0 +1,244 @@
+diff --git a/server/esync.c b/server/esync.c
+new file mode 100644
+index 00000000000..60801878483
+--- /dev/null
++++ b/server/esync.c
+@@ -0,0 +1,238 @@
++#include "config.h"
++#include <fcntl.h>
++#include <stdio.h>
++#include <stdint.h>
++#ifdef HAVE_SYS_EVENTFD_H
++# include <sys/eventfd.h>
++#endif
++#include <sys/mman.h>
++#ifdef HAVE_SYS_STAT_H
++# include <sys/stat.h>
++#endif
++#include <errno.h>
++#include <unistd.h>
++#include <stdint.h>
++
++#include "ntstatus.h"
++#define WIN32_NO_STATUS
++#include "windef.h"
++#include "winternl.h"
++#include "handle.h"
++#include "request.h"
++
++#include "file.h"
++#include "thread.h"
++#include "esync.h"
++#include "fsync.h"
++
++#ifdef __linux__
++#include <sys/mman.h>
++#include <sys/syscall.h>
++#include <linux/memfd.h>
++#include <linux/futex.h>
++#endif
++
++#ifndef MFD_CLOEXEC
++#define MFD_CLOEXEC 0x0001U
++#endif
++
++static char shm_name[29];
++static int shm_fd;
++static off_t shm_size;
++static void **shm_addrs;
++static int shm_addrs_size;
++static long pagesize;
++
++static int is_esync_initialized = 0;
++
++#ifdef __linux__
++static int create_memfd(const char *name)
++{
++#ifdef SYS_memfd_create
++    return syscall(SYS_memfd_create, name, MFD_CLOEXEC);
++#else
++    errno = ENOSYS;
++    return -1;
++#endif
++}
++#endif
++
++int do_esync(void)
++{
++#ifdef HAVE_SYS_EVENTFD_H
++    static int do_esync_cached = -1;
++
++    if (do_esync_cached == -1)
++        do_esync_cached = getenv("WINEESYNC") && atoi(getenv("WINEESYNC")) && !do_fsync();
++
++    return do_esync_cached;
++#else
++    return 0;
++#endif
++}
++
++static void cleanup(void)
++{
++    close( shm_fd );
++}
++
++int esync_get_shm_fd(void) { return shm_fd; }
++
++void esync_init(void)
++{
++    struct stat st;
++    if (fstat( config_dir_fd, &st ) == -1) fatal_error( "cannot stat config dir\n" );
++
++    shm_fd = create_memfd( "wine-esync" );
++    if (shm_fd == -1) fatal_error( "memfd_create" );
++
++    pagesize = sysconf( _SC_PAGESIZE );
++    shm_addrs = calloc( 128, sizeof(shm_addrs[0]) );
++    shm_addrs_size = 128;
++    shm_size = pagesize;
++    if (ftruncate( shm_fd, shm_size ) == -1) fatal_error( "ftruncate" );
++
++	fprintf( stderr, "esync: shm initialized, fd=%d size=%ld pagesize=%ld\n",
++			 shm_fd, (long)shm_size, pagesize );
++
++    fprintf( stderr, "esync: up and running.\n" );
++    atexit( cleanup );
++
++	is_esync_initialized = 1;
++}
++
++static void *get_shm( unsigned int idx )
++{
++    int entry  = (idx * 8) / pagesize;
++    int offset = (idx * 8) % pagesize;
++
++    if (entry >= shm_addrs_size) {
++        int new_size = max(shm_addrs_size * 2, entry + 1);
++        void *new_addrs = realloc( shm_addrs, new_size * sizeof(shm_addrs[0]) );
++		if (!new_addrs) return NULL;
++		shm_addrs = new_addrs;
++        memset( shm_addrs + shm_addrs_size, 0, (new_size - shm_addrs_size) * sizeof(shm_addrs[0]) );
++        shm_addrs_size = new_size;
++    }
++
++    if (!shm_addrs[entry]) {
++        void *addr = mmap( NULL, pagesize, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, entry * pagesize );
++		if (addr == MAP_FAILED) return NULL;
++        if (__sync_val_compare_and_swap( &shm_addrs[entry], 0, addr )) munmap( addr, pagesize );
++    }
++    return (void *)((unsigned long)shm_addrs[entry] + offset);
++}
++
++struct semaphore { int max; int count; };
++struct mutex { DWORD tid; int count; };
++struct event { int signaled; int locked; };
++
++unsigned int esync_alloc_shm(int fd, enum inproc_sync_type type, int initval, int max)
++{
++    if (!is_esync_initialized)
++        return 0;
++
++    unsigned int shm_idx = fd + 1;
++
++    while (shm_idx * 8 >= shm_size) {
++        shm_size += pagesize;
++        if (ftruncate( shm_fd, shm_size ) == -1) perror( "ftruncate" );
++    }
++
++    if (type == ESYNC_SEMAPHORE) {
++        struct semaphore *sem = get_shm( shm_idx );
++        if (sem) {
++            sem->max = max;
++            sem->count = initval;
++        }
++    }
++    else if (type == ESYNC_AUTO_EVENT || type == ESYNC_MANUAL_EVENT ||
++             type == ESYNC_AUTO_SERVER || type == ESYNC_MANUAL_SERVER) {
++        struct event *evt = get_shm( shm_idx );
++		if (evt) {
++			evt->signaled = initval ? 1 : 0;
++			evt->locked = 0;
++		}
++    }
++    else if (type == ESYNC_MUTEX) {
++        struct mutex *mut = get_shm( shm_idx );
++		if (mut) {
++			mut->tid = initval ? 0 : current->id;
++			mut->count = initval ? 0 : 1;
++		}
++    }
++    return shm_idx;
++}
++
++static void event_lock( struct event *event )
++{
++    int val;
++    /* 0 = unlocked, 1 = locked no waiters, 2 = locked with waiters */
++    while ((val = __sync_val_compare_and_swap( &event->locked, 0, 1 )) != 0)
++    {
++        /* if someone else already set it to 2, or we just failed the CAS,
++         * go to sleep — but first ensure the value is 2 so the unlocker
++         * knows to wake us */
++        if (val == 1)
++            __atomic_compare_exchange_n( &event->locked, &val, 2, 0,
++                                         __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST );
++        syscall( __NR_futex, &event->locked, FUTEX_WAIT, 2, NULL, NULL, 0 );
++    }
++}
++
++static void event_unlock( struct event *event )
++{
++    /* if locked field was 2 (waiters exist), wake one */
++    if (__atomic_exchange_n( &event->locked, 0, __ATOMIC_SEQ_CST ) == 2)
++        syscall( __NR_futex, &event->locked, FUTEX_WAKE, 1, NULL, NULL, 0 );
++}
++
++void esync_set_event( int fd, unsigned int shm_idx, enum inproc_sync_type type )
++{
++    static const uint64_t value = 1;
++    struct event *event = get_shm( shm_idx );
++    if (!event) fatal_error( "esync: failed to map shm for event\n" );
++
++    if (type == ESYNC_MANUAL_EVENT || type == ESYNC_MANUAL_SERVER)
++        event_lock( event );
++
++    if (!__atomic_exchange_n( &event->signaled, 1, __ATOMIC_SEQ_CST )) {
++        if (write( fd, &value, sizeof(value) ) == -1)
++            perror( "esync: write" );
++	}
++
++    if (type == ESYNC_MANUAL_EVENT || type == ESYNC_MANUAL_SERVER)
++        event_unlock( event );
++}
++
++void esync_reset_event( int fd, unsigned int shm_idx, enum inproc_sync_type type )
++{
++    uint64_t value;
++    struct event *event = get_shm( shm_idx );
++    if (!event) fatal_error( "esync: failed to map shm for event\n" );
++
++    if (type == ESYNC_MANUAL_EVENT || type == ESYNC_MANUAL_SERVER)
++        event_lock( event );
++
++    if (__atomic_exchange_n( &event->signaled, 0, __ATOMIC_SEQ_CST ))
++        if (read( fd, &value, sizeof(value) ) == -1)
++            perror( "esync: read" );
++
++    if (type == ESYNC_MANUAL_EVENT || type == ESYNC_MANUAL_SERVER)
++        event_unlock( event );
++}
++
++void esync_abandon_mutex( int fd, unsigned int shm_idx, thread_id_t tid )
++{
++    struct mutex *mutex = get_shm( shm_idx );
++    if (!mutex) fatal_error( "esync: failed to map shm for mutex\n" );
++
++    /* Atomically claim ownership by swapping tid -> ~0 only if it's still ours.
++       If another thread already cleared it, the CAS fails and we do nothing. */
++    if (__sync_bool_compare_and_swap( &mutex->tid, tid, ~0 ))
++    {
++        uint64_t value = 1;
++        __atomic_store_n( &mutex->count, 0, __ATOMIC_RELEASE );
++        write( fd, &value, sizeof(value) );
++    }
++}

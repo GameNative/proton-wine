@@ -1,0 +1,11 @@
+diff --git a/dlls/midimap/Makefile.in b/dlls/midimap/Makefile.in
+index 35ae704386f..c09a86545cb 100644
+--- a/dlls/midimap/Makefile.in
++++ b/dlls/midimap/Makefile.in
+@@ -1,5 +1,5 @@
+ MODULE    = midimap.dll
+-IMPORTS   = winmm user32 advapi32
++IMPORTS   = winmm user32 advapi32 ws2_32
+
+ SOURCES = \
+ 	midimap.c
