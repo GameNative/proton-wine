@@ -1,9 +1,9 @@
 diff --git a/dlls/ntdll/unix/esync.c b/dlls/ntdll/unix/esync.c
 new file mode 100644
-index 00000000000..15bbedaf7b5
+index 00000000000..202e945b95b
 --- /dev/null
 +++ b/dlls/ntdll/unix/esync.c
-@@ -0,0 +1,1294 @@
+@@ -0,0 +1,1271 @@
 +/*
 + * eventfd-based synchronization objects
 + *
@@ -52,11 +52,8 @@ index 00000000000..15bbedaf7b5
 +#include "wine/debug.h"
 +
 +#include "unix_private.h"
-+#include "sync.h"
 +#include "esync.h"
 +#include "fsync.h"
-+#include <linux/futex.h>
-+#include <sys/syscall.h>
 +#ifdef __ANDROID__
 +#include "../../../android/shm_utils/shm_utils.h"
 +#endif
@@ -171,7 +168,7 @@ index 00000000000..15bbedaf7b5
 +    return idx % ESYNC_LIST_BLOCK_SIZE;
 +}
 +
-+static struct esync *add_to_list( HANDLE handle, enum esync_type type, int fd, void *shm, BOOL *is_new )
++static struct esync *add_to_list( HANDLE handle, enum esync_type type, int fd, void *shm )
 +{
 +    UINT_PTR entry, idx = handle_to_index( handle, &entry );
 +
@@ -198,7 +195,6 @@ index 00000000000..15bbedaf7b5
 +    {
 +        esync_list[entry][idx].fd = fd;
 +        esync_list[entry][idx].shm = shm;
-+        *is_new = TRUE;
 +    }
 +    return &esync_list[entry][idx];
 +}
@@ -275,26 +271,7 @@ index 00000000000..15bbedaf7b5
 +
 +    TRACE("Got fd %d for handle %p.\n", fd, handle);
 +
-+    BOOL is_new = FALSE;
-+    struct esync *new_obj = add_to_list( handle, type, fd, shm_idx ? get_shm( shm_idx ) : 0 , &is_new);
-+    if (!new_obj)
-+    {
-+        /* Allocation failed; clean up the FD we received */
-+        close( fd );
-+        return STATUS_NO_MEMORY;
-+    }
-+
-+    if (!is_new)
-+    {
-+        /* Another thread already initialized this entry. */
-+        close( fd );
-+    }
-+    else
-+    {
-+        esync_register_inproc( handle, fd );  /* register with refcount cache */
-+    }
-+
-+    *obj = new_obj;
++    *obj = add_to_list( handle, type, fd, shm_idx ? get_shm( shm_idx ) : 0 );
 +    return ret;
 +}
 +
@@ -306,11 +283,9 @@ index 00000000000..15bbedaf7b5
 +
 +    if (entry < ESYNC_LIST_ENTRIES && esync_list[entry])
 +    {
-+        /* zero the type atomically — this evicts the handle from the
-+           fast-lookup list without closing the fd.  The fd lifetime
-+           is now owned by the inproc refcount cache. */
 +        if (InterlockedExchange((LONG *)&esync_list[entry][idx].type, 0))
 +        {
++            close( esync_list[entry][idx].fd );
 +            return STATUS_SUCCESS;
 +        }
 +    }
@@ -450,22 +425,63 @@ index 00000000000..15bbedaf7b5
 +    return open_esync( ESYNC_AUTO_EVENT, handle, access, attr ); /* doesn't matter which */
 +}
 +
-+static void event_lock( struct event *event )
++static inline void small_pause(void)
 +{
-+    int val;
-+    while ((val = InterlockedCompareExchange( (LONG *)&event->locked, 1, 0 )) != 0)
-+    {
-+        if (val == 1)
-+            InterlockedCompareExchange( (LONG *)&event->locked, 2, 1 );
-+        syscall( __NR_futex, &event->locked, FUTEX_WAIT, 2, NULL, NULL, 0 );
-+    }
++#ifdef __i386__
++    __asm__ __volatile__( "rep;nop" : : : "memory" );
++#else
++    __asm__ __volatile__( "" : : : "memory" );
++#endif
 +}
 +
-+static void event_unlock( struct event *event )
-+{
-+    if (InterlockedExchange( (LONG *)&event->locked, 0 ) == 2)
-+        syscall( __NR_futex, &event->locked, FUTEX_WAKE, 1, NULL, NULL, 0 );
-+}
++/* Manual-reset events are actually racier than other objects in terms of shm
++ * state. With other objects, races don't matter, because we only treat the shm
++ * state as a hint that lets us skip poll()—we still have to read(). But with
++ * manual-reset events we don't, which means that the shm state can be out of
++ * sync with the actual state.
++ *
++ * In general we shouldn't have to worry about races between modifying the
++ * event and waiting on it. If the state changes while we're waiting, it's
++ * equally plausible that we caught it before or after the state changed.
++ * However, we can have races between SetEvent() and ResetEvent(), so that the
++ * event has inconsistent internal state.
++ *
++ * To solve this we have to use the other field to lock the event. Currently
++ * this is implemented as a spinlock, but I'm not sure if a futex might be
++ * better. I'm also not sure if it's possible to obviate locking by arranging
++ * writes and reads in a certain way.
++ *
++ * Note that we don't have to worry about locking in esync_wait_objects().
++ * There's only two general patterns:
++ *
++ * WaitFor()    SetEvent()
++ * -------------------------
++ * read()
++ * signaled = 0
++ *              signaled = 1
++ *              write()
++ * -------------------------
++ * read()
++ *              signaled = 1
++ * signaled = 0
++ *              <no write(), because it was already signaled>
++ * -------------------------
++ *
++ * That is, if SetEvent() tries to signal the event before WaitFor() resets its
++ * signaled state, it won't bother trying to write(), and then the signaled
++ * state will be reset, so the result is a consistent non-signaled event.
++ * There's several variations to this pattern but all of them are protected in
++ * the same way. Note however this is why we have to use interlocked_xchg()
++ * event inside of the lock.
++ */
++
++/* Removing this spinlock is harder than it looks. esync_wait_objects() can
++ * deal with inconsistent state well enough, and a race between SetEvent() and
++ * ResetEvent() gives us license to yield either result as long as we act
++ * consistently, but that's not enough. Notably, esync_wait_objects() should
++ * probably act like a fence, so that the second half of esync_set_event() does
++ * not seep past a subsequent reset. That's one problem, but no guarantee there
++ * aren't others. */
 +
 +NTSTATUS esync_set_event( HANDLE handle )
 +{
@@ -485,7 +501,8 @@ index 00000000000..15bbedaf7b5
 +    if (obj->type == ESYNC_MANUAL_EVENT)
 +    {
 +        /* Acquire the spinlock. */
-+        event_lock( event );
++        while (InterlockedCompareExchange( (LONG *)&event->locked, 1, 0 ))
++            small_pause();
 +    }
 +
 +    /* For manual-reset events, as long as we're in a lock, we can take the
@@ -506,7 +523,7 @@ index 00000000000..15bbedaf7b5
 +    if (obj->type == ESYNC_MANUAL_EVENT)
 +    {
 +        /* Release the spinlock. */
-+        event_unlock( event );
++        __atomic_store_n( &event->locked, 0, __ATOMIC_RELEASE );
 +    }
 +
 +    return STATUS_SUCCESS;
@@ -530,7 +547,8 @@ index 00000000000..15bbedaf7b5
 +    if (obj->type == ESYNC_MANUAL_EVENT)
 +    {
 +        /* Acquire the spinlock. */
-+        event_lock( event );
++        while (InterlockedCompareExchange( (LONG *)&event->locked, 1, 0 ))
++            small_pause();
 +    }
 +
 +    /* For manual-reset events, as long as we're in a lock, we can take the
@@ -549,7 +567,8 @@ index 00000000000..15bbedaf7b5
 +
 +    if (obj->type == ESYNC_MANUAL_EVENT)
 +    {
-+        event_unlock( event );
++        /* Release the spinlock. */
++        event->locked = 0;
 +    }
 +
 +    return STATUS_SUCCESS;
@@ -762,8 +781,6 @@ index 00000000000..15bbedaf7b5
 +{
 +    static const LARGE_INTEGER zero;
 +
-+    struct inproc_sync *inproc_refs[MAXIMUM_WAIT_OBJECTS];
-+    memset( inproc_refs, 0, sizeof(inproc_refs) );
 +    struct esync *objs[MAXIMUM_WAIT_OBJECTS];
 +    struct pollfd fds[MAXIMUM_WAIT_OBJECTS + 1];
 +    int has_esync = 0, has_server = 0;
@@ -816,32 +833,13 @@ index 00000000000..15bbedaf7b5
 +        else if (ret == STATUS_NOT_IMPLEMENTED)
 +            has_server = 1;
 +        else
-+            goto cleanup;
-+    }
-+
-+    for (i = 0; i < count; i++)
-+    {
-+        if (objs[i])
-+        {
-+            /* grab a refcount so the fd stays alive for the duration of the wait */
-+            inproc_refs[i] = get_cached_inproc_sync( handles[i] );
-+
-+            /* if the handle was already closed and the refcount hit zero,
-+               get_cached_inproc_sync returns NULL — treat as invalid handle */
-+            if (!inproc_refs[i])
-+            {
-+                while (i--) if (inproc_refs[i]) release_inproc_sync( inproc_refs[i] );
-+                return STATUS_INVALID_HANDLE;
-+            }
-+        }
++            return ret;
 +    }
 +
 +    if (has_esync && has_server)
 +        FIXME("Can't wait on esync and server objects at the same time!\n");
-+    else if (has_server) {
-+        ret = STATUS_NOT_IMPLEMENTED;
-+        goto cleanup;
-+    }
++    else if (has_server)
++        return STATUS_NOT_IMPLEMENTED;
 +
 +    if (TRACE_ON(esync))
 +    {
@@ -881,8 +879,7 @@ index 00000000000..15bbedaf7b5
 +                    {
 +                        TRACE("Woken up by handle %p [%d].\n", handles[i], i);
 +                        mutex->count++;
-+                        ret = i;
-+                        goto cleanup;
++                        return i;
 +                    }
 +                    else if (!mutex->count)
 +                    {
@@ -897,8 +894,7 @@ index 00000000000..15bbedaf7b5
 +                                TRACE("Woken up by handle %p [%d].\n", handles[i], i);
 +                            mutex->tid = GetCurrentThreadId();
 +                            mutex->count++;
-+                            ret = i;
-+                            goto cleanup;
++                            return i;
 +                        }
 +                    }
 +                    break;
@@ -913,8 +909,7 @@ index 00000000000..15bbedaf7b5
 +                        {
 +                            TRACE("Woken up by handle %p [%d].\n", handles[i], i);
 +                            InterlockedDecrement( (LONG *)&semaphore->count );
-+                            ret = i;
-+                            goto cleanup;
++                            return i;
 +                        }
 +                    }
 +                    break;
@@ -932,8 +927,7 @@ index 00000000000..15bbedaf7b5
 +                        {
 +                            TRACE("Woken up by handle %p [%d].\n", handles[i], i);
 +                            event->signaled = 0;
-+                            ret = i;
-+                            goto cleanup;
++                            return i;
 +                        }
 +                    }
 +                    break;
@@ -952,8 +946,7 @@ index 00000000000..15bbedaf7b5
 +                                break;
 +                        }
 +                        TRACE("Woken up by handle %p [%d].\n", handles[i], i);
-+                        ret = i;
-+                        goto cleanup;
++                        return i;
 +                    }
 +                    break;
 +                }
@@ -973,8 +966,7 @@ index 00000000000..15bbedaf7b5
 +        {
 +            if (has_esync)
 +                FIXME("Can't wait on esync and server objects at the same time! Falling back to server.\n");
-+            ret = STATUS_NOT_IMPLEMENTED;
-+            goto cleanup;
++            return STATUS_NOT_IMPLEMENTED;
 +        }
 +
 +        if (alertable)
@@ -1009,8 +1001,7 @@ index 00000000000..15bbedaf7b5
 +                    if (fds[i].revents & (POLLERR | POLLHUP | POLLNVAL))
 +                    {
 +                        ERR("Wait-any polling on fd %d returned %#x.\n", fds[i].fd, fds[i].revents);
-+                        ret = STATUS_INVALID_HANDLE;
-+                        goto cleanup;
++                        return STATUS_INVALID_HANDLE;
 +                    }
 +
 +                    if (obj)
@@ -1023,8 +1014,7 @@ index 00000000000..15bbedaf7b5
 +                            if (fds[i].revents & POLLIN)
 +                            {
 +                                TRACE("Woken up by handle %p [%d].\n", handles[i], i);
-+                                ret = i;
-+                                goto cleanup;
++                                return i;
 +                            }
 +                        }
 +                        else
@@ -1033,12 +1023,9 @@ index 00000000000..15bbedaf7b5
 +                            {
 +                                /* We found our object. */
 +                                TRACE("Woken up by handle %p [%d].\n", handles[i], i);
-+                                if (update_grabbed_object( obj )) {
-+                                    ret = STATUS_ABANDONED_WAIT_0 + i;
-+                                    goto cleanup;
-+                                }
-+                                ret = i;
-+                                goto cleanup;
++                                if (update_grabbed_object( obj ))
++                                    return STATUS_ABANDONED_WAIT_0 + i;
++                                return i;
 +                            }
 +                        }
 +                    }
@@ -1112,8 +1099,7 @@ index 00000000000..15bbedaf7b5
 +                if (fds[0].revents & (POLLHUP | POLLERR | POLLNVAL))
 +                {
 +                    ERR("Wait-all polling on fd %d returned %#x.\n", fds[0].fd, fds[0].revents);
-+                    ret = STATUS_INVALID_HANDLE;
-+                    goto cleanup;
++                    return STATUS_INVALID_HANDLE;
 +                }
 +            }
 +
@@ -1168,8 +1154,7 @@ index 00000000000..15bbedaf7b5
 +                                if (write( fds[j].fd, &value, sizeof(value) ) == -1)
 +                                {
 +                                    ERR("write failed.\n");
-+                                    ret = errno_to_status( errno );
-+                                    goto cleanup;
++                                    return errno_to_status( errno );
 +                                }
 +                            }
 +
@@ -1192,12 +1177,10 @@ index 00000000000..15bbedaf7b5
 +                if (abandoned)
 +                {
 +                    TRACE("Wait successful, but some object(s) were abandoned.\n");
-+                    ret = STATUS_ABANDONED;
-+                    goto cleanup;
++                    return STATUS_ABANDONED;
 +                }
 +                TRACE("Wait successful.\n");
-+                ret = STATUS_SUCCESS;
-+                goto cleanup;
++                return STATUS_SUCCESS;
 +            }
 +
 +            /* If we got here, ppoll() returned less than all of our objects.
@@ -1211,14 +1194,12 @@ index 00000000000..15bbedaf7b5
 +    if (ret == 0)
 +    {
 +        TRACE("Wait timed out.\n");
-+        ret = STATUS_TIMEOUT;
-+        goto cleanup;
++        return STATUS_TIMEOUT;
 +    }
 +    else
 +    {
 +        ERR("ppoll failed: %s\n", strerror(errno));
-+        ret = errno_to_status( errno );
-+        goto cleanup;
++        return errno_to_status( errno );
 +    }
 +
 +userapc:
@@ -1232,10 +1213,6 @@ index 00000000000..15bbedaf7b5
 +     * before we got SIGUSR1. poll() doesn't return EINTR in that case. The
 +     * right thing to do seems to be to return STATUS_USER_APC anyway. */
 +    if (ret == STATUS_TIMEOUT) ret = STATUS_USER_APC;
-+
-+cleanup:
-+    for (i = 0; i < count; i++)
-+        if (inproc_refs[i]) release_inproc_sync( inproc_refs[i] );
 +    return ret;
 +}
 +
