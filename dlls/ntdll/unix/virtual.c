@@ -2043,9 +2043,64 @@ static NTSTATUS get_vprot_flags( DWORD protect, unsigned int *vprot, BOOL image 
 
 
 /***********************************************************************
+ *           try_rebake_anonymous_exec
+ *
+ * Strict-W^X kernels (notably Android / arm64 Bionic) reject
+ * mprotect(PROT_EXEC) on a file-backed MAP_PRIVATE region that was
+ * ever writable, even if the range is now read-only. Wine's PE loader
+ * hits this constantly when flipping freshly-relocated text sections
+ * from RW to RX. Replace the affected range with an anonymous private
+ * mapping holding identical contents -- anonymous mappings are not
+ * subject to the W^X restriction -- then apply the requested
+ * protection.
+ *
+ * Returns 0 on success with the range now anonymously mapped at
+ * `unix_prot`. Returns -1 (without touching the original mapping
+ * beyond a possible PROT_READ downgrade) on any failure, in which
+ * case the caller should treat it as the original mprotect failure.
+ */
+static int try_rebake_anonymous_exec( void *base, size_t size, int unix_prot )
+{
+    void *stage;
+
+    /* PROT_READ alone never trips W^X and lets us memcpy the source
+     * contents out before we replace the mapping. */
+    if (mprotect( base, size, PROT_READ ) != 0) return -1;
+
+    if ((stage = anon_mmap_alloc( size, PROT_READ | PROT_WRITE )) == MAP_FAILED)
+        return -1;
+    memcpy( stage, base, size );
+
+    /* MAP_FIXED + MAP_ANONYMOUS replaces whatever VMA(s) cover
+     * [base, base+size) with a fresh anonymous private mapping.
+     * Surrounding portions of any larger original VMA stay intact via
+     * the kernel's automatic VMA splits. */
+    if (anon_mmap_fixed( base, size, PROT_READ | PROT_WRITE, 0 ) != base)
+    {
+        munmap( stage, size );
+        return -1;
+    }
+
+    memcpy( base, stage, size );
+    munmap( stage, size );
+
+    if (mprotect( base, size, unix_prot ) != 0) return -1;
+
+#ifdef __aarch64__
+    if (unix_prot & PROT_EXEC)
+        __builtin___clear_cache( (char *)base, (char *)base + size );
+#endif
+    return 0;
+}
+
+
+/***********************************************************************
  *           mprotect_exec
  *
- * Wrapper for mprotect, adds PROT_EXEC if forced by force_exec_prot
+ * Wrapper for mprotect, adds PROT_EXEC if forced by force_exec_prot.
+ * On strict-W^X kernels, falls back to converting the range to an
+ * anonymous private mapping when a genuine PROT_EXEC request is
+ * rejected on a file-backed VMA.
  */
 static inline int mprotect_exec( void *base, size_t size, int unix_prot )
 {
@@ -2057,7 +2112,15 @@ static inline int mprotect_exec( void *base, size_t size, int unix_prot )
         if (!(unix_prot & PROT_WRITE)) return -1;
     }
 
-    return mprotect( base, size, unix_prot );
+    if (!mprotect( base, size, unix_prot )) return 0;
+
+    /* Genuine PROT_EXEC on a file-backed mapping the kernel won't let us
+     * mark executable -- rebake the range as anonymous and retry. */
+    if ((unix_prot & PROT_EXEC) &&
+        try_rebake_anonymous_exec( base, size, unix_prot ) == 0)
+        return 0;
+
+    return -1;
 }
 
 
