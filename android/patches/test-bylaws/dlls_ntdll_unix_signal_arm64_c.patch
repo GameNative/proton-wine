@@ -1,5 +1,5 @@
 diff --git a/dlls/ntdll/unix/signal_arm64.c b/dlls/ntdll/unix/signal_arm64.c
-index dc8a252..c31892e 100644
+index dc8a252..ed87cdf 100644
 --- a/dlls/ntdll/unix/signal_arm64.c
 +++ b/dlls/ntdll/unix/signal_arm64.c
 @@ -84,10 +84,20 @@ WINE_DEFAULT_DEBUG_CHANNEL(seh);
@@ -76,7 +76,31 @@ index dc8a252..c31892e 100644
          frame->restore_flags |= CONTEXT_INTEGER;
  
      if (is_arm64ec() && !is_ec_code( frame->pc ))
-@@ -955,7 +986,7 @@ __ASM_GLOBAL_FUNC( user_mode_callback_return,
+@@ -440,12 +471,20 @@ NTSTATUS WINAPI NtGetContextThread( HANDLE handle, CONTEXT *context )
+ {
+     struct syscall_frame *frame = arm64_thread_data()->syscall_frame;
+     DWORD needed_flags = context->ContextFlags & ~CONTEXT_ARM64;
+-    BOOL self = (handle == GetCurrentThread());
++    THREAD_BASIC_INFORMATION info;
++    NTSTATUS ret;
++    BOOL self;
++
++    NtQueryInformationThread( handle, ThreadBasicInformation, &info, sizeof(info), NULL );
++    self = HandleToULong( info.ClientId.UniqueThread ) == GetCurrentThreadId();
+ 
+     if (!self)
+     {
+-        NTSTATUS ret = get_thread_context( handle, context, &self, IMAGE_FILE_MACHINE_ARM64 );
+-        if (ret || !self) return ret;
++        /* Avoid exposing JIT code pointers to other processes on ARM64EC */
++        if (is_arm64ec()) NtSuspendThread( handle, NULL );
++        ret = get_thread_context( handle, context, &self, IMAGE_FILE_MACHINE_ARM64 );
++        if (is_arm64ec()) NtResumeThread( handle, NULL );
++        return ret;
+     }
+ 
+     if (needed_flags & CONTEXT_INTEGER)
+@@ -955,7 +994,7 @@ __ASM_GLOBAL_FUNC( user_mode_callback_return,
   */
  extern void DECLSPEC_NORETURN user_mode_abort_thread( NTSTATUS status, struct syscall_frame *frame );
  __ASM_GLOBAL_FUNC( user_mode_abort_thread,
@@ -85,7 +109,7 @@ index dc8a252..c31892e 100644
                     "sub x29, x1, #0xc0\n\t"
                     /* switch to kernel stack */
                     "mov sp, x29\n\t"
-@@ -1020,6 +1051,8 @@ static BOOL handle_syscall_fault( ucontext_t *context, EXCEPTION_RECORD *rec )
+@@ -1020,6 +1059,8 @@ static BOOL handle_syscall_fault( ucontext_t *context, EXCEPTION_RECORD *rec )
  
      if (!is_inside_syscall( context )) return FALSE;
  
@@ -94,7 +118,7 @@ index dc8a252..c31892e 100644
      TRACE( "code=%x flags=%x addr=%p pc=%p tid=%04x\n",
             rec->ExceptionCode, rec->ExceptionFlags, rec->ExceptionAddress,
             (void *)PC_sig(context), GetCurrentThreadId() );
-@@ -1083,9 +1116,12 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
+@@ -1083,9 +1124,12 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
  {
      EXCEPTION_RECORD rec = { 0 };
      ucontext_t *context = sigcontext;
@@ -108,7 +132,22 @@ index dc8a252..c31892e 100644
      rec.ExceptionInformation[1] = (ULONG_PTR)siginfo->si_addr;
      if (!virtual_handle_fault( &rec, (void *)SP_sig(context) )) return;
      if (handle_syscall_fault( context, &rec )) return;
-@@ -1340,12 +1376,21 @@ static void usr2_handler( int signal, siginfo_t *siginfo, void *sigcontext )
+@@ -1300,6 +1344,14 @@ static void usr1_handler( int signal, siginfo_t *siginfo, void *sigcontext )
+ {
+     CONTEXT context;
+ 
++    if (is_arm64ec_suspend_doorbell_valid() &&
++        (NtCurrentTeb()->ChpeV2CpuAreaInfo->InSimulation || NtCurrentTeb()->ChpeV2CpuAreaInfo->InSyscallCallback))
++    {
++        *NtCurrentTeb()->ChpeV2CpuAreaInfo->SuspendDoorbell = 1;
++        arm64_thread_data()->suspend_pending = TRUE;
++        return;
++    }
++
+     if (is_inside_syscall( sigcontext ))
+     {
+         context.ContextFlags = CONTEXT_FULL | CONTEXT_EXCEPTION_REQUEST;
+@@ -1340,12 +1392,21 @@ static void usr2_handler( int signal, siginfo_t *siginfo, void *sigcontext )
  #ifdef linux
      {
          struct fpsimd_context *fp = get_fpsimd_context( sigcontext );
@@ -130,3 +169,11 @@ index dc8a252..c31892e 100644
      }
  #elif defined(__APPLE__)
      context->uc_mcontext->__ns.__fpcr = frame->fpcr;
+@@ -1460,6 +1521,7 @@ void call_init_thunk( LPTHREAD_START_ROUTINE entry, void *arg, BOOL suspend, TEB
+     ARM_CONTEXT *arm_context;
+ 
+     thread_data->syscall_table = KeServiceDescriptorTable;
++    thread_data->suspend_pending = FALSE;
+ 
+     context.X0  = (DWORD64)entry;
+     context.X1  = (DWORD64)arg;

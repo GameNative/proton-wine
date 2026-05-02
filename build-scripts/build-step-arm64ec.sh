@@ -216,6 +216,8 @@ do
       "arm64ec/dlls_ntdll_loader_c.patch"
       "arm64ec/dlls_ntdll_unix_loader_c.patch"
       "arm64ec/loader_wine_inf_in.patch"
+      "test-bylaws/programs_services_services_c.patch"
+      "test-bylaws/dlls_winecrt0_arm64ec_c.patch"
 
       # fix build
       "arm64ec/dlls_wdscore_wdscore_spec.patch"
@@ -249,6 +251,7 @@ do
       "test-bylaws/server_process_c.patch"
       "test-bylaws/server_thread_h.patch"
       "test-bylaws/server_thread_c.patch"
+      "test-bylaws/server_mapping_c.patch"
 
       # 5. Internal Headers
       "test-bylaws/include_winternl_h.patch"

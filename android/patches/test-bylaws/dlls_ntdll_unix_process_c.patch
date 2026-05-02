@@ -1,5 +1,5 @@
 diff --git a/dlls/ntdll/unix/process.c b/dlls/ntdll/unix/process.c
-index 01286e1..e2ecb7b 100644
+index 01286e1..32f307c 100644
 --- a/dlls/ntdll/unix/process.c
 +++ b/dlls/ntdll/unix/process.c
 @@ -46,6 +46,9 @@
@@ -63,13 +63,13 @@ index 01286e1..e2ecb7b 100644
          SERVER_END_REQ;
          break;
  
-+        case ProcessFexHardwareTso:
-+            if (size != sizeof(BOOL)) return STATUS_INFO_LENGTH_MISMATCH;
-+            return set_hardware_tso( *(BOOL *)info ) ? STATUS_SUCCESS : STATUS_NOT_SUPPORTED;
++    case ProcessFexHardwareTso:
++        if (size != sizeof(BOOL)) return STATUS_INFO_LENGTH_MISMATCH;
++        return set_hardware_tso( *(BOOL *)info ) ? STATUS_SUCCESS : STATUS_NOT_SUPPORTED;
 +
-+        case ProcessFexUnalignAtomic:
-+            if (size != sizeof(ULONG64)) return STATUS_INFO_LENGTH_MISMATCH;
-+            return set_unalign_atomic_mode( *(ULONG64 *)info ) ? STATUS_SUCCESS : STATUS_NOT_SUPPORTED;
++    case ProcessFexUnalignAtomic:
++        if (size != sizeof(ULONG64)) return STATUS_INFO_LENGTH_MISMATCH;
++        return set_unalign_atomic_mode( *(ULONG64 *)info ) ? STATUS_SUCCESS : STATUS_NOT_SUPPORTED;
 +
      case ProcessPowerThrottlingState:
          FIXME( "ProcessPowerThrottlingState - stub\n" );

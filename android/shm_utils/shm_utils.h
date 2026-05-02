@@ -30,6 +30,7 @@
 static inline int shm_open(const char *name, int oflag, mode_t mode) {
     char *tmpdir;
     char *fname;
+    int fd;
 
     tmpdir = getenv("TMPDIR");
 
@@ -38,12 +39,15 @@ static inline int shm_open(const char *name, int oflag, mode_t mode) {
     }
 
     asprintf(&fname, "%s/%s", tmpdir, name);
-    return open(fname, oflag, mode);
+    fd = open(fname, oflag, mode);
+    free(fname);
+    return fd;
 }
 
 static inline int shm_unlink(const char *name) {
     char *tmpdir;
     char *fname;
+    int ret;
 
     tmpdir = getenv("TMPDIR");
 
@@ -52,7 +56,9 @@ static inline int shm_unlink(const char *name) {
     }
 
     asprintf(&fname, "%s/%s", tmpdir, name);
-    return unlink(fname);
+    ret = unlink(fname);
+    free(fname);
+    return ret;
 }
 
 #endif /* __ANDROID__ */

@@ -1,0 +1,14 @@
+diff --git a/programs/services/services.c b/programs/services/services.c
+index 7cc45eb..b76e8de 100644
+--- a/programs/services/services.c
++++ b/programs/services/services.c
+@@ -1041,6 +1041,9 @@ found:
+             L"WINEBUSCONFIG",
+             L"PROTON_DISABLE_HIDRAW",
+             L"PROTON_ENABLE_HIDRAW",
++            L"FEX_APP_DATA_LOCATION",
++            L"FEX_APP_CONFIG_LOCATION",
++            L"FEX_APP_CONFIG",
+         };
+         WCHAR buffer[1024];
+ 
