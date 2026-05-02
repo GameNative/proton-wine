@@ -1,5 +1,5 @@
 diff --git a/dlls/wow64/process.c b/dlls/wow64/process.c
-index 269843a..85a5006 100644
+index 269843a..8968bcc 100644
 --- a/dlls/wow64/process.c
 +++ b/dlls/wow64/process.c
 @@ -1092,7 +1092,7 @@ NTSTATUS WINAPI wow64_NtSuspendThread( UINT *args )
@@ -11,16 +11,3 @@ index 269843a..85a5006 100644
  }
  
  
-@@ -1146,3 +1146,12 @@ NTSTATUS WINAPI wow64_NtWow64QueryInformationProcess64( UINT *args )
-         return STATUS_NOT_IMPLEMENTED;
-     }
- }
-+
-+
-+/**********************************************************************
-+ *           Wow64SuspendLocalThread  (wow64.@)
-+ */
-+NTSTATUS WINAPI Wow64SuspendLocalThread( HANDLE thread, ULONG *count )
-+{
-+    return NtSuspendThread( thread, count );
-+}

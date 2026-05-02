@@ -1,5 +1,5 @@
 diff --git a/dlls/ntdll/signal_arm64ec.c b/dlls/ntdll/signal_arm64ec.c
-index 061c9a66680..10cc7c4793f 100644
+index 061c9a6..9fe3250 100644
 --- a/dlls/ntdll/signal_arm64ec.c
 +++ b/dlls/ntdll/signal_arm64ec.c
 @@ -36,6 +36,11 @@
@@ -14,7 +14,15 @@ index 061c9a66680..10cc7c4793f 100644
  WINE_DEFAULT_DEBUG_CHANNEL(seh);
  WINE_DECLARE_DEBUG_CHANNEL(relay);
  
-@@ -1240,7 +1245,11 @@ NTSTATUS call_seh_handlers( EXCEPTION_RECORD *rec, CONTEXT *orig_context )
+@@ -85,6 +90,7 @@ static inline BOOL enter_syscall_callback(void)
+ static inline void leave_syscall_callback(void)
+ {
+     get_arm64ec_cpu_area()->InSyscallCallback = 0;
++    if (get_arm64ec_cpu_area()->SuspendDoorbell && *get_arm64ec_cpu_area()->SuspendDoorbell) arm64ec_suspend_point();
+ }
+ 
+ /**********************************************************************
+@@ -1240,7 +1246,11 @@ NTSTATUS call_seh_handlers( EXCEPTION_RECORD *rec, CONTEXT *orig_context )
   */
  void dispatch_emulation( ARM64_NT_CONTEXT *arm_ctx )
  {
@@ -27,7 +35,7 @@ index 061c9a66680..10cc7c4793f 100644
      get_arm64ec_cpu_area()->InSimulation = 1;
      pBeginSimulation();
  }
-@@ -1270,11 +1279,13 @@ static void dispatch_syscall( ARM64_NT_CONTEXT *context )
+@@ -1270,11 +1280,13 @@ static void dispatch_syscall( ARM64_NT_CONTEXT *context )
  }
  
  
@@ -44,7 +52,7 @@ index 061c9a66680..10cc7c4793f 100644
      /* call x64 dispatcher if the thunk or the function pointer was modified */
      if (pWow64PrepareForException || memcmp( KiUserExceptionDispatcher_thunk, KiUserExceptionDispatcher_orig,
                                               sizeof(KiUserExceptionDispatcher_orig) ))
-@@ -1289,12 +1300,13 @@ void __attribute__((naked)) KiUserExceptionDispatcher( EXCEPTION_RECORD *rec, CO
+@@ -1289,12 +1301,13 @@ void __attribute__((naked)) KiUserExceptionDispatcher( EXCEPTION_RECORD *rec, CO
  {
      asm( ".seh_proc \"#KiUserExceptionDispatcher\"\n\t"
           ".seh_context\n\t"
@@ -62,7 +70,7 @@ index 061c9a66680..10cc7c4793f 100644
           "bl \"#prepare_exception_arm64ec\"\n\t"
           "cbz x0, 1f\n\t"
           /* bypass exit thunk to avoid messing up the stack */
-@@ -1302,8 +1314,9 @@ void __attribute__((naked)) KiUserExceptionDispatcher( EXCEPTION_RECORD *rec, CO
+@@ -1302,8 +1315,9 @@ void __attribute__((naked)) KiUserExceptionDispatcher( EXCEPTION_RECORD *rec, CO
           "ldr x16, [x16, #:lo12:__os_arm64x_dispatch_call_no_redirect]\n\t"
           "mov x9, x0\n\t"
           "blr x16\n"
@@ -74,7 +82,7 @@ index 061c9a66680..10cc7c4793f 100644
           "bl #dispatch_exception\n\t"
           "brk #1\n\t"
           ".seh_endproc" );
-@@ -1317,11 +1330,12 @@ static void __attribute__((used)) dispatch_apc( void (CALLBACK *func)(ULONG_PTR,
+@@ -1317,11 +1331,12 @@ static void __attribute__((used)) dispatch_apc( void (CALLBACK *func)(ULONG_PTR,
                                                  ULONG_PTR arg1, ULONG_PTR arg2, ULONG_PTR arg3,
                                                  BOOLEAN alertable, ARM64_NT_CONTEXT *arm_ctx )
  {
@@ -92,7 +100,7 @@ index 061c9a66680..10cc7c4793f 100644
  }
  __ASM_GLOBAL_FUNC( "#KiUserApcDispatcher",
                     ".seh_context\n\t"
-@@ -1593,7 +1607,7 @@ void CDECL RtlRestoreContext( CONTEXT *context, EXCEPTION_RECORD *rec )
+@@ -1593,7 +1608,7 @@ void CDECL RtlRestoreContext( CONTEXT *context, EXCEPTION_RECORD *rec )
      }
  
      /* hack: remove no longer accessible TEB frames */
@@ -101,7 +109,7 @@ index 061c9a66680..10cc7c4793f 100644
      {
          TRACE( "removing TEB frame: %p\n", teb_frame );
          teb_frame = __wine_pop_frame( teb_frame );
-@@ -1788,6 +1802,14 @@ BOOLEAN WINAPI RtlIsProcessorFeaturePresent( UINT feature )
+@@ -1788,6 +1803,14 @@ BOOLEAN WINAPI RtlIsProcessorFeaturePresent( UINT feature )
      return emulated_processor_features[feature];
  }
  
@@ -116,7 +124,7 @@ index 061c9a66680..10cc7c4793f 100644
  
  /*************************************************************************
   *		RtlWalkFrameChain (NTDLL.@)
-@@ -2069,7 +2091,9 @@ void __attribute__((naked)) RtlUserThreadStart( PRTL_THREAD_START_ROUTINE entry,
+@@ -2069,7 +2092,9 @@ void __attribute__((naked)) RtlUserThreadStart( PRTL_THREAD_START_ROUTINE entry,
   */
  void WINAPI LdrInitializeThunk( CONTEXT *arm_context, ULONG_PTR unk2, ULONG_PTR unk3, ULONG_PTR unk4 )
  {
@@ -127,7 +135,7 @@ index 061c9a66680..10cc7c4793f 100644
  
      if (!__os_arm64x_check_call)
      {
-@@ -2080,10 +2104,10 @@ void WINAPI LdrInitializeThunk( CONTEXT *arm_context, ULONG_PTR unk2, ULONG_PTR
+@@ -2080,10 +2105,10 @@ void WINAPI LdrInitializeThunk( CONTEXT *arm_context, ULONG_PTR unk2, ULONG_PTR 
          __os_arm64x_set_x64_information = LdrpSetX64Information;
      }
  

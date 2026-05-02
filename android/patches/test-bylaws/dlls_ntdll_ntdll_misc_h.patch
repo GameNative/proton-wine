@@ -1,5 +1,5 @@
 diff --git a/dlls/ntdll/ntdll_misc.h b/dlls/ntdll/ntdll_misc.h
-index 4c62304..c4a7a9d 100644
+index 4c62304..fb47856 100644
 --- a/dlls/ntdll/ntdll_misc.h
 +++ b/dlls/ntdll/ntdll_misc.h
 @@ -82,6 +82,7 @@ extern void WINAPI KiUserApcDispatcher(CONTEXT*,ULONG_PTR,ULONG_PTR,ULONG_PTR,PN
@@ -10,3 +10,11 @@ index 4c62304..c4a7a9d 100644
  
  /* debug helpers */
  extern LPCSTR debugstr_us( const UNICODE_STRING *str );
+@@ -183,6 +184,7 @@ extern IMAGE_ARM64EC_METADATA *arm64ec_get_module_metadata( HMODULE module );
+ extern void arm64ec_update_hybrid_metadata( void *module, IMAGE_NT_HEADERS *nt,
+                                             const IMAGE_ARM64EC_METADATA *metadata );
+ extern void invoke_arm64ec_syscall(void);
++extern void arm64ec_suspend_point(void);
+ 
+ extern void *__os_arm64x_check_call;
+ extern void *__os_arm64x_check_icall;

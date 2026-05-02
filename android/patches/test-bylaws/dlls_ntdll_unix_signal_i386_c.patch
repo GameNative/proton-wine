@@ -1,0 +1,13 @@
+diff --git a/dlls/ntdll/unix/signal_i386.c b/dlls/ntdll/unix/signal_i386.c
+index 817a839..ccc6a35 100644
+--- a/dlls/ntdll/unix/signal_i386.c
++++ b/dlls/ntdll/unix/signal_i386.c
+@@ -1881,6 +1881,8 @@ static BOOL handle_syscall_fault( ucontext_t *sigcontext, void *stack_ptr,
+ 
+     if (!is_inside_syscall( sigcontext )) return FALSE;
+ 
++    __wine_dbg_notify_syscall_fault();
++
+     TRACE( "code=%lx flags=%lx addr=%p ip=%08lx\n",
+            rec->ExceptionCode, rec->ExceptionFlags, rec->ExceptionAddress, context->Eip );
+     for (i = 0; i < rec->NumberParameters; i++)

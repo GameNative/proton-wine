@@ -1,5 +1,5 @@
 diff --git a/server/thread.c b/server/thread.c
-index 25b91a9..42bd48d 100644
+index 25b91a9..cdb0549 100644
 --- a/server/thread.c
 +++ b/server/thread.c
 @@ -305,6 +305,7 @@ static inline void init_thread_structure( struct thread *thread )
@@ -67,6 +67,15 @@ index 25b91a9..42bd48d 100644
  
      if (debug_level) fprintf( stderr, "%04x: *wakeup* signaled=TIMEOUT\n", thread->id );
      end_wait( thread, STATUS_TIMEOUT );
+@@ -1253,7 +1259,7 @@ static inline struct list *get_apc_queue( struct thread *thread, enum apc_type t
+ /* check if thread is currently waiting for a (system) apc */
+ static inline int is_in_apc_wait( struct thread *thread )
+ {
+-    return (thread->process->suspend || thread->suspend ||
++    return (get_effective_proc_suspend( thread ) || thread->suspend ||
+             (thread->wait && (thread->wait->flags & SELECT_INTERRUPTIBLE)));
+ }
+ 
 @@ -1549,6 +1555,7 @@ DECL_HANDLER(new_thread)
          thread->system_regs = current->system_regs;
          if (req->flags & THREAD_CREATE_FLAGS_CREATE_SUSPENDED) thread->suspend++;

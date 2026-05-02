@@ -1,0 +1,10 @@
+diff --git a/dlls/ntdll/unix/debug.c b/dlls/ntdll/unix/debug.c
+index 2ac1c54..7b0f6d9 100644
+--- a/dlls/ntdll/unix/debug.c
++++ b/dlls/ntdll/unix/debug.c
+@@ -457,3 +457,5 @@ NTSTATUS WINAPI NtSetDebugFilterState( ULONG component_id, ULONG level, BOOLEAN 
+ 
+     return STATUS_SUCCESS;
+ }
++
++void DECLSPEC_NOINLINE __wine_dbg_notify_syscall_fault(void) {}

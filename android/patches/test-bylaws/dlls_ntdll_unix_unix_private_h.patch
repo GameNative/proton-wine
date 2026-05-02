@@ -1,0 +1,11 @@
+diff --git a/dlls/ntdll/unix/unix_private.h b/dlls/ntdll/unix/unix_private.h
+index ad73f83..301718d 100644
+--- a/dlls/ntdll/unix/unix_private.h
++++ b/dlls/ntdll/unix/unix_private.h
+@@ -606,4 +606,6 @@ static inline NTSTATUS map_section( HANDLE mapping, void **ptr, SIZE_T *size, UL
+                                0, NULL, size, ViewShare, 0, protect );
+ }
+ 
++void DECLSPEC_NOINLINE __wine_dbg_notify_syscall_fault(void);
++
+ #endif /* __NTDLL_UNIX_PRIVATE_H */

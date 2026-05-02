@@ -1,0 +1,132 @@
+diff --git a/dlls/ntdll/unix/signal_arm64.c b/dlls/ntdll/unix/signal_arm64.c
+index dc8a252..c31892e 100644
+--- a/dlls/ntdll/unix/signal_arm64.c
++++ b/dlls/ntdll/unix/signal_arm64.c
+@@ -84,10 +84,20 @@ WINE_DEFAULT_DEBUG_CHANNEL(seh);
+ static struct _aarch64_ctx *get_extended_sigcontext( const ucontext_t *sigcontext, unsigned int magic )
+ {
+     struct _aarch64_ctx *ctx = (struct _aarch64_ctx *)sigcontext->uc_mcontext.__reserved;
+-    while ((char *)ctx < (char *)(&sigcontext->uc_mcontext + 1) && ctx->magic && ctx->size)
++    BOOL extra = FALSE;
++    while ((extra || (char *)ctx < (char *)(&sigcontext->uc_mcontext + 1)) && ctx->magic && ctx->size)
+     {
+         if (ctx->magic == magic) return ctx;
+-        ctx = (struct _aarch64_ctx *)((char *)ctx + ctx->size);
++
++        if (ctx->magic == EXTRA_MAGIC)
++        {
++            ctx = (struct _aarch64_ctx *)((struct extra_context *)ctx)->datap;
++            extra = TRUE;
++        }
++        else
++        {
++            ctx = (struct _aarch64_ctx *)((char *)ctx + ctx->size);
++        }
+     }
+     return NULL;
+ }
+@@ -97,6 +107,11 @@ static struct fpsimd_context *get_fpsimd_context( const ucontext_t *sigcontext )
+     return (struct fpsimd_context *)get_extended_sigcontext( sigcontext, FPSIMD_MAGIC );
+ }
+ 
++static struct sve_context *get_sve_context( const ucontext_t *sigcontext )
++{
++    return (struct sve_context *)get_extended_sigcontext( sigcontext, SVE_MAGIC );
++}
++
+ static DWORD64 get_fault_esr( ucontext_t *sigcontext )
+ {
+     struct esr_context *esr = (struct esr_context *)get_extended_sigcontext( sigcontext, ESR_MAGIC );
+@@ -189,6 +204,7 @@ struct arm64_thread_data
+ {
+     struct syscall_frame *syscall_frame; /* 02f0 frame pointer on syscall entry */
+     SYSTEM_SERVICE_TABLE *syscall_table; /* 02f8 syscall table */
++    BOOL suspend_pending;
+ };
+ 
+ C_ASSERT( sizeof(struct arm64_thread_data) <= sizeof(((struct ntdll_thread_data *)0)->cpu_data) );
+@@ -229,6 +245,10 @@ void set_process_instrumentation_callback( void *callback )
+     if (callback) FIXME( "Not supported.\n" );
+ }
+ 
++static BOOL is_arm64ec_suspend_doorbell_valid(void)
++{
++    return is_arm64ec() && NtCurrentTeb()->ChpeV2CpuAreaInfo && NtCurrentTeb()->ChpeV2CpuAreaInfo->SuspendDoorbell;
++}
+ 
+ /***********************************************************************
+  *           unwind_builtin_dll
+@@ -349,7 +369,18 @@ NTSTATUS signal_set_full_context( CONTEXT *context )
+     struct syscall_frame *frame = arm64_thread_data()->syscall_frame;
+     NTSTATUS status = NtSetContextThread( GetCurrentThread(), context );
+ 
+-    if (!status && (context->ContextFlags & CONTEXT_INTEGER) == CONTEXT_INTEGER)
++    if (is_arm64ec_suspend_doorbell_valid() && arm64_thread_data()->suspend_pending)
++    {
++        CONTEXT suspend_context;
++        *NtCurrentTeb()->ChpeV2CpuAreaInfo->SuspendDoorbell = 0;
++        arm64_thread_data()->suspend_pending = FALSE;
++        suspend_context.ContextFlags = CONTEXT_FULL | CONTEXT_EXCEPTION_REPORTING; /* TODO: check */
++        NtGetContextThread( GetCurrentThread(), &suspend_context );
++        wait_suspend( &suspend_context );
++        NtSetContextThread( GetCurrentThread(), &suspend_context );
++    }
++
++    if (!status && (context->ContextFlags & CONTEXT_INTEGER) == CONTEXT_INTEGER) /* TODO: also check with susp */
+         frame->restore_flags |= CONTEXT_INTEGER;
+ 
+     if (is_arm64ec() && !is_ec_code( frame->pc ))
+@@ -955,7 +986,7 @@ __ASM_GLOBAL_FUNC( user_mode_callback_return,
+  */
+ extern void DECLSPEC_NORETURN user_mode_abort_thread( NTSTATUS status, struct syscall_frame *frame );
+ __ASM_GLOBAL_FUNC( user_mode_abort_thread,
+-                   "ldr x1, [x1, #0x110]\n\t"    /* frame->syscall_cfa */
++                   "ldr x1, [x1, #0x118]\n\t"    /* frame->syscall_cfa */
+                    "sub x29, x1, #0xc0\n\t"
+                    /* switch to kernel stack */
+                    "mov sp, x29\n\t"
+@@ -1020,6 +1051,8 @@ static BOOL handle_syscall_fault( ucontext_t *context, EXCEPTION_RECORD *rec )
+ 
+     if (!is_inside_syscall( context )) return FALSE;
+ 
++    __wine_dbg_notify_syscall_fault();
++
+     TRACE( "code=%x flags=%x addr=%p pc=%p tid=%04x\n",
+            rec->ExceptionCode, rec->ExceptionFlags, rec->ExceptionAddress,
+            (void *)PC_sig(context), GetCurrentThreadId() );
+@@ -1083,9 +1116,12 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
+ {
+     EXCEPTION_RECORD rec = { 0 };
+     ucontext_t *context = sigcontext;
++    DWORD64 esr = get_fault_esr( context );
+ 
+     rec.NumberParameters = 2;
+-    rec.ExceptionInformation[0] = (get_fault_esr( context ) & 0x40) != 0;
++    if ((esr & 0xf0000000) == 0x80000000) rec.ExceptionInformation[0] = EXCEPTION_EXECUTE_FAULT;
++    else if (esr & 0x40) rec.ExceptionInformation[0] = EXCEPTION_WRITE_FAULT;
++    else rec.ExceptionInformation[0] = EXCEPTION_READ_FAULT;
+     rec.ExceptionInformation[1] = (ULONG_PTR)siginfo->si_addr;
+     if (!virtual_handle_fault( &rec, (void *)SP_sig(context) )) return;
+     if (handle_syscall_fault( context, &rec )) return;
+@@ -1340,12 +1376,21 @@ static void usr2_handler( int signal, siginfo_t *siginfo, void *sigcontext )
+ #ifdef linux
+     {
+         struct fpsimd_context *fp = get_fpsimd_context( sigcontext );
++        struct sve_context *sve = get_sve_context( sigcontext );
+         if (fp)
+         {
+             fp->fpcr = frame->fpcr;
+             fp->fpsr = frame->fpsr;
+             memcpy( fp->vregs, frame->v, sizeof(fp->vregs) );
+         }
++
++        if (sve)
++        {
++            /* setup FEX SVE state */
++            ULONG64 vq = sve_vq_from_vl(sve->vl);
++            *(UINT16 *)((BYTE *)sve + SVE_SIG_PREG_OFFSET(vq, 2)) = 0x155;
++            *(UINT16 *)((BYTE *)sve + SVE_SIG_PREG_OFFSET(vq, 6)) = 0xffff;
++        }
+     }
+ #elif defined(__APPLE__)
+     context->uc_mcontext->__ns.__fpcr = frame->fpcr;
