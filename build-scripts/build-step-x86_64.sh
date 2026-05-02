@@ -134,7 +134,6 @@ do
       --with-vulkan \
       --without-wayland \
       --without-xcomposite \
-      --without-xcursor \
       --without-xfixes \
       --without-xinerama \
       --without-xrandr \
