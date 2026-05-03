@@ -1,0 +1,13 @@
+diff --git a/configure.ac b/configure.ac
+index 0f66c00..e78e246 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -2395,7 +2395,7 @@ esac
+ dnl *** Check for modules to disable by default
+ 
+ enable_win16=${enable_win16:-i386}
+-enable_vcruntime140_1=${enable_vcruntime140_1:-x86_64,arm64ec}
++enable_vcruntime140_1=${enable_vcruntime140_1:-x86_64,arm64ec,aarch64}
+ 
+ if test -n "$PE_ARCHS"
+ then

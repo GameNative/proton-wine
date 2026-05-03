@@ -256,7 +256,10 @@ do
       # 5. Internal Headers
       "test-bylaws/include_winternl_h.patch"
 
-      # 6. Build System (Optional)
+      # 6. build vcruntime140_1 with aarch64
+      "test-bylaws/dlls_vcruntime140_1_vcruntime140_1_spec.patch"
+
+      # 7. Build System (Optional)
 #      "test-bylaws/tools_makedep_c.patch"
     )
 
