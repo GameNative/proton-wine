@@ -95,9 +95,13 @@ jobs:
           wget https://github.com/bylaws/llvm-mingw/releases/download/20250920/llvm-mingw-20250920-ucrt-ubuntu-22.04-x86_64.tar.xz
           tar -xf llvm-mingw-20250920-ucrt-ubuntu-22.04-x86_64.tar.xz
       
-      - name: Run autogen.sh
+      - name: Run autogen.sh for ${{ matrix.arch }}
         run: |
-          bash autogen.sh
+          if [ "${{ matrix.arch }}" == "x86_64" ]; then
+            bash autogen.sh
+          else
+            bash autogen.sh --aarch64
+          fi
       
       - name: Cache wine-tools
         id: cache-wine-tools
