@@ -169,7 +169,7 @@ jobs:
           {
             "type": "Proton",
             "versionName": "10.0-4-${ARCH_NAME}",
-            "versionCode": 1,
+            "versionCode": 2,
             "description": "Proton 10.0-4 ${ARCH_NAME} - Windows compatibility layer with improved gaming support",
             "files": [],
             "wine": {
@@ -264,18 +264,7 @@ jobs:
         id: generate_tag
         run: |
           DATE=$(date +%Y%m%d)
-          
-          # Get existing tags for today with SDK28 suffix
-          EXISTING_TAGS=$(git tag -l "build-${DATE}-*-sdk28" | sort -V | tail -1)
-          
-          if [ -z "$EXISTING_TAGS" ]; then
-            BUILD_NUMBER=1
-          else
-            # Extract build number from last tag and increment
-            BUILD_NUMBER=$(echo "$EXISTING_TAGS" | sed "s/build-${DATE}-//" | sed "s/-sdk28//" | awk '{print $1 + 1}')
-          fi
-          
-          TAG_NAME="build-${DATE}-${BUILD_NUMBER}-sdk28"
+          TAG_NAME="build-${DATE}-sdk28"
           echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
           echo "Generated tag: ${TAG_NAME}"
       
