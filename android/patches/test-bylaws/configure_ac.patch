@@ -1,5 +1,5 @@
 diff --git a/configure.ac b/configure.ac
-index 0f66c00..e78e246 100644
+index 0f66c00..556d8a8 100644
 --- a/configure.ac
 +++ b/configure.ac
 @@ -2395,7 +2395,7 @@ esac
@@ -11,3 +11,12 @@ index 0f66c00..e78e246 100644
  
  if test -n "$PE_ARCHS"
  then
+@@ -2413,7 +2413,7 @@ fi
+ dnl Explicitly enable some programs for arm64ec
+ enable_cmd=${enable_cmd:-yes}
+ enable_dllhost=${enable_dllhost:-yes}
+-enable_dpnsvr=${enable_dpnsvr:-i386,x86_64,arm64ec}
++enable_dpnsvr=${enable_dpnsvr:-i386,x86_64,arm64ec,aarch64}
+ enable_dxdiag=${enable_dxdiag:-yes}
+ enable_msiexec=${enable_msiexec:-yes}
+ enable_netsh=${enable_netsh:-yes}
