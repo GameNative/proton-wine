@@ -2587,7 +2587,8 @@ static NTSTATUS map_view( struct file_view **view_ret, void *base, size_t size,
  * virtual_mutex must be held by caller.
  */
 static NTSTATUS map_file_into_view( struct file_view *view, int fd, size_t start, size_t size,
-                                    off_t offset, unsigned int vprot, BOOL removable )
+                                    off_t offset, unsigned int vprot, BOOL removable,
+                                    BOOL force_anon )
 {
     void *ptr;
     int prot = get_unix_prot( vprot | VPROT_COMMITTED /* make sure it is accessible */ );
@@ -2601,6 +2602,18 @@ static NTSTATUS map_file_into_view( struct file_view *view, int fd, size_t start
         TRACE( "forcing exec permission on mapping %p-%p\n",
                (char *)view->base + start, (char *)view->base + start + size - 1 );
         prot |= PROT_EXEC;
+    }
+
+    /* On strict-W^X kernels (e.g. Android arm64), a file-backed MAP_PRIVATE
+     * mapping that was ever writable cannot later be flipped to PROT_EXEC,
+     * which breaks Wine's PE loader after relocations. When the caller
+     * passes force_anon=TRUE for a private mapping, skip the file mmap and
+     * load the contents into a fresh anonymous mapping instead. Anonymous
+     * mappings have no W^X restriction. Shared mappings still need a real
+     * file mmap and must always pass force_anon=FALSE. */
+    if (force_anon && (flags & MAP_PRIVATE))
+    {
+        removable = TRUE;
     }
 
     /* only try mmap if media is not removable (or if we require write access) */
@@ -2929,9 +2942,13 @@ static NTSTATUS allocate_dos_memory( struct file_view **view, unsigned int vprot
  *
  * Map the header of a PE file into memory.
  */
-static NTSTATUS map_pe_header( void *ptr, size_t size, int fd, BOOL *removable )
+static NTSTATUS map_pe_header( void *ptr, size_t size, int fd, BOOL *removable, BOOL force_anon )
 {
     if (!size) return STATUS_INVALID_IMAGE_FORMAT;
+
+    /* Force the pread fallback path when the caller wants the entire PE
+     * image to come up as anonymous memory (W^X-safe). */
+    if (force_anon) *removable = TRUE;
 
     if (!*removable)
     {
@@ -3227,7 +3244,7 @@ static IMAGE_BASE_RELOCATION *process_relocation_block( char *page, IMAGE_BASE_R
  */
 static NTSTATUS map_image_into_view( struct file_view *view, const WCHAR *filename, int fd,
                                      struct pe_image_info *image_info, USHORT machine,
-                                     int shared_fd, BOOL removable )
+                                     int shared_fd, BOOL removable, BOOL force_anon )
 {
     IMAGE_DOS_HEADER *dos;
     IMAGE_NT_HEADERS *nt;
@@ -3249,7 +3266,7 @@ static NTSTATUS map_image_into_view( struct file_view *view, const WCHAR *filena
 
     fstat( fd, &st );
     header_size = min( image_info->header_size, st.st_size );
-    if ((status = map_pe_header( view->base, header_size, fd, &removable ))) return status;
+    if ((status = map_pe_header( view->base, header_size, fd, &removable, force_anon ))) return status;
 
     status = STATUS_INVALID_IMAGE_FORMAT;  /* generic error */
     dos = (IMAGE_DOS_HEADER *)ptr;
@@ -3275,7 +3292,7 @@ static NTSTATUS map_image_into_view( struct file_view *view, const WCHAR *filena
 
         total_size = min( total_size, ROUND_SIZE( 0, st.st_size ));
         if (map_file_into_view( view, fd, 0, total_size, 0, VPROT_COMMITTED | VPROT_READ | VPROT_WRITECOPY,
-                                removable ) != STATUS_SUCCESS) return status;
+                                removable, force_anon ) != STATUS_SUCCESS) return status;
 
         /* check that all sections are loaded at the right offset */
         if (nt->OptionalHeader.FileAlignment != nt->OptionalHeader.SectionAlignment) return status;
@@ -3327,7 +3344,8 @@ static NTSTATUS map_image_into_view( struct file_view *view, const WCHAR *filena
                             (int)sec->PointerToRawData, (int)pos, file_size, map_size,
                             (int)sec->Characteristics );
             if (map_file_into_view( view, shared_fd, sec->VirtualAddress, map_size, pos,
-                                    VPROT_COMMITTED | VPROT_READ | VPROT_WRITE, FALSE ) != STATUS_SUCCESS)
+                                    VPROT_COMMITTED | VPROT_READ | VPROT_WRITE, FALSE,
+                                    FALSE /* MAP_SHARED, never anon */ ) != STATUS_SUCCESS)
             {
                 ERR_(module)( "Could not map %s shared section %.8s\n", debugstr_w(filename), sec->Name );
                 return status;
@@ -3343,7 +3361,8 @@ static NTSTATUS map_image_into_view( struct file_view *view, const WCHAR *filena
                 if (end > base)
                     map_file_into_view( view, shared_fd, base, end - base,
                                         pos + (base - sec->VirtualAddress),
-                                        VPROT_COMMITTED | VPROT_READ | VPROT_WRITECOPY, FALSE );
+                                        VPROT_COMMITTED | VPROT_READ | VPROT_WRITECOPY, FALSE,
+                                        force_anon );
             }
             pos += map_size;
             continue;
@@ -3365,7 +3384,7 @@ static NTSTATUS map_image_into_view( struct file_view *view, const WCHAR *filena
             end < file_start ||
             map_file_into_view( view, fd, sec->VirtualAddress, file_size, file_start,
                                 VPROT_COMMITTED | VPROT_READ | VPROT_WRITECOPY,
-                                removable ) != STATUS_SUCCESS)
+                                removable, force_anon ) != STATUS_SUCCESS)
         {
             ERR_(module)( "Could not map %s section %.8s, file probably truncated\n",
                           debugstr_w(filename), sec->Name );
@@ -3609,7 +3628,11 @@ static NTSTATUS virtual_map_image( HANDLE mapping, void **addr_ptr, SIZE_T *size
     status = map_image_view( &view, image_info, size, limit_low, limit_high, alloc_type );
     if (status) goto done;
 
-    status = map_image_into_view( view, filename, unix_fd, image_info, machine, shared_fd, needs_close );
+    /* Force PE images to come up as anonymous memory so later mprotect()
+     * calls that flip text sections to PROT_EXEC succeed on strict-W^X
+     * kernels (e.g. Android arm64). */
+    status = map_image_into_view( view, filename, unix_fd, image_info, machine, shared_fd,
+                                  needs_close, TRUE );
     if (status == STATUS_SUCCESS)
     {
         if (offset)
@@ -3751,7 +3774,7 @@ static unsigned int virtual_map_section( HANDLE handle, PVOID *addr_ptr, ULONG_P
     if (res) goto done;
 
     TRACE( "handle=%p size=%lx offset=%s\n", handle, size, wine_dbgstr_longlong(offset.QuadPart) );
-    res = map_file_into_view( view, unix_handle, 0, size, offset.QuadPart, vprot, needs_close );
+    res = map_file_into_view( view, unix_handle, 0, size, offset.QuadPart, vprot, needs_close, FALSE );
     if (res == STATUS_SUCCESS)
     {
         SERVER_START_REQ( map_view )
