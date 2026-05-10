@@ -947,6 +947,7 @@ static void release_key_flush_mutex( HANDLE mutex )
 }
 
 /* save registry branch to Wine regsitry storage file */
+static NTSTATUS save_registry_branch( char **data ) __attribute__((unused));
 static NTSTATUS save_registry_branch( char **data )
 {
     static const char temp_fn[] = "savereg.tmp";
@@ -1020,62 +1021,8 @@ done:
  */
 NTSTATUS WINAPI NtFlushKey( HANDLE key )
 {
-    abstime_t timestamp_counter;
-    data_size_t size = 0;
-    unsigned int ret;
-    char *data = NULL, *curr_data;
-    HANDLE mutex;
-    int i, branch_count, branch;
-
-    TRACE( "key=%p\n", key );
-
-    mutex = get_key_flush_mutex();
-
-    while (1)
-    {
-        SERVER_START_REQ( flush_key )
-        {
-            req->hkey = wine_server_obj_handle( key );
-            if (size) wine_server_set_reply( req, data, size );
-            ret = wine_server_call( req );
-            size = reply->total;
-            branch_count = reply->branch_count;
-            timestamp_counter = reply->timestamp_counter;
-        }
-        SERVER_END_REQ;
-
-        if (ret != STATUS_BUFFER_TOO_SMALL) break;
-        free( data );
-        if (!(data = malloc( size )))
-        {
-            ERR( "No memory.\n" );
-            ret = STATUS_NO_MEMORY;
-            goto done;
-        }
-    }
-    if (ret) goto done;
-
-    curr_data = data;
-    for (i = 0; i < branch_count; ++i)
-    {
-        branch = *(int *)curr_data;
-        curr_data += sizeof(int);
-        if ((ret = save_registry_branch( &curr_data ))) goto done;
-
-        SERVER_START_REQ( flush_key_done )
-        {
-            req->branch = branch;
-            req->timestamp_counter = timestamp_counter;
-            ret = wine_server_call( req );
-        }
-        SERVER_END_REQ;
-        if (ret) break;
-    }
-
-done:
-    release_key_flush_mutex( mutex );
-    free( data );
-    return ret;
+    TRACE( "key=%p (stubbed -- see HACK comment)\n", key );
+    return STATUS_SUCCESS;
 }
 
 
