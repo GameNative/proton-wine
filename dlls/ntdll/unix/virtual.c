@@ -3219,6 +3219,41 @@ static IMAGE_BASE_RELOCATION *process_relocation_block( char *page, IMAGE_BASE_R
 }
 
 
+#ifdef __ANDROID__
+/***********************************************************************
+ *           remap_exec_anon
+ *
+ * Android W^X (SELinux execmod) refuses PROT_EXEC on a *modified* private
+ * file mapping. PE sections are mapped MAP_PRIVATE file-backed and then
+ * relocated (which dirties the COW pages), so the final mprotect to RX is
+ * denied with EACCES. Anonymous memory only needs execmem, which is granted,
+ * so privatize the range into anonymous memory preserving the (already
+ * relocated) contents and set the requested protection. virtual_mutex must
+ * be held by caller.
+ */
+static BOOL remap_exec_anon( void *addr, size_t size, int unix_prot )
+{
+    void *stage;
+
+    if (mprotect( addr, size, PROT_READ )) return FALSE;  /* ensure readable */
+    stage = mmap( NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0 );
+    if (stage == MAP_FAILED) return FALSE;
+    memcpy( stage, addr, size );
+    if (mmap( addr, size, PROT_READ | PROT_WRITE,
+              MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0 ) == MAP_FAILED)
+    {
+        munmap( stage, size );
+        return FALSE;
+    }
+    memcpy( addr, stage, size );
+    munmap( stage, size );
+    if (mprotect( addr, size, unix_prot )) return FALSE;
+    if (unix_prot & PROT_EXEC) __builtin___clear_cache( (char *)addr, (char *)addr + size );
+    return TRUE;
+}
+#endif
+
+
 /***********************************************************************
  *           map_image_into_view
  *
@@ -3286,7 +3321,14 @@ static NTSTATUS map_image_into_view( struct file_view *view, const WCHAR *filena
         }
 
         /* set the image protections */
-        set_vprot( view, ptr, total_size, VPROT_COMMITTED | VPROT_READ | VPROT_WRITECOPY | VPROT_EXEC );
+        if (!set_vprot( view, ptr, total_size, VPROT_COMMITTED | VPROT_READ | VPROT_WRITECOPY | VPROT_EXEC ))
+        {
+#ifdef __ANDROID__
+            BYTE flat_vprot = VPROT_COMMITTED | VPROT_READ | VPROT_WRITECOPY | VPROT_EXEC;
+            if (remap_exec_anon( ptr, total_size, get_unix_prot( flat_vprot ) ))
+                set_page_vprot( ptr, total_size, flat_vprot );
+#endif
+        }
 
         /* no relocations are performed on non page-aligned binaries */
         return STATUS_SUCCESS;
@@ -3442,8 +3484,19 @@ static NTSTATUS map_image_into_view( struct file_view *view, const WCHAR *filena
         if (sec->Characteristics & IMAGE_SCN_MEM_EXECUTE) vprot |= VPROT_EXEC;
 
         if (!set_vprot( view, ptr + sec->VirtualAddress, size, vprot ) && (vprot & VPROT_EXEC))
+        {
+#ifdef __ANDROID__
+            /* W^X (execmod) denied RX on the relocated file-backed section;
+             * privatize it into anonymous memory and retry. */
+            if (remap_exec_anon( ptr + sec->VirtualAddress, size, get_unix_prot( vprot ) ))
+            {
+                set_page_vprot( ptr + sec->VirtualAddress, size, vprot );
+                continue;
+            }
+#endif
             ERR( "failed to set %08x protection on %s section %.8s, noexec filesystem?\n",
                  (int)sec->Characteristics, debugstr_w(filename), sec->Name );
+        }
     }
 
 #ifdef VALGRIND_LOAD_PDB_DEBUGINFO
