@@ -3324,7 +3324,8 @@ static NTSTATUS map_image_into_view( struct file_view *view, const WCHAR *filena
         /* Proactive privatization for the whole flat image (see comment on
          * the per-section path) -- detecting EACCES via set_vprot failure is
          * unreliable when an LD_PRELOAD shim strips PROT_EXEC. */
-        remap_exec_anon( ptr, total_size, PROT_READ | PROT_WRITE );
+        remap_exec_anon( ptr, total_size,
+                         get_unix_prot( VPROT_COMMITTED | VPROT_READ | VPROT_WRITECOPY | VPROT_EXEC ) );
 #endif
         /* set the image protections */
         set_vprot( view, ptr, total_size, VPROT_COMMITTED | VPROT_READ | VPROT_WRITECOPY | VPROT_EXEC );
@@ -3494,7 +3495,7 @@ static NTSTATUS map_image_into_view( struct file_view *view, const WCHAR *filena
          * to detect a failure that may have been hidden. */
         if (vprot & VPROT_EXEC)
             remap_exec_anon( ptr + sec->VirtualAddress, size,
-                             PROT_READ | PROT_WRITE );
+                             get_unix_prot( vprot ) );
 #endif
 
         if (!set_vprot( view, ptr + sec->VirtualAddress, size, vprot ) && (vprot & VPROT_EXEC))
