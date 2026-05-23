@@ -3320,15 +3320,14 @@ static NTSTATUS map_image_into_view( struct file_view *view, const WCHAR *filena
                 return status;  /* Windows refuses to load in that case too */
         }
 
-        /* set the image protections */
-        if (!set_vprot( view, ptr, total_size, VPROT_COMMITTED | VPROT_READ | VPROT_WRITECOPY | VPROT_EXEC ))
-        {
 #ifdef __ANDROID__
-            BYTE flat_vprot = VPROT_COMMITTED | VPROT_READ | VPROT_WRITECOPY | VPROT_EXEC;
-            if (remap_exec_anon( ptr, total_size, get_unix_prot( flat_vprot ) ))
-                set_page_vprot( ptr, total_size, flat_vprot );
+        /* Proactive privatization for the whole flat image (see comment on
+         * the per-section path) -- detecting EACCES via set_vprot failure is
+         * unreliable when an LD_PRELOAD shim strips PROT_EXEC. */
+        remap_exec_anon( ptr, total_size, PROT_READ | PROT_WRITE );
 #endif
-        }
+        /* set the image protections */
+        set_vprot( view, ptr, total_size, VPROT_COMMITTED | VPROT_READ | VPROT_WRITECOPY | VPROT_EXEC );
 
         /* no relocations are performed on non page-aligned binaries */
         return STATUS_SUCCESS;
@@ -3483,20 +3482,24 @@ static NTSTATUS map_image_into_view( struct file_view *view, const WCHAR *filena
         if (sec->Characteristics & IMAGE_SCN_MEM_WRITE)   vprot |= VPROT_WRITECOPY;
         if (sec->Characteristics & IMAGE_SCN_MEM_EXECUTE) vprot |= VPROT_EXEC;
 
-        if (!set_vprot( view, ptr + sec->VirtualAddress, size, vprot ) && (vprot & VPROT_EXEC))
-        {
 #ifdef __ANDROID__
-            /* W^X (execmod) denied RX on the relocated file-backed section;
-             * privatize it into anonymous memory and retry. */
-            if (remap_exec_anon( ptr + sec->VirtualAddress, size, get_unix_prot( vprot ) ))
-            {
-                set_page_vprot( ptr + sec->VirtualAddress, size, vprot );
-                continue;
-            }
+        /* Android W^X (SELinux execmod) refuses PROT_EXEC on a modified
+         * private file mapping, which is exactly what a relocated PE .text
+         * is. Detecting that via set_vprot() failure is unreliable -- LD_PRELOAD
+         * shims commonly strip PROT_EXEC and report success to keep Wine
+         * load paths working, so the kernel's EACCES never reaches us.
+         * Privatize executable sections into anonymous memory PROACTIVELY,
+         * before the final mprotect: anon memory only needs execmem, so the
+         * subsequent set_vprot() succeeds on its own merits without needing
+         * to detect a failure that may have been hidden. */
+        if (vprot & VPROT_EXEC)
+            remap_exec_anon( ptr + sec->VirtualAddress, size,
+                             PROT_READ | PROT_WRITE );
 #endif
+
+        if (!set_vprot( view, ptr + sec->VirtualAddress, size, vprot ) && (vprot & VPROT_EXEC))
             ERR( "failed to set %08x protection on %s section %.8s, noexec filesystem?\n",
                  (int)sec->Characteristics, debugstr_w(filename), sec->Name );
-        }
     }
 
 #ifdef VALGRIND_LOAD_PDB_DEBUGINFO
