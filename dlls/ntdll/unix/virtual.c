@@ -3219,7 +3219,7 @@ static IMAGE_BASE_RELOCATION *process_relocation_block( char *page, IMAGE_BASE_R
 }
 
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) && defined(__aarch64__)
 /***********************************************************************
  *           remap_exec_anon
  *
@@ -3320,12 +3320,15 @@ static NTSTATUS map_image_into_view( struct file_view *view, const WCHAR *filena
                 return status;  /* Windows refuses to load in that case too */
         }
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) && defined(__aarch64__)
         /* Proactive privatization for the whole flat image (see comment on
          * the per-section path) -- detecting EACCES via set_vprot failure is
-         * unreliable when an LD_PRELOAD shim strips PROT_EXEC. */
-        remap_exec_anon( ptr, total_size,
-                         get_unix_prot( VPROT_COMMITTED | VPROT_READ | VPROT_WRITECOPY | VPROT_EXEC ) );
+         * unreliable when an LD_PRELOAD shim strips PROT_EXEC. Gated on
+         * arm64ec: only that build executes PE bytes as native ARM hardware
+         * code, so only it needs RX on relocated file mappings. */
+        if (is_arm64ec())
+            remap_exec_anon( ptr, total_size,
+                             get_unix_prot( VPROT_COMMITTED | VPROT_READ | VPROT_WRITECOPY | VPROT_EXEC ) );
 #endif
         /* set the image protections */
         set_vprot( view, ptr, total_size, VPROT_COMMITTED | VPROT_READ | VPROT_WRITECOPY | VPROT_EXEC );
@@ -3483,7 +3486,7 @@ static NTSTATUS map_image_into_view( struct file_view *view, const WCHAR *filena
         if (sec->Characteristics & IMAGE_SCN_MEM_WRITE)   vprot |= VPROT_WRITECOPY;
         if (sec->Characteristics & IMAGE_SCN_MEM_EXECUTE) vprot |= VPROT_EXEC;
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) && defined(__aarch64__)
         /* Android W^X (SELinux execmod) refuses PROT_EXEC on a modified
          * private file mapping, which is exactly what a relocated PE .text
          * is. Detecting that via set_vprot() failure is unreliable -- LD_PRELOAD
@@ -3492,8 +3495,10 @@ static NTSTATUS map_image_into_view( struct file_view *view, const WCHAR *filena
          * Privatize executable sections into anonymous memory PROACTIVELY,
          * before the final mprotect: anon memory only needs execmem, so the
          * subsequent set_vprot() succeeds on its own merits without needing
-         * to detect a failure that may have been hidden. */
-        if (vprot & VPROT_EXEC)
+         * to detect a failure that may have been hidden. Gated on arm64ec:
+         * only that build executes PE bytes as native ARM hardware code, so
+         * only it needs RX on relocated file mappings. */
+        if ((vprot & VPROT_EXEC) && is_arm64ec())
             remap_exec_anon( ptr + sec->VirtualAddress, size,
                              get_unix_prot( vprot ) );
 #endif
