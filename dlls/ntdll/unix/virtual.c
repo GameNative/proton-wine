@@ -3219,7 +3219,7 @@ static IMAGE_BASE_RELOCATION *process_relocation_block( char *page, IMAGE_BASE_R
 }
 
 
-#if defined(__ANDROID__) && defined(__aarch64__)
+#ifdef __ANDROID__
 /***********************************************************************
  *           remap_exec_anon
  *
@@ -3320,7 +3320,7 @@ static NTSTATUS map_image_into_view( struct file_view *view, const WCHAR *filena
                 return status;  /* Windows refuses to load in that case too */
         }
 
-#if defined(__ANDROID__) && defined(__aarch64__)
+#ifdef __ANDROID__
         /* Proactive privatization for the whole flat image (see comment on
          * the per-section path) -- detecting EACCES via set_vprot failure is
          * unreliable when an LD_PRELOAD shim strips PROT_EXEC. Gated on
@@ -3486,7 +3486,7 @@ static NTSTATUS map_image_into_view( struct file_view *view, const WCHAR *filena
         if (sec->Characteristics & IMAGE_SCN_MEM_WRITE)   vprot |= VPROT_WRITECOPY;
         if (sec->Characteristics & IMAGE_SCN_MEM_EXECUTE) vprot |= VPROT_EXEC;
 
-#if defined(__ANDROID__) && defined(__aarch64__)
+#ifdef __ANDROID__
         /* Android W^X (SELinux execmod) refuses PROT_EXEC on a modified
          * private file mapping, which is exactly what a relocated PE .text
          * is. Detecting that via set_vprot() failure is unreliable -- LD_PRELOAD
