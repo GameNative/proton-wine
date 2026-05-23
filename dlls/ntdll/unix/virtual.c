@@ -3219,6 +3219,41 @@ static IMAGE_BASE_RELOCATION *process_relocation_block( char *page, IMAGE_BASE_R
 }
 
 
+#ifdef __ANDROID__
+/***********************************************************************
+ *           remap_exec_anon
+ *
+ * Android W^X (SELinux execmod) refuses PROT_EXEC on a *modified* private
+ * file mapping. PE sections are mapped MAP_PRIVATE file-backed and then
+ * relocated (which dirties the COW pages), so the final mprotect to RX is
+ * denied with EACCES. Anonymous memory only needs execmem, which is granted,
+ * so privatize the range into anonymous memory preserving the (already
+ * relocated) contents and set the requested protection. virtual_mutex must
+ * be held by caller.
+ */
+static BOOL remap_exec_anon( void *addr, size_t size, int unix_prot )
+{
+    void *stage;
+
+    if (mprotect( addr, size, PROT_READ )) return FALSE;  /* ensure readable */
+    stage = mmap( NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0 );
+    if (stage == MAP_FAILED) return FALSE;
+    memcpy( stage, addr, size );
+    if (mmap( addr, size, PROT_READ | PROT_WRITE,
+              MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0 ) == MAP_FAILED)
+    {
+        munmap( stage, size );
+        return FALSE;
+    }
+    memcpy( addr, stage, size );
+    munmap( stage, size );
+    if (mprotect( addr, size, unix_prot )) return FALSE;
+    if (unix_prot & PROT_EXEC) __builtin___clear_cache( (char *)addr, (char *)addr + size );
+    return TRUE;
+}
+#endif
+
+
 /***********************************************************************
  *           map_image_into_view
  *
@@ -3285,6 +3320,16 @@ static NTSTATUS map_image_into_view( struct file_view *view, const WCHAR *filena
                 return status;  /* Windows refuses to load in that case too */
         }
 
+#ifdef __ANDROID__
+        /* Proactive privatization for the whole flat image (see comment on
+         * the per-section path) -- detecting EACCES via set_vprot failure is
+         * unreliable when an LD_PRELOAD shim strips PROT_EXEC. Gated on
+         * arm64ec: only that build executes PE bytes as native ARM hardware
+         * code, so only it needs RX on relocated file mappings. */
+        if (is_arm64ec())
+            remap_exec_anon( ptr, total_size,
+                             get_unix_prot( VPROT_COMMITTED | VPROT_READ | VPROT_WRITECOPY | VPROT_EXEC ) );
+#endif
         /* set the image protections */
         set_vprot( view, ptr, total_size, VPROT_COMMITTED | VPROT_READ | VPROT_WRITECOPY | VPROT_EXEC );
 
@@ -3440,6 +3485,23 @@ static NTSTATUS map_image_into_view( struct file_view *view, const WCHAR *filena
         if (sec->Characteristics & IMAGE_SCN_MEM_READ)    vprot |= VPROT_READ;
         if (sec->Characteristics & IMAGE_SCN_MEM_WRITE)   vprot |= VPROT_WRITECOPY;
         if (sec->Characteristics & IMAGE_SCN_MEM_EXECUTE) vprot |= VPROT_EXEC;
+
+#ifdef __ANDROID__
+        /* Android W^X (SELinux execmod) refuses PROT_EXEC on a modified
+         * private file mapping, which is exactly what a relocated PE .text
+         * is. Detecting that via set_vprot() failure is unreliable -- LD_PRELOAD
+         * shims commonly strip PROT_EXEC and report success to keep Wine
+         * load paths working, so the kernel's EACCES never reaches us.
+         * Privatize executable sections into anonymous memory PROACTIVELY,
+         * before the final mprotect: anon memory only needs execmem, so the
+         * subsequent set_vprot() succeeds on its own merits without needing
+         * to detect a failure that may have been hidden. Gated on arm64ec:
+         * only that build executes PE bytes as native ARM hardware code, so
+         * only it needs RX on relocated file mappings. */
+        if ((vprot & VPROT_EXEC) && is_arm64ec())
+            remap_exec_anon( ptr + sec->VirtualAddress, size,
+                             get_unix_prot( vprot ) );
+#endif
 
         if (!set_vprot( view, ptr + sec->VirtualAddress, size, vprot ) && (vprot & VPROT_EXEC))
             ERR( "failed to set %08x protection on %s section %.8s, noexec filesystem?\n",
