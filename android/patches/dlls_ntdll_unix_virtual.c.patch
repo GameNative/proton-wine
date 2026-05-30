@@ -1,11 +1,11 @@
 diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
-index 6e1697720f0..c12be9ba401 100644
+index 6e1697720f0..bcd4f3a1922 100644
 --- a/dlls/ntdll/unix/virtual.c
 +++ b/dlls/ntdll/unix/virtual.c
 @@ -100,6 +100,10 @@
  #include "unix_private.h"
  #include "wine/debug.h"
-
+ 
 +#ifdef __ANDROID__
 +#include "../../android/shm_utils/shm_utils.h"
 +#endif
@@ -35,7 +35,7 @@ index 6e1697720f0..c12be9ba401 100644
  {
 +#ifndef __ANDROID__
      struct uffdio_api uffdio_api;
-
+ 
      uffd_fd = syscall( __NR_userfaultfd, O_CLOEXEC | O_NONBLOCK | UFFD_USER_MODE_ONLY );
 @@ -439,6 +450,10 @@ static void kernel_writewatch_init(void)
      }
@@ -46,5 +46,14 @@ index 6e1697720f0..c12be9ba401 100644
 +    use_kernel_writewatch = 0;
 +#endif
  }
-
+ 
  static void kernel_writewatch_reset( void *start, SIZE_T len )
+@@ -3473,7 +3488,7 @@ static NTSTATUS map_image_into_view( struct file_view *view, const UNICODE_STRIN
+ 
+     /* set the image protections */
+ 
+-    set_vprot( view, ptr, ROUND_SIZE( 0, header_size, align_mask ), VPROT_COMMITTED | VPROT_READ );
++    set_vprot( view, ptr, ROUND_SIZE( 0, header_size, align_mask ), VPROT_COMMITTED | VPROT_READ | VPROT_WRITECOPY );
+ 
+     for (i = 0; i < nt->FileHeader.NumberOfSections; i++)
+     {
