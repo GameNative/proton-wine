@@ -168,9 +168,9 @@ jobs:
           cat > $GITHUB_WORKSPACE/profile.json << EOF
           {
             "type": "Proton",
-            "versionName": "10.0-4-${ARCH_NAME}",
+            "versionName": "7.0-6-${ARCH_NAME}",
             "versionCode": 2,
-            "description": "Proton 10.0-4 ${ARCH_NAME} - Windows compatibility layer with improved gaming support",
+            "description": "Proton 7.0-6 ${ARCH_NAME} - Windows compatibility layer with improved gaming support",
             "files": [],
             "wine": {
               "binPath": "bin",
@@ -184,9 +184,9 @@ jobs:
           cat > $GITHUB_WORKSPACE/profile-wine.json << EOF
           {
             "type": "Wine",
-            "versionName": "10.0-4-${ARCH_NAME}",
+            "versionName": "7.0-6-${ARCH_NAME}",
             "versionCode": 0,
-            "description": "Proton 10.0-4 ${ARCH_NAME} - Windows compatibility layer with improved gaming support",
+            "description": "Proton 7.0-6 ${ARCH_NAME} - Windows compatibility layer with improved gaming support",
             "files": [],
             "wine": {
               "binPath": "bin",
@@ -211,13 +211,13 @@ jobs:
           # Create Proton WCP - txz format
           cp $GITHUB_WORKSPACE/prefixPack.txz .
           cp $GITHUB_WORKSPACE/profile.json .
-          tar cJf proton-10.0-4-$ARCH_NAME.wcp bin lib share prefixPack.txz profile.json
-          mv proton-10.0-4-$ARCH_NAME.wcp $GITHUB_WORKSPACE/
+          tar cJf proton-7.0-6-$ARCH_NAME.wcp bin lib share prefixPack.txz profile.json
+          mv proton-7.0-6-$ARCH_NAME.wcp $GITHUB_WORKSPACE/
           
           # Create Wine WCP for CMOD & Ludashi - wcp.xz format
           cp $GITHUB_WORKSPACE/profile-wine.json profile.json
-          tar cJf proton-wine-10.0-4-$ARCH_NAME.wcp.xz bin lib share prefixPack.txz profile.json
-          mv proton-wine-10.0-4-$ARCH_NAME.wcp.xz $GITHUB_WORKSPACE/
+          tar cJf proton-wine-7.0-6-$ARCH_NAME.wcp.xz bin lib share prefixPack.txz profile.json
+          mv proton-wine-7.0-6-$ARCH_NAME.wcp.xz $GITHUB_WORKSPACE/
       
       - name: Upload build artifacts
         run: |
@@ -232,14 +232,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: proton-${{ env.ARCH_NAME }}
-          path: proton-10.0-4-${{ env.ARCH_NAME }}.wcp
+          path: proton-7.0-6-${{ env.ARCH_NAME }}.wcp
           retention-days: 30
       
       - name: Upload Wine build artifacts for ${{ matrix.arch }}
         uses: actions/upload-artifact@v4
         with:
           name: proton-wine-${{ env.ARCH_NAME }}
-          path: proton-wine-10.0-4-${{ env.ARCH_NAME }}.wcp.xz
+          path: proton-wine-7.0-6-${{ env.ARCH_NAME }}.wcp.xz
           retention-days: 30
   
   release:
@@ -272,7 +272,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ steps.generate_tag.outputs.tag_name }}
-          name: Proton Wine 10.0-4 (SDK 35, ${{ steps.generate_tag.outputs.tag_name }})
+          name: Proton Wine 7.0-6 (SDK 35, ${{ steps.generate_tag.outputs.tag_name }})
           files: release/*
           draft: false
           prerelease: false
@@ -281,7 +281,7 @@ jobs:
             
             ## Proton Wine Build based on Valve [Wine](https://github.com/ValveSoftware/wine/tree/proton_10.0)
             
-            ### Proton Version: 10.0-4
+            ### Proton Version: 7.0-6
             
             Built from commit: ${{ github.sha }}
             
@@ -291,11 +291,11 @@ jobs:
             
             ### WCP Files
             **Proton Type:**
-            - `proton-10.0-4-x86_64.wcp` - For GameNative
-            - `proton-10.0-4-arm64ec.wcp` - For GameNative
+            - `proton-7.0-6-x86_64.wcp` - For GameNative
+            - `proton-7.0-6-arm64ec.wcp` - For GameNative
             
             **Wine Type:**
-            - `proton-wine-10.0-4-x86_64.wcp.xz` - For Winlator for CMOD & Ludashi
-            - `proton-wine-10.0-4-arm64ec.wcp.xz` - For Winlator for CMOD & Ludashi
+            - `proton-wine-7.0-6-x86_64.wcp.xz` - For Winlator for CMOD & Ludashi
+            - `proton-wine-7.0-6-arm64ec.wcp.xz` - For Winlator for CMOD & Ludashi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
