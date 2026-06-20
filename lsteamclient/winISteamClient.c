@@ -4869,6 +4869,38 @@ void * __thiscall winISteamClient_SteamClient017_GetISteamGenericInterface(struc
     TRACE("%p\n", _this);
     IsBadStringPtrA(pchVersion, -1);
     STEAMCLIENT_CALL( ISteamClient_SteamClient017_GetISteamGenericInterface, &params );
+    {
+        /* LOBBYDBG: probe the engine's Steam Datagram Relay availability -- legacy
+         * P2P (AoE2 multiplayer) routes through it. Fetch ISteamNetworkingUtils
+         * from the same engine/user/pipe and read GetRelayNetworkStatus; logged
+         * across the session we see whether the relay ever reaches Current (100)
+         * or stays NeverTried(0)/Failed(<0). */
+        struct ISteamClient_SteamClient017_GetISteamGenericInterface_params up =
+        {
+            .u_iface = _this->u_iface,
+            .hSteamUser = hSteamUser,
+            .hSteamPipe = hSteamPipe,
+            .pchVersion = "SteamNetworkingUtils004",
+        };
+        STEAMCLIENT_CALL( ISteamClient_SteamClient017_GetISteamGenericInterface, &up );
+        if (up._ret.handle)
+        {
+            char details[2048];
+            struct ISteamNetworkingUtils_SteamNetworkingUtils004_GetRelayNetworkStatus_params rp;
+            memset(details, 0, sizeof(details));
+            memset(&rp, 0, sizeof(rp));
+            rp.u_iface = up._ret;
+            rp.pDetails = (void *)details;
+            STEAMCLIENT_CALL( ISteamNetworkingUtils_SteamNetworkingUtils004_GetRelayNetworkStatus, &rp );
+            TRACE("LOBBYDBG RelayNetworkStatus req=%s avail_ret=%d eAvail=%d\n",
+                  pchVersion ? pchVersion : "?", (int)rp._ret, *(int *)details);
+        }
+        else
+        {
+            TRACE("LOBBYDBG RelayNetworkStatus: engine returned no SteamNetworkingUtils004 (req=%s)\n",
+                  pchVersion ? pchVersion : "?");
+        }
+    }
     return create_win_interface( pchVersion, params._ret );
 }
 
