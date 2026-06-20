@@ -3978,21 +3978,10 @@ const char * __thiscall winISteamMatchmaking_SteamMatchMaking009_GetLobbyData(st
         .steamIDLobby = steamIDLobby,
         .pchKey = pchKey,
     };
-    const char *ret;
     TRACE("%p\n", _this);
     IsBadStringPtrA(pchKey, -1);
     STEAMCLIENT_CALL( ISteamMatchmaking_SteamMatchMaking009_GetLobbyData, &params );
-    ret = get_unix_buffer( params._ret );
-    {
-        /* LOBBYDBG: bounded scan of the returned value (may be non-terminated /
-         * over-long, which would corrupt the caller's heap on a strcpy). */
-        int len = -1;
-        if (ret) { len = 0; while (len < 65536 && ret[len]) len++; }
-        TRACE("LOBBYDBG GetLobbyData key=%s ret=%p len=%d%s\n",
-              pchKey ? pchKey : "(null)", ret, len,
-              (len >= 65536) ? " UNTERMINATED>=64K!" : "");
-    }
-    return ret;
+    return get_unix_buffer( params._ret );
 }
 
 int8_t __thiscall winISteamMatchmaking_SteamMatchMaking009_SetLobbyData(struct w_iface *_this, CSteamID steamIDLobby, const char *pchKey, const char *pchValue)
@@ -4020,7 +4009,6 @@ int32_t __thiscall winISteamMatchmaking_SteamMatchMaking009_GetLobbyDataCount(st
     };
     TRACE("%p\n", _this);
     STEAMCLIENT_CALL( ISteamMatchmaking_SteamMatchMaking009_GetLobbyDataCount, &params );
-    TRACE("LOBBYDBG GetLobbyDataCount ret=%d\n", (int)params._ret);
     return params._ret;
 }
 
@@ -4038,17 +4026,6 @@ int8_t __thiscall winISteamMatchmaking_SteamMatchMaking009_GetLobbyDataByIndex(s
     };
     TRACE("%p\n", _this);
     STEAMCLIENT_CALL( ISteamMatchmaking_SteamMatchMaking009_GetLobbyDataByIndex, &params );
-    {
-        /* LOBBYDBG: scan key/value within the caller's buffers. val_terminated=0
-         * means the bionic client wrote past cchValueBufferSize (heap smash). */
-        int klen = -1, vlen = -1;
-        if (pchKey && cchKeyBufferSize > 0)   { klen = 0; while (klen < cchKeyBufferSize   && pchKey[klen])   klen++; }
-        if (pchValue && cchValueBufferSize > 0) { vlen = 0; while (vlen < cchValueBufferSize && pchValue[vlen]) vlen++; }
-        TRACE("LOBBYDBG GetLobbyDataByIndex idx=%d ret=%d keybuf=%d klen=%d valbuf=%d vlen=%d val_terminated=%d key=%s\n",
-              iLobbyData, (int)params._ret, cchKeyBufferSize, klen, cchValueBufferSize, vlen,
-              (pchValue && vlen < cchValueBufferSize) ? 1 : 0,
-              (pchKey && klen >= 0 && klen < cchKeyBufferSize) ? pchKey : "(n/a)");
-    }
     return params._ret;
 }
 
