@@ -1207,6 +1207,7 @@ int8_t __thiscall winISteamApps_STEAMAPPS_INTERFACE_VERSION007_BIsSubscribedApp(
     };
     TRACE("%p\n", _this);
     STEAMCLIENT_CALL( ISteamApps_STEAMAPPS_INTERFACE_VERSION007_BIsSubscribedApp, &params );
+    TRACE("LOBBYDBG BIsSubscribedApp app=%u ret=%d\n", appID, (int)params._ret);
     return params._ret;
 }
 
@@ -1219,6 +1220,7 @@ int8_t __thiscall winISteamApps_STEAMAPPS_INTERFACE_VERSION007_BIsDlcInstalled(s
     };
     TRACE("%p\n", _this);
     STEAMCLIENT_CALL( ISteamApps_STEAMAPPS_INTERFACE_VERSION007_BIsDlcInstalled, &params );
+    TRACE("LOBBYDBG BIsDlcInstalled app=%u ret=%d\n", appID, (int)params._ret);
     return params._ret;
 }
 
