@@ -326,6 +326,15 @@ done:
     return ret;
 }
 
+/* Returned Steamworks strings/buffers are only valid until a later call, so we
+ * keep the last GET_UNIX_BUFFER_RING allocations per thread and free the oldest
+ * as we cycle. Previously every allocation leaked, which on a 32-bit title
+ * talking to a 64-bit steamclient (so the >4GB ptr never takes the fast path)
+ * grows/fragments the process heap without bound. */
+#define GET_UNIX_BUFFER_RING 256
+static __thread void *get_unix_buffer_ring[GET_UNIX_BUFFER_RING];
+static __thread unsigned int get_unix_buffer_idx;
+
 void *get_unix_buffer( struct u_buffer buf )
 {
     struct steamclient_get_unix_buffer_params params = {.buf = buf};
@@ -337,9 +346,15 @@ void *get_unix_buffer( struct u_buffer buf )
     if (!(params.ptr = ret = HeapAlloc( GetProcessHeap(), 0, buf.len ))) return NULL;
     if (STEAMCLIENT_CALL( steamclient_get_unix_buffer, &params ) || (ret != params.ptr))
     {
+        /* fallback pointer is not owned by our heap; don't track it */
         HeapFree( GetProcessHeap(), 0, ret );
-        ret = params.ptr;
+        return params.ptr;
     }
+
+    if (get_unix_buffer_ring[get_unix_buffer_idx])
+        HeapFree( GetProcessHeap(), 0, get_unix_buffer_ring[get_unix_buffer_idx] );
+    get_unix_buffer_ring[get_unix_buffer_idx] = ret;
+    get_unix_buffer_idx = (get_unix_buffer_idx + 1) % GET_UNIX_BUFFER_RING;
 
     return ret;
 }
