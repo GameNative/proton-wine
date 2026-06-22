@@ -716,35 +716,41 @@ w_SteamNetworkingMessage_t_153a *__thiscall winISteamNetworkingUtils_SteamNetwor
     return params._ret;
 }
 
-/* === Legacy ISteamNetworking005 P2P -> ISteamNetworkingMessages002 bridge ===
+/* === Legacy ISteamNetworking005 P2P -> ISteamNetworkingSockets012 ConnectP2P bridge ===
  * Valve's Android libsteamclient stubs the legacy P2P socket transport
- * ("CreateSNetSocketForP2P not implemented for Android, iOS, tvOS"), so the old
- * ISteamNetworking005 SendP2PPacket queues then times out -- never connects.
- * The modern ISteamNetworkingMessages002 (SNS-backed; relays come up fine) IS
- * implemented and maps ~1:1, so these six SteamNetworking005 P2P methods route
- * to it. The Messages002 wrapper is captured in winISteamClient_*_GetISteamNetworking
- * via p2p_bridge_set_messages(). Interop is sound: desktop Steam already runs
- * ISteamNetworking005 over SNS, so both ends speak SNS P2P.
+ * ("CreateSNetSocketForP2P not implemented for Android,iOS,tvOS"), so legacy
+ * SendP2PPacket queues then times out. We reimplement the six SteamNetworking005
+ * P2P methods over modern ISteamNetworkingSockets, exactly as desktop Steam does
+ * internally: desktop legacy ISteamNetworking P2P and ConnectP2P share the same
+ * SNS rendezvous wire message (CMsgSteamDatagramP2PSessionRequest), and the
+ * legacy / plain-P2P remote virtual port is -1. (k_nVirtualPort_Messages =
+ * 0x7fffffff is a DIFFERENT subsystem -- a prior Messages002 bridge connected on
+ * 0x7fffffff and a desktop legacy host had nothing listening there, so it stayed
+ * silent and timed out.) One SNS connection per remote peer; legacy channels are
+ * not separately framed over SNS (AoE2 uses channel 0). The Sockets012 wrapper is
+ * captured via p2p_bridge_set_sockets() in winISteamClient_*_GetISteamNetworking.
  * (DEFINE_THISCALL_WRAPPER + VTABLE_ADD_FUNC for these remain in winISteamNetworking.c.) */
-extern uint32_t __thiscall winISteamNetworkingMessages_SteamNetworkingMessages002_SendMessageToUser(struct w_iface *, const SteamNetworkingIdentity_144 *, const void *, uint32_t, int32_t, int32_t);
-extern int8_t   __thiscall winISteamNetworkingMessages_SteamNetworkingMessages002_AcceptSessionWithUser(struct w_iface *, const SteamNetworkingIdentity_144 *);
-extern int8_t   __thiscall winISteamNetworkingMessages_SteamNetworkingMessages002_CloseSessionWithUser(struct w_iface *, const SteamNetworkingIdentity_144 *);
-extern uint32_t __thiscall winISteamNetworkingMessages_SteamNetworkingMessages002_GetSessionConnectionInfo(struct w_iface *, const SteamNetworkingIdentity_144 *, void *, void *);
-extern int32_t  __thiscall winISteamNetworkingMessages_SteamNetworkingMessages002_ReceiveMessagesOnChannel(struct w_iface *, int32_t, w_SteamNetworkingMessage_t_153a **, int32_t);
+extern uint32_t __thiscall winISteamNetworkingSockets_SteamNetworkingSockets012_ConnectP2P(struct w_iface *, const SteamNetworkingIdentity_144 *, int32_t, int32_t, const void *);
+extern uint32_t __thiscall winISteamNetworkingSockets_SteamNetworkingSockets012_SendMessageToConnection(struct w_iface *, uint32_t, const void *, uint32_t, int32_t, int64_t *);
+extern int8_t   __thiscall winISteamNetworkingSockets_SteamNetworkingSockets012_GetConnectionInfo(struct w_iface *, uint32_t, SteamNetConnectionInfo_t_153a *);
+extern int8_t   __thiscall winISteamNetworkingSockets_SteamNetworkingSockets012_CloseConnection(struct w_iface *, uint32_t, int32_t, const char *, int8_t);
+/* winISteamNetworkingSockets_SteamNetworkingSockets012_ReceiveMessagesOnConnection is defined above. */
 
-#define P2P_BR_CH 8     /* channels buffered */
-#define P2P_BR_Q  256   /* per-channel queue depth */
-static struct w_iface *g_p2p_msgs;
-static w_SteamNetworkingMessage_t_153a *g_p2p_q[P2P_BR_CH][P2P_BR_Q];
-static int g_p2p_h[P2P_BR_CH], g_p2p_t[P2P_BR_CH];
+#define P2P_BR_PEERS 32    /* concurrent remote peers */
+#define P2P_BR_Q     512   /* global receive FIFO depth */
+static struct w_iface *g_p2p_sockets;
+static struct { uint64_t steam; uint32_t hConn; int8_t got_data; } g_p2p_peer[P2P_BR_PEERS];
+static int g_p2p_npeers;
+static w_SteamNetworkingMessage_t_153a *g_p2p_rx[P2P_BR_Q];
+static int g_p2p_rxh, g_p2p_rxt;
 static CRITICAL_SECTION g_p2p_cs;
 static BOOL g_p2p_cs_ok;
 
-void p2p_bridge_set_messages(struct w_iface *m)
+void p2p_bridge_set_sockets(struct w_iface *s)
 {
     if (!g_p2p_cs_ok) { InitializeCriticalSection(&g_p2p_cs); g_p2p_cs_ok = TRUE; }
-    g_p2p_msgs = m;
-    TRACE("p2p_bridge: Messages002 wrapper = %p\n", m);
+    g_p2p_sockets = s;
+    TRACE("p2p_bridge: NetworkingSockets012 wrapper = %p\n", s);
 }
 
 static void p2p_make_id(SteamNetworkingIdentity_144 *id, uint64_t s)
@@ -755,43 +761,72 @@ static void p2p_make_id(SteamNetworkingIdentity_144 *id, uint64_t s)
     memcpy(&id->data, &s, sizeof(s));
 }
 
-/* Pull pending messages for channel `ch` into the FIFO. Caller holds g_p2p_cs. */
-static void p2p_refill(int ch)
+/* Find (and optionally open) the per-peer SNS connection. Caller holds g_p2p_cs. */
+static uint32_t p2p_conn_for(uint64_t steam, int create)
+{
+    SteamNetworkingIdentity_144 id;
+    uint32_t h;
+    int i;
+    for (i = 0; i < g_p2p_npeers; i++)
+        if (g_p2p_peer[i].steam == steam) return g_p2p_peer[i].hConn;
+    if (!create || g_p2p_npeers >= P2P_BR_PEERS) return 0;
+    p2p_make_id(&id, steam);
+    /* nRemoteVirtualPort = -1 (legacy/plain P2P); no options. */
+    h = winISteamNetworkingSockets_SteamNetworkingSockets012_ConnectP2P(g_p2p_sockets, &id, -1, 0, NULL);
+    if (!h) { ERR("p2p_bridge: ConnectP2P to %llx failed\n", (unsigned long long)steam); return 0; }
+    g_p2p_peer[g_p2p_npeers].steam = steam;
+    g_p2p_peer[g_p2p_npeers].hConn = h;
+    g_p2p_peer[g_p2p_npeers].got_data = 0;
+    g_p2p_npeers++;
+    TRACE("p2p_bridge: ConnectP2P(vport=-1) to %llx -> hConn %u\n", (unsigned long long)steam, h);
+    return h;
+}
+
+/* Drain every peer connection into the global FIFO. Caller holds g_p2p_cs. */
+static void p2p_rx_refill(void)
 {
     w_SteamNetworkingMessage_t_153a *tmp[64];
-    int n, i;
-    if (g_p2p_h[ch] != g_p2p_t[ch]) return;   /* still draining */
-    n = winISteamNetworkingMessages_SteamNetworkingMessages002_ReceiveMessagesOnChannel(g_p2p_msgs, ch, tmp, 64);
-    for (i = 0; i < n; i++)
+    int i, n, k;
+    for (i = 0; i < g_p2p_npeers; i++)
     {
-        int nt = (g_p2p_t[ch] + 1) % P2P_BR_Q;
-        if (nt == g_p2p_h[ch]) { tmp[i]->m_pfnRelease(tmp[i]); continue; }  /* full */
-        g_p2p_q[ch][g_p2p_t[ch]] = tmp[i];
-        g_p2p_t[ch] = nt;
+        if (!g_p2p_peer[i].hConn) continue;
+        n = winISteamNetworkingSockets_SteamNetworkingSockets012_ReceiveMessagesOnConnection(g_p2p_sockets, g_p2p_peer[i].hConn, tmp, 64);
+        if (n > 0) g_p2p_peer[i].got_data = 1;
+        for (k = 0; k < n; k++)
+        {
+            int nt = (g_p2p_rxt + 1) % P2P_BR_Q;
+            if (nt == g_p2p_rxh) { tmp[k]->m_pfnRelease(tmp[k]); continue; }  /* full */
+            g_p2p_rx[g_p2p_rxt] = tmp[k];
+            g_p2p_rxt = nt;
+        }
     }
 }
 
 int8_t __thiscall winISteamNetworking_SteamNetworking005_SendP2PPacket(struct w_iface *_this, CSteamID steamIDRemote, const void *pubData, uint32_t cubData, uint32_t eP2PSendType, int32_t nChannel)
 {
-    SteamNetworkingIdentity_144 id;
+    uint32_t h, r;
     TRACE("%p\n", _this);
-    if (!g_p2p_msgs) return 0;
-    p2p_make_id(&id, *(uint64_t *)&steamIDRemote);
+    if (!g_p2p_sockets) return 0;
+    EnterCriticalSection(&g_p2p_cs);
+    h = p2p_conn_for(*(uint64_t *)&steamIDRemote, 1);
+    LeaveCriticalSection(&g_p2p_cs);
+    if (!h) return 0;
     /* EP2PSend: Reliable(2)/ReliableWithBuffering(3) -> Reliable(8); else Unreliable(0). */
-    return winISteamNetworkingMessages_SteamNetworkingMessages002_SendMessageToUser(
-               g_p2p_msgs, &id, pubData, cubData, (eP2PSendType == 2 || eP2PSendType == 3) ? 8 : 0, nChannel) == 1;
+    r = winISteamNetworkingSockets_SteamNetworkingSockets012_SendMessageToConnection(
+            g_p2p_sockets, h, pubData, cubData, (eP2PSendType == 2 || eP2PSendType == 3) ? 8 : 0, NULL);
+    return r == 1;   /* k_EResultOK */
 }
 
 int8_t __thiscall winISteamNetworking_SteamNetworking005_IsP2PPacketAvailable(struct w_iface *_this, uint32_t *pcubMsgSize, int32_t nChannel)
 {
     int8_t r = 0;
     TRACE("%p\n", _this);
-    if (!g_p2p_msgs || nChannel < 0 || nChannel >= P2P_BR_CH) return 0;
+    if (!g_p2p_sockets) return 0;
     EnterCriticalSection(&g_p2p_cs);
-    p2p_refill(nChannel);
-    if (g_p2p_h[nChannel] != g_p2p_t[nChannel])
+    p2p_rx_refill();
+    if (g_p2p_rxh != g_p2p_rxt)
     {
-        if (pcubMsgSize) *pcubMsgSize = g_p2p_q[nChannel][g_p2p_h[nChannel]]->m_cbSize;
+        if (pcubMsgSize) *pcubMsgSize = g_p2p_rx[g_p2p_rxh]->m_cbSize;
         r = 1;
     }
     LeaveCriticalSection(&g_p2p_cs);
@@ -802,14 +837,14 @@ int8_t __thiscall winISteamNetworking_SteamNetworking005_ReadP2PPacket(struct w_
 {
     int8_t r = 0;
     TRACE("%p\n", _this);
-    if (!g_p2p_msgs || nChannel < 0 || nChannel >= P2P_BR_CH) return 0;
+    if (!g_p2p_sockets) return 0;
     EnterCriticalSection(&g_p2p_cs);
-    p2p_refill(nChannel);
-    if (g_p2p_h[nChannel] != g_p2p_t[nChannel])
+    p2p_rx_refill();
+    if (g_p2p_rxh != g_p2p_rxt)
     {
-        w_SteamNetworkingMessage_t_153a *m = g_p2p_q[nChannel][g_p2p_h[nChannel]];
+        w_SteamNetworkingMessage_t_153a *m = g_p2p_rx[g_p2p_rxh];
         uint32_t sz = m->m_cbSize;
-        g_p2p_h[nChannel] = (g_p2p_h[nChannel] + 1) % P2P_BR_Q;
+        g_p2p_rxh = (g_p2p_rxh + 1) % P2P_BR_Q;
         if (sz > cubDest) sz = cubDest;
         if (pubDest && m->m_pData) memcpy(pubDest, m->m_pData, sz);
         if (pcubMsgSize) *pcubMsgSize = sz;
@@ -823,33 +858,53 @@ int8_t __thiscall winISteamNetworking_SteamNetworking005_ReadP2PPacket(struct w_
 
 int8_t __thiscall winISteamNetworking_SteamNetworking005_AcceptP2PSessionWithUser(struct w_iface *_this, CSteamID steamIDRemote)
 {
-    SteamNetworkingIdentity_144 id;
+    uint32_t h;
     TRACE("%p\n", _this);
-    if (!g_p2p_msgs) return 0;
-    p2p_make_id(&id, *(uint64_t *)&steamIDRemote);
-    return winISteamNetworkingMessages_SteamNetworkingMessages002_AcceptSessionWithUser(g_p2p_msgs, &id);
+    if (!g_p2p_sockets) return 0;
+    EnterCriticalSection(&g_p2p_cs);
+    h = p2p_conn_for(*(uint64_t *)&steamIDRemote, 1);   /* ensure a connection to the peer exists */
+    LeaveCriticalSection(&g_p2p_cs);
+    return h != 0;
 }
 
 int8_t __thiscall winISteamNetworking_SteamNetworking005_CloseP2PSessionWithUser(struct w_iface *_this, CSteamID steamIDRemote)
 {
-    SteamNetworkingIdentity_144 id;
+    uint64_t steam = *(uint64_t *)&steamIDRemote;
+    int i;
     TRACE("%p\n", _this);
-    if (!g_p2p_msgs) return 0;
-    p2p_make_id(&id, *(uint64_t *)&steamIDRemote);
-    return winISteamNetworkingMessages_SteamNetworkingMessages002_CloseSessionWithUser(g_p2p_msgs, &id);
+    if (!g_p2p_sockets) return 0;
+    EnterCriticalSection(&g_p2p_cs);
+    for (i = 0; i < g_p2p_npeers; i++)
+    {
+        if (g_p2p_peer[i].steam != steam) continue;
+        if (g_p2p_peer[i].hConn)
+            winISteamNetworkingSockets_SteamNetworkingSockets012_CloseConnection(g_p2p_sockets, g_p2p_peer[i].hConn, 0, NULL, 0);
+        g_p2p_peer[i] = g_p2p_peer[--g_p2p_npeers];
+        break;
+    }
+    LeaveCriticalSection(&g_p2p_cs);
+    return 1;
 }
 
 int8_t __thiscall winISteamNetworking_SteamNetworking005_GetP2PSessionState(struct w_iface *_this, CSteamID steamIDRemote, P2PSessionState_t *pConnectionState)
 {
-    SteamNetworkingIdentity_144 id;
-    int s;
+    SteamNetConnectionInfo_t_153a info;
+    uint32_t h;
     TRACE("%p\n", _this);
     if (!pConnectionState) return 0;
     memset(pConnectionState, 0, sizeof(*pConnectionState));
-    if (!g_p2p_msgs) return 0;
-    p2p_make_id(&id, *(uint64_t *)&steamIDRemote);
-    s = winISteamNetworkingMessages_SteamNetworkingMessages002_GetSessionConnectionInfo(g_p2p_msgs, &id, NULL, NULL);
-    if (s == 3)                 pConnectionState->m_bConnectionActive = 1;  /* Connected */
-    else if (s == 1 || s == 2)  pConnectionState->m_bConnecting = 1;        /* Connecting / FindingRoute */
+    if (!g_p2p_sockets) return 0;
+    EnterCriticalSection(&g_p2p_cs);
+    h = p2p_conn_for(*(uint64_t *)&steamIDRemote, 0);
+    LeaveCriticalSection(&g_p2p_cs);
+    if (!h) return 0;
+    memset(&info, 0, sizeof(info));
+    if (winISteamNetworkingSockets_SteamNetworkingSockets012_GetConnectionInfo(g_p2p_sockets, h, &info))
+    {
+        /* m_eState: Connecting=1, FindingRoute=2, Connected=3 */
+        if (info.m_eState == 3)                         pConnectionState->m_bConnectionActive = 1;
+        else if (info.m_eState == 1 || info.m_eState == 2) pConnectionState->m_bConnecting = 1;
+    }
+    else pConnectionState->m_bConnecting = 1;
     return 1;
 }

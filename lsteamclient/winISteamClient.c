@@ -3,9 +3,9 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(steamclient);
 
-/* Hand off the modern Messages002 interface to the legacy-P2P bridge in
- * winISteamNetworking.c (see the bridge comment there). */
-extern void p2p_bridge_set_messages(struct w_iface *m);
+/* Hand off the modern ISteamNetworkingSockets012 interface to the legacy-P2P
+ * bridge in steam_networking_manual.c (see the bridge comment there). */
+extern void p2p_bridge_set_sockets(struct w_iface *s);
 
 DEFINE_THISCALL_WRAPPER(winISteamClient_SteamClient006_CreateSteamPipe, 4)
 DEFINE_THISCALL_WRAPPER(winISteamClient_SteamClient006_BReleaseSteamPipe, 8)
@@ -4967,22 +4967,22 @@ void /*ISteamNetworking*/ * __thiscall winISteamClient_SteamClient017_GetISteamN
     STEAMCLIENT_CALL( ISteamClient_SteamClient017_GetISteamNetworking, &params );
 
     /* P2P BRIDGE: the legacy ISteamNetworking005 P2P transport is stubbed on
-     * Android, so also fetch the modern ISteamNetworkingMessages002 from the
-     * same engine/user/pipe and hand it to the bridge (winISteamNetworking.c),
-     * which reroutes the 005 P2P methods through it. */
+     * Android, so also fetch the modern ISteamNetworkingSockets012 from the
+     * same engine/user/pipe and hand it to the bridge (steam_networking_manual.c),
+     * which reroutes the 005 P2P methods through ConnectP2P (vport -1). */
     {
-        struct ISteamClient_SteamClient017_GetISteamGenericInterface_params mp =
+        struct ISteamClient_SteamClient017_GetISteamGenericInterface_params sp =
         {
             .u_iface = _this->u_iface,
             .hSteamUser = hSteamUser,
             .hSteamPipe = hSteamPipe,
-            .pchVersion = "SteamNetworkingMessages002",
+            .pchVersion = "SteamNetworkingSockets012",
         };
-        STEAMCLIENT_CALL( ISteamClient_SteamClient017_GetISteamGenericInterface, &mp );
-        if (mp._ret.handle)
-            p2p_bridge_set_messages( create_win_interface( "SteamNetworkingMessages002", mp._ret ) );
+        STEAMCLIENT_CALL( ISteamClient_SteamClient017_GetISteamGenericInterface, &sp );
+        if (sp._ret.handle)
+            p2p_bridge_set_sockets( create_win_interface( "SteamNetworkingSockets012", sp._ret ) );
         else
-            ERR( "p2p_bridge: engine returned no SteamNetworkingMessages002\n" );
+            ERR( "p2p_bridge: engine returned no SteamNetworkingSockets012\n" );
     }
 
     return create_win_interface( pchVersion, params._ret );
