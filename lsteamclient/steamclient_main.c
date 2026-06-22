@@ -326,22 +326,10 @@ done:
     return ret;
 }
 
-/* Returned Steamworks strings/buffers are only valid until a later call, so we
- * keep the last GET_UNIX_BUFFER_RING allocations and free the displaced one as
- * we cycle. Previously every allocation leaked, which on a 32-bit title talking
- * to a 64-bit steamclient (so the >4GB ptr never takes the fast path) grows and
- * fragments the process heap without bound. Lock-free (no TLS: __thread does
- * not link in this PE build); a displaced entry is many calls old and no longer
- * referenced by the caller, so freeing it from whichever thread wins is safe. */
-#define GET_UNIX_BUFFER_RING 256 /* power of two */
-static void *volatile get_unix_buffer_ring[GET_UNIX_BUFFER_RING];
-static volatile LONG get_unix_buffer_pos;
-
 void *get_unix_buffer( struct u_buffer buf )
 {
     struct steamclient_get_unix_buffer_params params = {.buf = buf};
-    void *ret, *old;
-    LONG slot;
+    void *ret;
 
     if ((UINT_PTR)buf.ptr == buf.ptr && (UINT_PTR)(buf.ptr + buf.len) == (buf.ptr + buf.len))
         return (void *)(UINT_PTR)buf.ptr;
@@ -349,14 +337,9 @@ void *get_unix_buffer( struct u_buffer buf )
     if (!(params.ptr = ret = HeapAlloc( GetProcessHeap(), 0, buf.len ))) return NULL;
     if (STEAMCLIENT_CALL( steamclient_get_unix_buffer, &params ) || (ret != params.ptr))
     {
-        /* fallback pointer is not owned by our heap; don't track it */
         HeapFree( GetProcessHeap(), 0, ret );
-        return params.ptr;
+        ret = params.ptr;
     }
-
-    slot = (InterlockedIncrement( &get_unix_buffer_pos ) - 1) & (GET_UNIX_BUFFER_RING - 1);
-    old = InterlockedExchangePointer( &get_unix_buffer_ring[slot], ret );
-    if (old) HeapFree( GetProcessHeap(), 0, old );
 
     return ret;
 }
