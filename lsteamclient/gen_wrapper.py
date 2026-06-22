@@ -299,6 +299,15 @@ MANUAL_METHODS = {
 
     "ISteamNetworkingMessages_ReceiveMessagesOnChannel": True,
 
+    # Legacy ISteamNetworking005 P2P bridged onto ISteamNetworkingMessages002 on the
+    # win side (Android stubs the legacy P2P socket); bodies in steam_networking_manual.c.
+    "ISteamNetworking_SendP2PPacket": lambda ver, abi: abi == 'w' and ver == 5,
+    "ISteamNetworking_IsP2PPacketAvailable": lambda ver, abi: abi == 'w' and ver == 5,
+    "ISteamNetworking_ReadP2PPacket": lambda ver, abi: abi == 'w' and ver == 5,
+    "ISteamNetworking_AcceptP2PSessionWithUser": lambda ver, abi: abi == 'w' and ver == 5,
+    "ISteamNetworking_CloseP2PSessionWithUser": lambda ver, abi: abi == 'w' and ver == 5,
+    "ISteamNetworking_GetP2PSessionState": lambda ver, abi: abi == 'w' and ver == 5,
+
     "ISteamInput_EnableActionEventCallbacks": lambda ver, abi: abi == 'u',
     "ISteamInput_GetGlyphForActionOrigin": True,
     "ISteamInput_GetGlyphPNGForActionOrigin": True,
