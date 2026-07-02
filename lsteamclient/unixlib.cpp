@@ -851,16 +851,16 @@ static NTSTATUS steamclient_get_unix_buffer( Params *params, bool wow64 )
     struct cache_entry *entry;
     struct rb_entry *ptr;
 
-    pthread_mutex_lock( &buffer_cache_lock );
-    auto iter = buffer_cache.find( params->buf );
-    if (iter != buffer_cache.end()) params->ptr = iter->second;
-    else buffer_cache[params->buf] = params->ptr;
-    /* Always (re)copy the current host bytes. The cache is keyed by the host address,
-     * which the host reuses across freed/realloced strings, so even a (ptr,len)-matched
-     * hit can hold a STALE value from that address's previous occupant -- refresh it.
-     * Safe: operator== matches len, so the cached buffer is exactly params->buf.len. */
+    /* Do NOT cache/dedup by host pointer. The host reuses freed addresses, so a cache
+     * keyed by pointer is fundamentally unsafe: a hit can be stale for the current key,
+     * and worse, "refreshing" the shared buffer mutates it out from under an earlier
+     * caller that still holds it (and races other threads) -> GetLobbyData intermittently
+     * returns another key's value and the game crashes indexing on it. Each call gets its
+     * OWN fresh buffer (params->ptr, allocated buf.len by the caller) with a current copy.
+     * Only reached on the 32-bit-game / 64-bit-host path (Android); desktop takes the
+     * direct-pointer fast path in get_unix_buffer() and never gets here. */
+    (void)buffer_cache; (void)buffer_cache_lock;
     memcpy( params->ptr, (char *)params->buf, params->buf.len );
-    pthread_mutex_unlock( &buffer_cache_lock );
 
     return 0;
 }
