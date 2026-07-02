@@ -519,6 +519,30 @@ next_event:
     last_callback_data = win_msg->m_pubParam;
     STEAMCLIENT_CALL( steamclient_callback_message_receive, &receive_params );
 
+    /* LOBBYDIAG: dump matchmaking lobby callback contents (k_iSteamMatchmakingCallbacks
+     * range 0x1f4..0x1ff) so lobby join/drop failures can be diagnosed directly from the
+     * log instead of guessed at. m_pubParam holds the windows-packed struct after the
+     * receive above. Remove once the lobby-join issue is resolved. */
+    if (win_msg->m_iCallback >= 0x1f4 && win_msg->m_iCallback <= 0x1ff && win_msg->m_pubParam)
+    {
+        const uint8_t *p = (const uint8_t *)win_msg->m_pubParam;
+        uint32_t n = win_msg->m_cubParam, i, m = n > 40 ? 40 : n;
+        char hex[128];
+        for (i = 0; i < m; i++) snprintf(hex + i * 3, sizeof(hex) - i * 3, "%02x ", p[i]);
+        hex[m ? m * 3 - 1 : 0] = 0;
+        ERR("LOBBYDIAG cb=0x%x cub=%u raw=[%s]\n", win_msg->m_iCallback, n, hex);
+        if (win_msg->m_iCallback == 0x1f8 && n >= 20) /* LobbyEnter_t: +0 lobby, +16 EChatRoomEnterResponse (1=Success) */
+            ERR("LOBBYDIAG LobbyEnter lobby=0x%llx enterResponse=%u\n",
+                *(const unsigned long long *)p, *(const uint32_t *)(p + 16));
+        if (win_msg->m_iCallback == 0x1fa && n >= 28) /* LobbyChatUpdate_t: +8 userChanged, +16 makingChange, +24 stateChange (1=Enter 2=Left 4=Disc 8=Kick 16=Ban) */
+            ERR("LOBBYDIAG LobbyChatUpdate userChanged=0x%llx makingChange=0x%llx stateChange=0x%x\n",
+                *(const unsigned long long *)(p + 8), *(const unsigned long long *)(p + 16), *(const uint32_t *)(p + 24));
+        if (win_msg->m_iCallback == 0x1fd && n >= 22) /* LobbyGameCreated_t: +0 lobby, +8 gameserver, +16 ip, +20 port */
+            ERR("LOBBYDIAG LobbyGameCreated lobby=0x%llx gs=0x%llx ip=0x%x port=%u\n",
+                *(const unsigned long long *)p, *(const unsigned long long *)(p + 8),
+                *(const uint32_t *)(p + 16), *(const unsigned short *)(p + 20));
+    }
+
     if (win_msg->m_iCallback == 0x14b) /* GameOverlayActivated_t::k_iCallback */
     {
         uint8_t activated = *(uint8_t *)win_msg->m_pubParam;
