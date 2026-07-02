@@ -360,7 +360,27 @@ NTSTATUS wow64_ISteamMatchmaking_SteamMatchMaking009_GetLobbyData( void *args )
 {
     struct wow64_ISteamMatchmaking_SteamMatchMaking009_GetLobbyData_params *params = (struct wow64_ISteamMatchmaking_SteamMatchMaking009_GetLobbyData_params *)args;
     struct u_ISteamMatchmaking_SteamMatchMaking009 *iface = (struct u_ISteamMatchmaking_SteamMatchMaking009 *)params->u_iface;
-    params->_ret = iface->GetLobbyData( params->steamIDLobby, params->pchKey );
+    /* NOTE: this file is auto-generated, but this wow64 (32-bit-game / 64-bit-host) handler
+     * is hand-patched -- re-apply after any regeneration. The native GetLobbyData() return
+     * points into the lobby's KeyValues, which the client's background CM thread mutates on
+     * LobbyDataUpdate. On this mixed-bitness path the win side copies the string in a
+     * SEPARATE get_unix_buffer() call, so between the two calls that address can be freed
+     * and reused -> GetLobbyData intermittently returns another key's value and the game
+     * crashes indexing on it. Snapshot the value into a thread-local buffer now, in the same
+     * call, so get_unix_buffer() copies a stable string. The native (same-bitness) handler
+     * is intentionally left as-is: desktop and 64-bit games take the direct-pointer fast
+     * path in get_unix_buffer() and never defer a copy, so they are not exposed. */
+    const char *v = iface->GetLobbyData( params->steamIDLobby, params->pchKey );
+    static thread_local char snap[8192];
+    if (v)
+    {
+        size_t n = strlen( v );
+        if (n >= sizeof(snap)) n = sizeof(snap) - 1;
+        memcpy( snap, v, n );
+        snap[n] = 0;
+        params->_ret = snap;
+    }
+    else params->_ret = (const char *)0;
     return 0;
 }
 #endif
