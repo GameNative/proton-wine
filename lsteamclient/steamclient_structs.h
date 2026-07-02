@@ -115,6 +115,12 @@ struct u_buffer
     struct u_buffer &operator=(const char* value) { this->ptr = (UINT_PTR)value; this->len = value ? strlen( value ) + 1 : 0; return *this; }
     template< typename T > struct u_buffer &operator=(const T* value) { this->ptr = (UINT_PTR)value; this->len = value ? sizeof( *value ) : 0; return *this; }
     operator char*() const { return (char*)(UINT_PTR)this->ptr; }
+    /* Explicit equality on (ptr,len). Without this, buffer_cache's std::equal_to falls
+     * back to the implicit char* conversion above and compares POINTERS ONLY -- so two
+     * different-length values the host placed at the same reused native address collide
+     * in the cache and the stale one is served (GetLobbyData returns another key's value,
+     * crashing/hanging games under the 32-bit-game / 64-bit-host mixed-bitness path). */
+    bool operator==( const struct u_buffer &o ) const { return this->ptr == o.ptr && this->len == o.len; }
 #endif /* __cplusplus */
 };
 

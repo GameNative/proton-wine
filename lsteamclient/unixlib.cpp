@@ -854,11 +854,12 @@ static NTSTATUS steamclient_get_unix_buffer( Params *params, bool wow64 )
     pthread_mutex_lock( &buffer_cache_lock );
     auto iter = buffer_cache.find( params->buf );
     if (iter != buffer_cache.end()) params->ptr = iter->second;
-    else
-    {
-        memcpy( params->ptr, (char *)params->buf, params->buf.len );
-        buffer_cache[params->buf] = params->ptr;
-    }
+    else buffer_cache[params->buf] = params->ptr;
+    /* Always (re)copy the current host bytes. The cache is keyed by the host address,
+     * which the host reuses across freed/realloced strings, so even a (ptr,len)-matched
+     * hit can hold a STALE value from that address's previous occupant -- refresh it.
+     * Safe: operator== matches len, so the cached buffer is exactly params->buf.len. */
+    memcpy( params->ptr, (char *)params->buf, params->buf.len );
     pthread_mutex_unlock( &buffer_cache_lock );
 
     return 0;

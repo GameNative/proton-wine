@@ -3953,6 +3953,8 @@ int32_t __thiscall winISteamMatchmaking_SteamMatchMaking009_GetNumLobbyMembers(s
     };
     TRACE("%p\n", _this);
     STEAMCLIENT_CALL( ISteamMatchmaking_SteamMatchMaking009_GetNumLobbyMembers, &params );
+    ERR("LOBBYDIAG GetNumLobbyMembers lobby=0x%llx -> %d\n",
+        *(const unsigned long long *)&steamIDLobby, params._ret);
     return params._ret;
 }
 
@@ -3967,6 +3969,9 @@ CSteamID * __thiscall winISteamMatchmaking_SteamMatchMaking009_GetLobbyMemberByI
     };
     TRACE("%p\n", _this);
     STEAMCLIENT_CALL( ISteamMatchmaking_SteamMatchMaking009_GetLobbyMemberByIndex, &params );
+    ERR("LOBBYDIAG GetLobbyMemberByIndex lobby=0x%llx iMember=%d -> member=0x%llx\n",
+        *(const unsigned long long *)&steamIDLobby, iMember,
+        params._ret ? *(const unsigned long long *)params._ret : 0ull);
     return params._ret;
 }
 
@@ -4222,6 +4227,9 @@ CSteamID * __thiscall winISteamMatchmaking_SteamMatchMaking009_GetLobbyOwner(str
     };
     TRACE("%p\n", _this);
     STEAMCLIENT_CALL( ISteamMatchmaking_SteamMatchMaking009_GetLobbyOwner, &params );
+    ERR("LOBBYDIAG GetLobbyOwner lobby=0x%llx -> owner=0x%llx\n",
+        *(const unsigned long long *)&steamIDLobby,
+        params._ret ? *(const unsigned long long *)params._ret : 0ull);
     return params._ret;
 }
 
