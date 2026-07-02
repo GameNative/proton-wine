@@ -3981,7 +3981,12 @@ const char * __thiscall winISteamMatchmaking_SteamMatchMaking009_GetLobbyData(st
     TRACE("%p\n", _this);
     IsBadStringPtrA(pchKey, -1);
     STEAMCLIENT_CALL( ISteamMatchmaking_SteamMatchMaking009_GetLobbyData, &params );
-    return get_unix_buffer( params._ret );
+    {
+        const char *ld_v = get_unix_buffer( params._ret );
+        ERR("LOBBYDIAG GetLobbyData lobby=0x%llx key='%s' -> '%s'\n",
+            *(const unsigned long long *)&steamIDLobby, pchKey ? pchKey : "", ld_v ? ld_v : "(null)");
+        return ld_v;
+    }
 }
 
 int8_t __thiscall winISteamMatchmaking_SteamMatchMaking009_SetLobbyData(struct w_iface *_this, CSteamID steamIDLobby, const char *pchKey, const char *pchValue)
@@ -3996,6 +4001,8 @@ int8_t __thiscall winISteamMatchmaking_SteamMatchMaking009_SetLobbyData(struct w
     TRACE("%p\n", _this);
     IsBadStringPtrA(pchKey, -1);
     IsBadStringPtrA(pchValue, -1);
+    ERR("LOBBYDIAG SetLobbyData lobby=0x%llx key='%s' value='%s'\n",
+        *(const unsigned long long *)&steamIDLobby, pchKey ? pchKey : "", pchValue ? pchValue : "");
     STEAMCLIENT_CALL( ISteamMatchmaking_SteamMatchMaking009_SetLobbyData, &params );
     return params._ret;
 }
@@ -4026,6 +4033,8 @@ int8_t __thiscall winISteamMatchmaking_SteamMatchMaking009_GetLobbyDataByIndex(s
     };
     TRACE("%p\n", _this);
     STEAMCLIENT_CALL( ISteamMatchmaking_SteamMatchMaking009_GetLobbyDataByIndex, &params );
+    if (params._ret) ERR("LOBBYDIAG GetLobbyDataByIndex[%d] lobby=0x%llx '%s'='%s'\n",
+        iLobbyData, *(const unsigned long long *)&steamIDLobby, pchKey ? pchKey : "", pchValue ? pchValue : "");
     return params._ret;
 }
 
@@ -4055,7 +4064,12 @@ const char * __thiscall winISteamMatchmaking_SteamMatchMaking009_GetLobbyMemberD
     TRACE("%p\n", _this);
     IsBadStringPtrA(pchKey, -1);
     STEAMCLIENT_CALL( ISteamMatchmaking_SteamMatchMaking009_GetLobbyMemberData, &params );
-    return get_unix_buffer( params._ret );
+    {
+        const char *lmd_v = get_unix_buffer( params._ret );
+        ERR("LOBBYDIAG GetLobbyMemberData lobby=0x%llx user=0x%llx key='%s' -> '%s'\n",
+            *(const unsigned long long *)&steamIDLobby, *(const unsigned long long *)&steamIDUser, pchKey ? pchKey : "", lmd_v ? lmd_v : "(null)");
+        return lmd_v;
+    }
 }
 
 void __thiscall winISteamMatchmaking_SteamMatchMaking009_SetLobbyMemberData(struct w_iface *_this, CSteamID steamIDLobby, const char *pchKey, const char *pchValue)
@@ -4070,6 +4084,8 @@ void __thiscall winISteamMatchmaking_SteamMatchMaking009_SetLobbyMemberData(stru
     TRACE("%p\n", _this);
     IsBadStringPtrA(pchKey, -1);
     IsBadStringPtrA(pchValue, -1);
+    ERR("LOBBYDIAG SetLobbyMemberData lobby=0x%llx key='%s' value='%s'\n",
+        *(const unsigned long long *)&steamIDLobby, pchKey ? pchKey : "", pchValue ? pchValue : "");
     STEAMCLIENT_CALL( ISteamMatchmaking_SteamMatchMaking009_SetLobbyMemberData, &params );
 }
 

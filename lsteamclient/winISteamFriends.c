@@ -10126,6 +10126,7 @@ int8_t __thiscall winISteamFriends_SteamFriends017_SetRichPresence(struct w_ifac
     TRACE("%p\n", _this);
     IsBadStringPtrA(pchKey, -1);
     IsBadStringPtrA(pchValue, -1);
+    ERR("LOBBYDIAG SetRichPresence key='%s' value='%s'\n", pchKey ? pchKey : "", pchValue ? pchValue : "");
     STEAMCLIENT_CALL( ISteamFriends_SteamFriends017_SetRichPresence, &params );
     return params._ret;
 }

@@ -523,7 +523,10 @@ next_event:
      * range 0x1f4..0x1ff) so lobby join/drop failures can be diagnosed directly from the
      * log instead of guessed at. m_pubParam holds the windows-packed struct after the
      * receive above. Remove once the lobby-join issue is resolved. */
-    if (win_msg->m_iCallback >= 0x1f4 && win_msg->m_iCallback <= 0x1ff && win_msg->m_pubParam)
+    if (win_msg->m_pubParam &&
+        ((win_msg->m_iCallback >= 0x1f4 && win_msg->m_iCallback <= 0x1ff) || /* matchmaking / lobby (500-511) */
+         (win_msg->m_iCallback >= 0x4b0 && win_msg->m_iCallback <= 0x4d5) || /* networking / P2P / SDR (1200-1237) */
+         win_msg->m_iCallback == 0x14d || win_msg->m_iCallback == 0x151))    /* GameRichPresence/GameLobby JoinRequested (333/337) */
     {
         const uint8_t *p = (const uint8_t *)win_msg->m_pubParam;
         uint32_t n = win_msg->m_cubParam, i, m = n > 40 ? 40 : n;
@@ -541,6 +544,14 @@ next_event:
             ERR("LOBBYDIAG LobbyGameCreated lobby=0x%llx gs=0x%llx ip=0x%x port=%u\n",
                 *(const unsigned long long *)p, *(const unsigned long long *)(p + 8),
                 *(const uint32_t *)(p + 16), *(const unsigned short *)(p + 20));
+        if (win_msg->m_iCallback == 0x4b2 && n >= 8) /* P2PSessionRequest_t: +0 steamIDRemote */
+            ERR("LOBBYDIAG P2PSessionRequest remote=0x%llx\n", *(const unsigned long long *)p);
+        if (win_msg->m_iCallback == 0x4b3 && n >= 9) /* P2PSessionConnectFail_t: +0 steamIDRemote, +8 eP2PSessionError */
+            ERR("LOBBYDIAG P2PSessionConnectFail remote=0x%llx error=%u\n", *(const unsigned long long *)p, p[8]);
+        if (win_msg->m_iCallback == 0x4c9 && n >= 8) /* SteamNetConnectionStatusChangedCallback_t (1225): +0 hConn, +4 ... state deep in struct */
+            ERR("LOBBYDIAG NetConnStatusChanged hConn=0x%x\n", *(const uint32_t *)p);
+        if ((win_msg->m_iCallback == 0x14d || win_msg->m_iCallback == 0x151) && n >= 8) /* Join*Requested: +0 steamIDFriend */
+            ERR("LOBBYDIAG JoinRequested(cb=0x%x) friend=0x%llx\n", win_msg->m_iCallback, *(const unsigned long long *)p);
     }
 
     if (win_msg->m_iCallback == 0x14b) /* GameOverlayActivated_t::k_iCallback */
