@@ -5,6 +5,23 @@
 #pragma makedep unix
 #endif
 
+/* TEMP DIAGNOSTIC: log the value GetLobbyData hands back at the UNIX capture point
+ * (into logcat, tag lsteamclient.unix), so we can compare it to the win-side
+ * LOBBYDIAG (what the game actually receives). capture-correct + delivery-wrong =>
+ * the deferred get_unix_buffer copy read a freed/reused IPC return buffer;
+ * capture-already-wrong => the client proxy returned it wrong. Remove after. */
+#include <dlfcn.h>
+#include <stdarg.h>
+static void LOBBYCAP_log( const char *fmt, ... )
+{
+    typedef int (*alp_t)( int, const char *, const char *, ... );
+    static alp_t alp; static int tried;
+    if (!tried) { void *h = dlopen( "liblog.so", RTLD_NOW ); if (h) alp = (alp_t)dlsym( h, "__android_log_print" ); tried = 1; }
+    if (!alp) return;
+    char buf[1024]; va_list ap; va_start( ap, fmt ); vsnprintf( buf, sizeof(buf), fmt, ap ); va_end( ap );
+    alp( 6 /*ANDROID_LOG_ERROR*/, "lsteamclient.unix", "%s", buf );
+}
+
 NTSTATUS ISteamMatchmaking_SteamMatchMaking009_GetFavoriteGameCount( void *args )
 {
     struct ISteamMatchmaking_SteamMatchMaking009_GetFavoriteGameCount_params *params = (struct ISteamMatchmaking_SteamMatchMaking009_GetFavoriteGameCount_params *)args;
@@ -351,7 +368,9 @@ NTSTATUS ISteamMatchmaking_SteamMatchMaking009_GetLobbyData( void *args )
 {
     struct ISteamMatchmaking_SteamMatchMaking009_GetLobbyData_params *params = (struct ISteamMatchmaking_SteamMatchMaking009_GetLobbyData_params *)args;
     struct u_ISteamMatchmaking_SteamMatchMaking009 *iface = (struct u_ISteamMatchmaking_SteamMatchMaking009 *)params->u_iface;
-    params->_ret = iface->GetLobbyData( params->steamIDLobby, params->pchKey );
+    const char *v = iface->GetLobbyData( params->steamIDLobby, params->pchKey );
+    params->_ret = v;
+    LOBBYCAP_log( "LOBBYCAP native key='%s' -> '%s'", params->pchKey ? params->pchKey : "", v ? v : "(null)" );
     return 0;
 }
 
@@ -360,27 +379,11 @@ NTSTATUS wow64_ISteamMatchmaking_SteamMatchMaking009_GetLobbyData( void *args )
 {
     struct wow64_ISteamMatchmaking_SteamMatchMaking009_GetLobbyData_params *params = (struct wow64_ISteamMatchmaking_SteamMatchMaking009_GetLobbyData_params *)args;
     struct u_ISteamMatchmaking_SteamMatchMaking009 *iface = (struct u_ISteamMatchmaking_SteamMatchMaking009 *)params->u_iface;
-    /* NOTE: this file is auto-generated, but this wow64 (32-bit-game / 64-bit-host) handler
-     * is hand-patched -- re-apply after any regeneration. The native GetLobbyData() return
-     * points into the lobby's KeyValues, which the client's background CM thread mutates on
-     * LobbyDataUpdate. On this mixed-bitness path the win side copies the string in a
-     * SEPARATE get_unix_buffer() call, so between the two calls that address can be freed
-     * and reused -> GetLobbyData intermittently returns another key's value and the game
-     * crashes indexing on it. Snapshot the value into a thread-local buffer now, in the same
-     * call, so get_unix_buffer() copies a stable string. The native (same-bitness) handler
-     * is intentionally left as-is: desktop and 64-bit games take the direct-pointer fast
-     * path in get_unix_buffer() and never defer a copy, so they are not exposed. */
+    /* DIAGNOSTIC (snapshot reverted): capture the raw return + log it, so we can compare
+     * the unix capture value to the win-side delivered value and locate the corruption. */
     const char *v = iface->GetLobbyData( params->steamIDLobby, params->pchKey );
-    static thread_local char snap[8192];
-    if (v)
-    {
-        size_t n = strlen( v );
-        if (n >= sizeof(snap)) n = sizeof(snap) - 1;
-        memcpy( snap, v, n );
-        snap[n] = 0;
-        params->_ret = snap;
-    }
-    else params->_ret = (const char *)0;
+    params->_ret = v;
+    LOBBYCAP_log( "LOBBYCAP wow64  key='%s' -> '%s'", params->pchKey ? params->pchKey : "", v ? v : "(null)" );
     return 0;
 }
 #endif
