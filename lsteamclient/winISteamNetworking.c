@@ -3,12 +3,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(steamclient);
 
-/* The six SteamNetworking005 P2P methods below (SendP2PPacket / IsP2PPacketAvailable
- * / ReadP2PPacket / AcceptP2PSessionWithUser / CloseP2PSessionWithUser /
- * GetP2PSessionState) are hand-implemented in steam_networking_manual.c: they
- * bridge the (Android-stubbed) legacy P2P transport onto ISteamNetworkingMessages002.
- * Their DEFINE_THISCALL_WRAPPER + VTABLE_ADD_FUNC stay here; the bodies live there. */
-
 DEFINE_THISCALL_WRAPPER(winISteamNetworking_SteamNetworking001_CreateListenSocket, 16)
 DEFINE_THISCALL_WRAPPER(winISteamNetworking_SteamNetworking001_CreateP2PConnectionSocket, 20)
 DEFINE_THISCALL_WRAPPER(winISteamNetworking_SteamNetworking001_CreateConnectionSocket, 16)
@@ -1163,8 +1157,74 @@ DEFINE_THISCALL_WRAPPER(winISteamNetworking_SteamNetworking005_GetListenSocketIn
 DEFINE_THISCALL_WRAPPER(winISteamNetworking_SteamNetworking005_GetSocketConnectionType, 8)
 DEFINE_THISCALL_WRAPPER(winISteamNetworking_SteamNetworking005_GetMaxPacketSize, 8)
 
-/* SendP2PPacket / IsP2PPacketAvailable / ReadP2PPacket / AcceptP2PSessionWithUser
- * / CloseP2PSessionWithUser -> bridged in steam_networking_manual.c */
+int8_t __thiscall winISteamNetworking_SteamNetworking005_SendP2PPacket(struct w_iface *_this, CSteamID steamIDRemote, const void *pubData, uint32_t cubData, uint32_t eP2PSendType, int32_t nChannel)
+{
+    struct ISteamNetworking_SteamNetworking005_SendP2PPacket_params params =
+    {
+        .u_iface = _this->u_iface,
+        .steamIDRemote = steamIDRemote,
+        .pubData = pubData,
+        .cubData = cubData,
+        .eP2PSendType = eP2PSendType,
+        .nChannel = nChannel,
+    };
+    TRACE("%p\n", _this);
+    STEAMCLIENT_CALL( ISteamNetworking_SteamNetworking005_SendP2PPacket, &params );
+    return params._ret;
+}
+
+int8_t __thiscall winISteamNetworking_SteamNetworking005_IsP2PPacketAvailable(struct w_iface *_this, uint32_t *pcubMsgSize, int32_t nChannel)
+{
+    struct ISteamNetworking_SteamNetworking005_IsP2PPacketAvailable_params params =
+    {
+        .u_iface = _this->u_iface,
+        .pcubMsgSize = pcubMsgSize,
+        .nChannel = nChannel,
+    };
+    TRACE("%p\n", _this);
+    STEAMCLIENT_CALL( ISteamNetworking_SteamNetworking005_IsP2PPacketAvailable, &params );
+    return params._ret;
+}
+
+int8_t __thiscall winISteamNetworking_SteamNetworking005_ReadP2PPacket(struct w_iface *_this, void *pubDest, uint32_t cubDest, uint32_t *pcubMsgSize, CSteamID *psteamIDRemote, int32_t nChannel)
+{
+    struct ISteamNetworking_SteamNetworking005_ReadP2PPacket_params params =
+    {
+        .u_iface = _this->u_iface,
+        .pubDest = pubDest,
+        .cubDest = cubDest,
+        .pcubMsgSize = pcubMsgSize,
+        .psteamIDRemote = psteamIDRemote,
+        .nChannel = nChannel,
+    };
+    TRACE("%p\n", _this);
+    STEAMCLIENT_CALL( ISteamNetworking_SteamNetworking005_ReadP2PPacket, &params );
+    return params._ret;
+}
+
+int8_t __thiscall winISteamNetworking_SteamNetworking005_AcceptP2PSessionWithUser(struct w_iface *_this, CSteamID steamIDRemote)
+{
+    struct ISteamNetworking_SteamNetworking005_AcceptP2PSessionWithUser_params params =
+    {
+        .u_iface = _this->u_iface,
+        .steamIDRemote = steamIDRemote,
+    };
+    TRACE("%p\n", _this);
+    STEAMCLIENT_CALL( ISteamNetworking_SteamNetworking005_AcceptP2PSessionWithUser, &params );
+    return params._ret;
+}
+
+int8_t __thiscall winISteamNetworking_SteamNetworking005_CloseP2PSessionWithUser(struct w_iface *_this, CSteamID steamIDRemote)
+{
+    struct ISteamNetworking_SteamNetworking005_CloseP2PSessionWithUser_params params =
+    {
+        .u_iface = _this->u_iface,
+        .steamIDRemote = steamIDRemote,
+    };
+    TRACE("%p\n", _this);
+    STEAMCLIENT_CALL( ISteamNetworking_SteamNetworking005_CloseP2PSessionWithUser, &params );
+    return params._ret;
+}
 
 int8_t __thiscall winISteamNetworking_SteamNetworking005_CloseP2PChannelWithUser(struct w_iface *_this, CSteamID steamIDRemote, int32_t nChannel)
 {
@@ -1179,7 +1239,18 @@ int8_t __thiscall winISteamNetworking_SteamNetworking005_CloseP2PChannelWithUser
     return params._ret;
 }
 
-/* GetP2PSessionState -> bridged in steam_networking_manual.c */
+int8_t __thiscall winISteamNetworking_SteamNetworking005_GetP2PSessionState(struct w_iface *_this, CSteamID steamIDRemote, P2PSessionState_t *pConnectionState)
+{
+    struct ISteamNetworking_SteamNetworking005_GetP2PSessionState_params params =
+    {
+        .u_iface = _this->u_iface,
+        .steamIDRemote = steamIDRemote,
+        .pConnectionState = pConnectionState,
+    };
+    TRACE("%p\n", _this);
+    STEAMCLIENT_CALL( ISteamNetworking_SteamNetworking005_GetP2PSessionState, &params );
+    return params._ret;
+}
 
 int8_t __thiscall winISteamNetworking_SteamNetworking005_AllowP2PPacketRelay(struct w_iface *_this, int8_t bAllow)
 {
@@ -1466,8 +1537,6 @@ int8_t __thiscall winISteamNetworking_SteamNetworking006_SendP2PPacket(struct w_
     };
     TRACE("%p\n", _this);
     STEAMCLIENT_CALL( ISteamNetworking_SteamNetworking006_SendP2PPacket, &params );
-    ERR("LOBBYDIAG SendP2PPacket to=0x%llx cub=%u sendType=%u chan=%d -> %d\n",
-        *(const unsigned long long *)&steamIDRemote, cubData, eP2PSendType, nChannel, params._ret);
     return params._ret;
 }
 
@@ -1497,8 +1566,6 @@ int8_t __thiscall winISteamNetworking_SteamNetworking006_ReadP2PPacket(struct w_
     };
     TRACE("%p\n", _this);
     STEAMCLIENT_CALL( ISteamNetworking_SteamNetworking006_ReadP2PPacket, &params );
-    if (params._ret) ERR("LOBBYDIAG ReadP2PPacket from=0x%llx size=%u chan=%d\n",
-        psteamIDRemote ? *(const unsigned long long *)psteamIDRemote : 0ull, pcubMsgSize ? *pcubMsgSize : 0, nChannel);
     return params._ret;
 }
 
@@ -1510,7 +1577,6 @@ int8_t __thiscall winISteamNetworking_SteamNetworking006_AcceptP2PSessionWithUse
         .steamIDRemote = steamIDRemote,
     };
     TRACE("%p\n", _this);
-    ERR("LOBBYDIAG AcceptP2PSessionWithUser remote=0x%llx\n", *(const unsigned long long *)&steamIDRemote);
     STEAMCLIENT_CALL( ISteamNetworking_SteamNetworking006_AcceptP2PSessionWithUser, &params );
     return params._ret;
 }
@@ -1550,11 +1616,6 @@ int8_t __thiscall winISteamNetworking_SteamNetworking006_GetP2PSessionState(stru
     };
     TRACE("%p\n", _this);
     STEAMCLIENT_CALL( ISteamNetworking_SteamNetworking006_GetP2PSessionState, &params );
-    if (params._ret && pConnectionState) {
-        const uint8_t *st = (const uint8_t *)pConnectionState; /* +0 active +1 connecting +2 error +3 usingRelay */
-        ERR("LOBBYDIAG GetP2PSessionState remote=0x%llx active=%u connecting=%u err=%u usingRelay=%u\n",
-            *(const unsigned long long *)&steamIDRemote, st[0], st[1], st[2], st[3]);
-    }
     return params._ret;
 }
 
