@@ -3,6 +3,10 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(steamclient);
 
+/* Hand off the modern Messages002 interface to the legacy-P2P bridge in
+ * winISteamNetworking.c (see the bridge comment there). */
+extern void p2p_bridge_set_messages(struct w_iface *m);
+
 DEFINE_THISCALL_WRAPPER(winISteamClient_SteamClient006_CreateSteamPipe, 4)
 DEFINE_THISCALL_WRAPPER(winISteamClient_SteamClient006_BReleaseSteamPipe, 8)
 DEFINE_THISCALL_WRAPPER(winISteamClient_SteamClient006_CreateGlobalUser, 8)
@@ -4961,6 +4965,26 @@ void /*ISteamNetworking*/ * __thiscall winISteamClient_SteamClient017_GetISteamN
     TRACE("%p\n", _this);
     IsBadStringPtrA(pchVersion, -1);
     STEAMCLIENT_CALL( ISteamClient_SteamClient017_GetISteamNetworking, &params );
+
+    /* P2P BRIDGE: the legacy ISteamNetworking005 P2P transport is stubbed on
+     * Android, so also fetch the modern ISteamNetworkingMessages002 from the
+     * same engine/user/pipe and hand it to the bridge (winISteamNetworking.c),
+     * which reroutes the 005 P2P methods through it. */
+    {
+        struct ISteamClient_SteamClient017_GetISteamGenericInterface_params mp =
+        {
+            .u_iface = _this->u_iface,
+            .hSteamUser = hSteamUser,
+            .hSteamPipe = hSteamPipe,
+            .pchVersion = "SteamNetworkingMessages002",
+        };
+        STEAMCLIENT_CALL( ISteamClient_SteamClient017_GetISteamGenericInterface, &mp );
+        if (mp._ret.handle)
+            p2p_bridge_set_messages( create_win_interface( "SteamNetworkingMessages002", mp._ret ) );
+        else
+            ERR( "p2p_bridge: engine returned no SteamNetworkingMessages002\n" );
+    }
+
     return create_win_interface( pchVersion, params._ret );
 }
 
