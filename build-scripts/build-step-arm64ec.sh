@@ -89,7 +89,6 @@ do
       --bindir $install_dir/bin \
       --libdir $install_dir/lib \
       --exec-prefix $install_dir \
-      --with-mingw=clang \
       --with-wine-tools=./wine-tools \
       --enable-win64 \
       --disable-win16 \
