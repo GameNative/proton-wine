@@ -96,41 +96,41 @@ do
       --disable-amd_ags_x64 \
       --enable-wineandroid_drv=no \
       --disable-tests \
-      --with-alsa \
+      --without-alsa \
       --without-capi \
       --without-coreaudio \
       --without-cups \
       --without-dbus \
       --without-ffmpeg \
-      --with-fontconfig \
-      --with-freetype \
+      --without-fontconfig \
+      --without-freetype \
       --without-gcrypt \
       --without-gettext \
       --with-gettextpo=no \
       --without-gphoto \
-      --with-gnutls \
+      --without-gnutls \
       --without-gssapi \
-      --with-gstreamer \
+      --without-gstreamer \
       --without-inotify \
       --without-krb5 \
       --without-netapi \
       --without-opencl \
-      --with-opengl \
+      --without-opengl \
       --without-osmesa \
       --without-oss \
       --without-pcap \
       --without-pcsclite \
       --without-piper \
       --with-pthread \
-      --with-pulse \
+      --without-pulse \
       --without-sane \
-      --with-sdl \
+      --without-sdl \
       --without-udev \
       --without-unwind \
       --without-usb \
       --without-v4l2 \
       --without-vosk \
-      --with-vulkan \
+      --without-vulkan \
       --without-wayland \
       --without-xcomposite \
       --without-xcursor \
