@@ -44,7 +44,7 @@
 
 #endif /* _WIN64 */
 
-#ifndef __x86_64__
+#if !defined(__x86_64__) && !defined(__aarch64__)
 
 #define DEFINE_RTTI_BASE(name, base_classes_no, mangled_name) \
     static type_info name ## _type_info = { \
@@ -335,7 +335,7 @@ typedef struct
 /* dlls/msvcrt/cppexcept.h */
 typedef void (*cxx_copy_ctor)(void);
 
-#ifndef __x86_64__
+#if !defined(__x86_64__) && !defined(__aarch64__)
 
 typedef struct _rtti_base_descriptor
 {
