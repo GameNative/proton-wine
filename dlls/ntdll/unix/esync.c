@@ -51,6 +51,18 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(esync);
 
+#ifdef __ANDROID__
+/* bionic has no shm_open; back it with a file under TMPDIR. */
+static int shm_open(const char *name, int oflag, mode_t mode)
+{
+    char *tmpdir = getenv("TMPDIR");
+    char *fname;
+    if (!tmpdir) tmpdir = "/tmp";
+    asprintf(&fname, "%s/%s", tmpdir, name);
+    return open(fname, oflag, mode);
+}
+#endif
+
 int do_esync(void)
 {
 #ifdef HAVE_SYS_EVENTFD_H
