@@ -139,7 +139,7 @@ do
       --without-xrandr \
       --without-xrender \
       --without-xshape \
-      --with-xshm \
+      --without-xshm \
       --without-xxf86vm
 
     echo "Applying patches..."
