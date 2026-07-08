@@ -392,7 +392,7 @@ struct w_steam_iface *create_winISteamTimeline_STEAMTIMELINE_INTERFACE_V004(void
 
 void init_winISteamTimeline_rtti( char *base )
 {
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
     init_winISteamTimeline_STEAMTIMELINE_INTERFACE_V001_rtti( base );
     init_winISteamTimeline_STEAMTIMELINE_INTERFACE_V004_rtti( base );
 #endif /* __x86_64__ */

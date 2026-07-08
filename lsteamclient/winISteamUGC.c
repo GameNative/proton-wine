@@ -19782,7 +19782,7 @@ struct w_steam_iface *create_winISteamUGC_STEAMUGC_INTERFACE_VERSION021(void *u_
 
 void init_winISteamUGC_rtti( char *base )
 {
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
     init_winISteamUGC_STEAMUGC_INTERFACE_VERSION001_rtti( base );
     init_winISteamUGC_STEAMUGC_INTERFACE_VERSION002_rtti( base );
     init_winISteamUGC_STEAMUGC_INTERFACE_VERSION003_rtti( base );

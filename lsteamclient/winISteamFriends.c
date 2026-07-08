@@ -11834,7 +11834,7 @@ struct w_steam_iface *create_winISteamFriends_SteamFriends018(void *u_iface)
 
 void init_winISteamFriends_rtti( char *base )
 {
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
     init_winISteamFriends_SteamFriends001_rtti( base );
     init_winISteamFriends_SteamFriends002_rtti( base );
     init_winISteamFriends_SteamFriends003_rtti( base );

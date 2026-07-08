@@ -9672,7 +9672,7 @@ struct w_steam_iface *create_winISteamRemoteStorage_STEAMREMOTESTORAGE_INTERFACE
 
 void init_winISteamRemoteStorage_rtti( char *base )
 {
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
     init_winISteamRemoteStorage_STEAMREMOTESTORAGE_INTERFACE_VERSION001_rtti( base );
     init_winISteamRemoteStorage_STEAMREMOTESTORAGE_INTERFACE_VERSION002_rtti( base );
     init_winISteamRemoteStorage_STEAMREMOTESTORAGE_INTERFACE_VERSION003_rtti( base );

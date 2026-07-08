@@ -399,7 +399,7 @@ struct w_steam_iface *create_winISteamScreenshots_STEAMSCREENSHOTS_INTERFACE_VER
 
 void init_winISteamScreenshots_rtti( char *base )
 {
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
     init_winISteamScreenshots_STEAMSCREENSHOTS_INTERFACE_VERSION001_rtti( base );
     init_winISteamScreenshots_STEAMSCREENSHOTS_INTERFACE_VERSION002_rtti( base );
     init_winISteamScreenshots_STEAMSCREENSHOTS_INTERFACE_VERSION003_rtti( base );

@@ -3051,7 +3051,7 @@ struct w_steam_iface *create_winISteamUtils_SteamUtils010(void *u_iface)
 
 void init_winISteamUtils_rtti( char *base )
 {
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
     init_winISteamUtils_SteamUtils002_rtti( base );
     init_winISteamUtils_SteamUtils004_rtti( base );
     init_winISteamUtils_SteamUtils005_rtti( base );

@@ -2351,7 +2351,7 @@ struct w_steam_iface *create_winISteamInput_SteamInput006(void *u_iface)
 
 void init_winISteamInput_rtti( char *base )
 {
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
     init_winISteamInput_SteamInput001_rtti( base );
     init_winISteamInput_SteamInput002_rtti( base );
     init_winISteamInput_SteamInput005_rtti( base );

@@ -230,7 +230,7 @@ struct w_steam_iface *create_winISteamMasterServerUpdater_SteamMasterServerUpdat
 
 void init_winISteamMasterServerUpdater_rtti( char *base )
 {
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
     init_winISteamMasterServerUpdater_SteamMasterServerUpdater001_rtti( base );
 #endif /* __x86_64__ */
 }

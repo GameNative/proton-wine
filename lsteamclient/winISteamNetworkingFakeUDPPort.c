@@ -58,7 +58,7 @@ struct w_steam_iface *create_winISteamNetworkingFakeUDPPort_SteamNetworkingFakeU
 
 void init_winISteamNetworkingFakeUDPPort_rtti( char *base )
 {
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
     init_winISteamNetworkingFakeUDPPort_SteamNetworkingFakeUDPPort001_rtti( base );
 #endif /* __x86_64__ */
 }

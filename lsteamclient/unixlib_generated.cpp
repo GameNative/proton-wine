@@ -8773,7 +8773,7 @@ static void SteamUGCDetails_t_160_u_from_w(void *dst, const void *src)
     d->m_unNumChildren = s->m_unNumChildren;
     d->m_ulTotalFilesSize = s->m_ulTotalFilesSize;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_SteamUGCDetails_t_160::operator u64_SteamUGCDetails_t_160() const
 {
     u64_SteamUGCDetails_t_160 ret;
@@ -8816,7 +8816,7 @@ static void SteamUGCDetails_t_160_w_from_u(void *dst, const void *src)
     d->m_unNumChildren = s->m_unNumChildren;
     d->m_ulTotalFilesSize = s->m_ulTotalFilesSize;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_SteamUGCDetails_t_160::operator w64_SteamUGCDetails_t_160() const
 {
     w64_SteamUGCDetails_t_160 ret;
@@ -8876,7 +8876,7 @@ static void SteamUGCDetails_t_128x_u_from_w(void *dst, const void *src)
     d->m_flScore = s->m_flScore;
     d->m_unNumChildren = s->m_unNumChildren;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_SteamUGCDetails_t_128x::operator u64_SteamUGCDetails_t_128x() const
 {
     u64_SteamUGCDetails_t_128x ret;
@@ -8918,7 +8918,7 @@ static void SteamUGCDetails_t_128x_w_from_u(void *dst, const void *src)
     d->m_flScore = s->m_flScore;
     d->m_unNumChildren = s->m_unNumChildren;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_SteamUGCDetails_t_128x::operator w64_SteamUGCDetails_t_128x() const
 {
     w64_SteamUGCDetails_t_128x ret;
@@ -8977,7 +8977,7 @@ static void SteamUGCDetails_t_126_u_from_w(void *dst, const void *src)
     d->m_unVotesDown = s->m_unVotesDown;
     d->m_flScore = s->m_flScore;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_SteamUGCDetails_t_126::operator u64_SteamUGCDetails_t_126() const
 {
     u64_SteamUGCDetails_t_126 ret;
@@ -9018,7 +9018,7 @@ static void SteamUGCDetails_t_126_w_from_u(void *dst, const void *src)
     d->m_unVotesDown = s->m_unVotesDown;
     d->m_flScore = s->m_flScore;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_SteamUGCDetails_t_126::operator w64_SteamUGCDetails_t_126() const
 {
     w64_SteamUGCDetails_t_126 ret;
@@ -9087,7 +9087,7 @@ static void AddAppDependencyResult_t_u_from_w(void *dst, const void *src)
     d->m_nPublishedFileId = s->m_nPublishedFileId;
     d->m_nAppID = s->m_nAppID;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_AddAppDependencyResult_t::operator u64_AddAppDependencyResult_t() const
 {
     u64_AddAppDependencyResult_t ret;
@@ -9106,7 +9106,7 @@ static void AddAppDependencyResult_t_w_from_u(void *dst, const void *src)
     d->m_nPublishedFileId = s->m_nPublishedFileId;
     d->m_nAppID = s->m_nAppID;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_AddAppDependencyResult_t::operator w64_AddAppDependencyResult_t() const
 {
     w64_AddAppDependencyResult_t ret;
@@ -9175,7 +9175,7 @@ static void AddUGCDependencyResult_t_u_from_w(void *dst, const void *src)
     d->m_nPublishedFileId = s->m_nPublishedFileId;
     d->m_nChildPublishedFileId = s->m_nChildPublishedFileId;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_AddUGCDependencyResult_t::operator u64_AddUGCDependencyResult_t() const
 {
     u64_AddUGCDependencyResult_t ret;
@@ -9194,7 +9194,7 @@ static void AddUGCDependencyResult_t_w_from_u(void *dst, const void *src)
     d->m_nPublishedFileId = s->m_nPublishedFileId;
     d->m_nChildPublishedFileId = s->m_nChildPublishedFileId;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_AddUGCDependencyResult_t::operator w64_AddUGCDependencyResult_t() const
 {
     w64_AddUGCDependencyResult_t ret;
@@ -10198,7 +10198,7 @@ static void CreateBeaconCallback_t_u_from_w(void *dst, const void *src)
     d->m_eResult = s->m_eResult;
     d->m_ulBeaconID = s->m_ulBeaconID;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_CreateBeaconCallback_t::operator u64_CreateBeaconCallback_t() const
 {
     u64_CreateBeaconCallback_t ret;
@@ -10216,7 +10216,7 @@ static void CreateBeaconCallback_t_w_from_u(void *dst, const void *src)
     d->m_eResult = s->m_eResult;
     d->m_ulBeaconID = s->m_ulBeaconID;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_CreateBeaconCallback_t::operator w64_CreateBeaconCallback_t() const
 {
     w64_CreateBeaconCallback_t ret;
@@ -10285,7 +10285,7 @@ static void CreateItemResult_t_u_from_w(void *dst, const void *src)
     d->m_nPublishedFileId = s->m_nPublishedFileId;
     d->m_bUserNeedsToAcceptWorkshopLegalAgreement = s->m_bUserNeedsToAcceptWorkshopLegalAgreement;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_CreateItemResult_t::operator u64_CreateItemResult_t() const
 {
     u64_CreateItemResult_t ret;
@@ -10304,7 +10304,7 @@ static void CreateItemResult_t_w_from_u(void *dst, const void *src)
     d->m_nPublishedFileId = s->m_nPublishedFileId;
     d->m_bUserNeedsToAcceptWorkshopLegalAgreement = s->m_bUserNeedsToAcceptWorkshopLegalAgreement;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_CreateItemResult_t::operator w64_CreateItemResult_t() const
 {
     w64_CreateItemResult_t ret;
@@ -10364,7 +10364,7 @@ static void DeleteItemResult_t_u_from_w(void *dst, const void *src)
     d->m_eResult = s->m_eResult;
     d->m_nPublishedFileId = s->m_nPublishedFileId;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_DeleteItemResult_t::operator u64_DeleteItemResult_t() const
 {
     u64_DeleteItemResult_t ret;
@@ -10382,7 +10382,7 @@ static void DeleteItemResult_t_w_from_u(void *dst, const void *src)
     d->m_eResult = s->m_eResult;
     d->m_nPublishedFileId = s->m_nPublishedFileId;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_DeleteItemResult_t::operator w64_DeleteItemResult_t() const
 {
     w64_DeleteItemResult_t ret;
@@ -10451,7 +10451,7 @@ static void DownloadItemResult_t_u_from_w(void *dst, const void *src)
     d->m_nPublishedFileId = s->m_nPublishedFileId;
     d->m_eResult = s->m_eResult;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_DownloadItemResult_t::operator u64_DownloadItemResult_t() const
 {
     u64_DownloadItemResult_t ret;
@@ -10470,7 +10470,7 @@ static void DownloadItemResult_t_w_from_u(void *dst, const void *src)
     d->m_nPublishedFileId = s->m_nPublishedFileId;
     d->m_eResult = s->m_eResult;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_DownloadItemResult_t::operator w64_DownloadItemResult_t() const
 {
     w64_DownloadItemResult_t ret;
@@ -10530,7 +10530,7 @@ static void EndGameResultCallback_t_u_from_w(void *dst, const void *src)
     d->m_eResult = s->m_eResult;
     d->ullUniqueGameID = s->ullUniqueGameID;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_EndGameResultCallback_t::operator u64_EndGameResultCallback_t() const
 {
     u64_EndGameResultCallback_t ret;
@@ -10548,7 +10548,7 @@ static void EndGameResultCallback_t_w_from_u(void *dst, const void *src)
     d->m_eResult = s->m_eResult;
     d->ullUniqueGameID = s->ullUniqueGameID;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_EndGameResultCallback_t::operator w64_EndGameResultCallback_t() const
 {
     w64_EndGameResultCallback_t ret;
@@ -10626,7 +10626,7 @@ static void FileDetailsResult_t_u_from_w(void *dst, const void *src)
     d->m_FileSHA = s->m_FileSHA;
     d->m_unFlags = s->m_unFlags;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_FileDetailsResult_t::operator u64_FileDetailsResult_t() const
 {
     u64_FileDetailsResult_t ret;
@@ -10646,7 +10646,7 @@ static void FileDetailsResult_t_w_from_u(void *dst, const void *src)
     d->m_FileSHA = s->m_FileSHA;
     d->m_unFlags = s->m_unFlags;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_FileDetailsResult_t::operator w64_FileDetailsResult_t() const
 {
     w64_FileDetailsResult_t ret;
@@ -10815,7 +10815,7 @@ static void GSReputation_t_123_u_from_w(void *dst, const void *src)
     d->m_ulBannedGameID = s->m_ulBannedGameID;
     d->m_unBanExpires = s->m_unBanExpires;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_GSReputation_t_123::operator u64_GSReputation_t_123() const
 {
     u64_GSReputation_t_123 ret;
@@ -10838,7 +10838,7 @@ static void GSReputation_t_123_w_from_u(void *dst, const void *src)
     d->m_ulBannedGameID = s->m_ulBannedGameID;
     d->m_unBanExpires = s->m_unBanExpires;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_GSReputation_t_123::operator w64_GSReputation_t_123() const
 {
     w64_GSReputation_t_123 ret;
@@ -10970,7 +10970,7 @@ static void GetAppDependenciesResult_t_u_from_w(void *dst, const void *src)
     d->m_nNumAppDependencies = s->m_nNumAppDependencies;
     d->m_nTotalNumAppDependencies = s->m_nTotalNumAppDependencies;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_GetAppDependenciesResult_t::operator u64_GetAppDependenciesResult_t() const
 {
     u64_GetAppDependenciesResult_t ret;
@@ -10991,7 +10991,7 @@ static void GetAppDependenciesResult_t_w_from_u(void *dst, const void *src)
     d->m_nNumAppDependencies = s->m_nNumAppDependencies;
     d->m_nTotalNumAppDependencies = s->m_nTotalNumAppDependencies;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_GetAppDependenciesResult_t::operator w64_GetAppDependenciesResult_t() const
 {
     w64_GetAppDependenciesResult_t ret;
@@ -11051,7 +11051,7 @@ static void HTML_ChangedTitle_t_u_from_w(void *dst, const void *src)
     d->unBrowserHandle = s->unBrowserHandle;
     d->pchTitle = s->pchTitle;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_HTML_ChangedTitle_t::operator u64_HTML_ChangedTitle_t() const
 {
     u64_HTML_ChangedTitle_t ret;
@@ -11069,7 +11069,7 @@ static void HTML_ChangedTitle_t_w_from_u(void *dst, const void *src)
     d->unBrowserHandle = s->unBrowserHandle;
     d->pchTitle = s->pchTitle;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_HTML_ChangedTitle_t::operator w64_HTML_ChangedTitle_t() const
 {
     w64_HTML_ChangedTitle_t ret;
@@ -11128,7 +11128,7 @@ static void HTML_ComboNeedsPaint_t_u_from_w(void *dst, const void *src)
     d->unWide = s->unWide;
     d->unTall = s->unTall;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_HTML_ComboNeedsPaint_t::operator u64_HTML_ComboNeedsPaint_t() const
 {
     u64_HTML_ComboNeedsPaint_t ret;
@@ -11148,7 +11148,7 @@ static void HTML_ComboNeedsPaint_t_w_from_u(void *dst, const void *src)
     d->unWide = s->unWide;
     d->unTall = s->unTall;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_HTML_ComboNeedsPaint_t::operator w64_HTML_ComboNeedsPaint_t() const
 {
     w64_HTML_ComboNeedsPaint_t ret;
@@ -11198,7 +11198,7 @@ static void HTML_FileOpenDialog_t_u_from_w(void *dst, const void *src)
     d->pchTitle = s->pchTitle;
     d->pchInitialFile = s->pchInitialFile;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_HTML_FileOpenDialog_t::operator u64_HTML_FileOpenDialog_t() const
 {
     u64_HTML_FileOpenDialog_t ret;
@@ -11218,7 +11218,7 @@ static void HTML_FileOpenDialog_t_w_from_u(void *dst, const void *src)
     steamclient_unix_path_to_dos_path(1, s->pchInitialFile, g_tmppath, TEMP_PATH_BUFFER_LENGTH, 1);
     d->pchInitialFile = g_tmppath;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_HTML_FileOpenDialog_t::operator w64_HTML_FileOpenDialog_t() const
 {
     w64_HTML_FileOpenDialog_t ret;
@@ -11287,7 +11287,7 @@ static void HTML_FinishedRequest_t_u_from_w(void *dst, const void *src)
     d->pchURL = s->pchURL;
     d->pchPageTitle = s->pchPageTitle;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_HTML_FinishedRequest_t::operator u64_HTML_FinishedRequest_t() const
 {
     u64_HTML_FinishedRequest_t ret;
@@ -11307,7 +11307,7 @@ static void HTML_FinishedRequest_t_w_from_u(void *dst, const void *src)
     d->pchURL = g_tmppath;
     d->pchPageTitle = s->pchPageTitle;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_HTML_FinishedRequest_t::operator w64_HTML_FinishedRequest_t() const
 {
     w64_HTML_FinishedRequest_t ret;
@@ -11367,7 +11367,7 @@ static void HTML_JSAlert_t_u_from_w(void *dst, const void *src)
     d->unBrowserHandle = s->unBrowserHandle;
     d->pchMessage = s->pchMessage;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_HTML_JSAlert_t::operator u64_HTML_JSAlert_t() const
 {
     u64_HTML_JSAlert_t ret;
@@ -11385,7 +11385,7 @@ static void HTML_JSAlert_t_w_from_u(void *dst, const void *src)
     d->unBrowserHandle = s->unBrowserHandle;
     d->pchMessage = s->pchMessage;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_HTML_JSAlert_t::operator w64_HTML_JSAlert_t() const
 {
     w64_HTML_JSAlert_t ret;
@@ -11426,7 +11426,7 @@ static void HTML_JSConfirm_t_u_from_w(void *dst, const void *src)
     d->unBrowserHandle = s->unBrowserHandle;
     d->pchMessage = s->pchMessage;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_HTML_JSConfirm_t::operator u64_HTML_JSConfirm_t() const
 {
     u64_HTML_JSConfirm_t ret;
@@ -11444,7 +11444,7 @@ static void HTML_JSConfirm_t_w_from_u(void *dst, const void *src)
     d->unBrowserHandle = s->unBrowserHandle;
     d->pchMessage = s->pchMessage;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_HTML_JSConfirm_t::operator w64_HTML_JSConfirm_t() const
 {
     w64_HTML_JSConfirm_t ret;
@@ -11521,7 +11521,7 @@ static void HTML_LinkAtPosition_t_u_from_w(void *dst, const void *src)
     d->bInput = s->bInput;
     d->bLiveLink = s->bLiveLink;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_HTML_LinkAtPosition_t::operator u64_HTML_LinkAtPosition_t() const
 {
     u64_HTML_LinkAtPosition_t ret;
@@ -11544,7 +11544,7 @@ static void HTML_LinkAtPosition_t_w_from_u(void *dst, const void *src)
     d->bInput = s->bInput;
     d->bLiveLink = s->bLiveLink;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_HTML_LinkAtPosition_t::operator w64_HTML_LinkAtPosition_t() const
 {
     w64_HTML_LinkAtPosition_t ret;
@@ -11694,7 +11694,7 @@ static void HTML_NeedsPaint_t_u_from_w(void *dst, const void *src)
     d->flPageScale = s->flPageScale;
     d->unPageSerial = s->unPageSerial;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_HTML_NeedsPaint_t::operator u64_HTML_NeedsPaint_t() const
 {
     u64_HTML_NeedsPaint_t ret;
@@ -11722,7 +11722,7 @@ static void HTML_NeedsPaint_t_w_from_u(void *dst, const void *src)
     d->flPageScale = s->flPageScale;
     d->unPageSerial = s->unPageSerial;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_HTML_NeedsPaint_t::operator w64_HTML_NeedsPaint_t() const
 {
     w64_HTML_NeedsPaint_t ret;
@@ -11864,7 +11864,7 @@ static void HTML_NewWindow_t_132x_u_from_w(void *dst, const void *src)
     d->unTall = s->unTall;
     d->unNewWindow_BrowserHandle_IGNORE = s->unNewWindow_BrowserHandle_IGNORE;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_HTML_NewWindow_t_132x::operator u64_HTML_NewWindow_t_132x() const
 {
     u64_HTML_NewWindow_t_132x ret;
@@ -11888,7 +11888,7 @@ static void HTML_NewWindow_t_132x_w_from_u(void *dst, const void *src)
     d->unTall = s->unTall;
     d->unNewWindow_BrowserHandle_IGNORE = s->unNewWindow_BrowserHandle_IGNORE;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_HTML_NewWindow_t_132x::operator w64_HTML_NewWindow_t_132x() const
 {
     w64_HTML_NewWindow_t_132x ret;
@@ -11928,7 +11928,7 @@ static void HTML_NewWindow_t_130x_u_from_w(void *dst, const void *src)
     d->unWide = s->unWide;
     d->unTall = s->unTall;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_HTML_NewWindow_t_130x::operator u64_HTML_NewWindow_t_130x() const
 {
     u64_HTML_NewWindow_t_130x ret;
@@ -11951,7 +11951,7 @@ static void HTML_NewWindow_t_130x_w_from_u(void *dst, const void *src)
     d->unWide = s->unWide;
     d->unTall = s->unTall;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_HTML_NewWindow_t_130x::operator w64_HTML_NewWindow_t_130x() const
 {
     w64_HTML_NewWindow_t_130x ret;
@@ -12011,7 +12011,7 @@ static void HTML_OpenLinkInNewTab_t_u_from_w(void *dst, const void *src)
     d->unBrowserHandle = s->unBrowserHandle;
     d->pchURL = s->pchURL;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_HTML_OpenLinkInNewTab_t::operator u64_HTML_OpenLinkInNewTab_t() const
 {
     u64_HTML_OpenLinkInNewTab_t ret;
@@ -12030,7 +12030,7 @@ static void HTML_OpenLinkInNewTab_t_w_from_u(void *dst, const void *src)
     steamclient_unix_path_to_dos_path(1, s->pchURL, g_tmppath, TEMP_PATH_BUFFER_LENGTH, 1);
     d->pchURL = g_tmppath;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_HTML_OpenLinkInNewTab_t::operator w64_HTML_OpenLinkInNewTab_t() const
 {
     w64_HTML_OpenLinkInNewTab_t ret;
@@ -12090,7 +12090,7 @@ static void HTML_ShowToolTip_t_u_from_w(void *dst, const void *src)
     d->unBrowserHandle = s->unBrowserHandle;
     d->pchMsg = s->pchMsg;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_HTML_ShowToolTip_t::operator u64_HTML_ShowToolTip_t() const
 {
     u64_HTML_ShowToolTip_t ret;
@@ -12108,7 +12108,7 @@ static void HTML_ShowToolTip_t_w_from_u(void *dst, const void *src)
     d->unBrowserHandle = s->unBrowserHandle;
     d->pchMsg = s->pchMsg;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_HTML_ShowToolTip_t::operator w64_HTML_ShowToolTip_t() const
 {
     w64_HTML_ShowToolTip_t ret;
@@ -12176,7 +12176,7 @@ static void HTML_StartRequest_t_u_from_w(void *dst, const void *src)
     d->pchPostData = s->pchPostData;
     d->bIsRedirect = s->bIsRedirect;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_HTML_StartRequest_t::operator u64_HTML_StartRequest_t() const
 {
     u64_HTML_StartRequest_t ret;
@@ -12198,7 +12198,7 @@ static void HTML_StartRequest_t_w_from_u(void *dst, const void *src)
     d->pchPostData = s->pchPostData;
     d->bIsRedirect = s->bIsRedirect;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_HTML_StartRequest_t::operator w64_HTML_StartRequest_t() const
 {
     w64_HTML_StartRequest_t ret;
@@ -12258,7 +12258,7 @@ static void HTML_StatusText_t_u_from_w(void *dst, const void *src)
     d->unBrowserHandle = s->unBrowserHandle;
     d->pchMsg = s->pchMsg;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_HTML_StatusText_t::operator u64_HTML_StatusText_t() const
 {
     u64_HTML_StatusText_t ret;
@@ -12276,7 +12276,7 @@ static void HTML_StatusText_t_w_from_u(void *dst, const void *src)
     d->unBrowserHandle = s->unBrowserHandle;
     d->pchMsg = s->pchMsg;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_HTML_StatusText_t::operator w64_HTML_StatusText_t() const
 {
     w64_HTML_StatusText_t ret;
@@ -12353,7 +12353,7 @@ static void HTML_URLChanged_t_u_from_w(void *dst, const void *src)
     d->pchPageTitle = s->pchPageTitle;
     d->bNewNavigation = s->bNewNavigation;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_HTML_URLChanged_t::operator u64_HTML_URLChanged_t() const
 {
     u64_HTML_URLChanged_t ret;
@@ -12376,7 +12376,7 @@ static void HTML_URLChanged_t_w_from_u(void *dst, const void *src)
     d->pchPageTitle = s->pchPageTitle;
     d->bNewNavigation = s->bNewNavigation;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_HTML_URLChanged_t::operator w64_HTML_URLChanged_t() const
 {
     w64_HTML_URLChanged_t ret;
@@ -12436,7 +12436,7 @@ static void HTML_UpdateToolTip_t_u_from_w(void *dst, const void *src)
     d->unBrowserHandle = s->unBrowserHandle;
     d->pchMsg = s->pchMsg;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_HTML_UpdateToolTip_t::operator u64_HTML_UpdateToolTip_t() const
 {
     u64_HTML_UpdateToolTip_t ret;
@@ -12454,7 +12454,7 @@ static void HTML_UpdateToolTip_t_w_from_u(void *dst, const void *src)
     d->unBrowserHandle = s->unBrowserHandle;
     d->pchMsg = s->pchMsg;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_HTML_UpdateToolTip_t::operator w64_HTML_UpdateToolTip_t() const
 {
     w64_HTML_UpdateToolTip_t ret;
@@ -12602,7 +12602,7 @@ static void HTTPRequestCompleted_t_132x_u_from_w(void *dst, const void *src)
     d->m_eStatusCode = s->m_eStatusCode;
     d->m_unBodySize = s->m_unBodySize;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_HTTPRequestCompleted_t_132x::operator u64_HTTPRequestCompleted_t_132x() const
 {
     u64_HTTPRequestCompleted_t_132x ret;
@@ -12623,7 +12623,7 @@ static void HTTPRequestCompleted_t_132x_w_from_u(void *dst, const void *src)
     d->m_eStatusCode = s->m_eStatusCode;
     d->m_unBodySize = s->m_unBodySize;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_HTTPRequestCompleted_t_132x::operator w64_HTTPRequestCompleted_t_132x() const
 {
     w64_HTTPRequestCompleted_t_132x ret;
@@ -12661,7 +12661,7 @@ static void HTTPRequestCompleted_t_123_u_from_w(void *dst, const void *src)
     d->m_bRequestSuccessful = s->m_bRequestSuccessful;
     d->m_eStatusCode = s->m_eStatusCode;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_HTTPRequestCompleted_t_123::operator u64_HTTPRequestCompleted_t_123() const
 {
     u64_HTTPRequestCompleted_t_123 ret;
@@ -12681,7 +12681,7 @@ static void HTTPRequestCompleted_t_123_w_from_u(void *dst, const void *src)
     d->m_bRequestSuccessful = s->m_bRequestSuccessful;
     d->m_eStatusCode = s->m_eStatusCode;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_HTTPRequestCompleted_t_123::operator w64_HTTPRequestCompleted_t_123() const
 {
     w64_HTTPRequestCompleted_t_123 ret;
@@ -12838,7 +12838,7 @@ static void HTTPRequestDataReceived_t_123_u_from_w(void *dst, const void *src)
     d->m_cOffset = s->m_cOffset;
     d->m_cBytesReceived = s->m_cBytesReceived;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_HTTPRequestDataReceived_t_123::operator u64_HTTPRequestDataReceived_t_123() const
 {
     u64_HTTPRequestDataReceived_t_123 ret;
@@ -12858,7 +12858,7 @@ static void HTTPRequestDataReceived_t_123_w_from_u(void *dst, const void *src)
     d->m_cOffset = s->m_cOffset;
     d->m_cBytesReceived = s->m_cBytesReceived;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_HTTPRequestDataReceived_t_123::operator w64_HTTPRequestDataReceived_t_123() const
 {
     w64_HTTPRequestDataReceived_t_123 ret;
@@ -12981,7 +12981,7 @@ static void HTTPRequestHeadersReceived_t_123_u_from_w(void *dst, const void *src
     d->m_hRequest = s->m_hRequest;
     d->m_ulContextValue = s->m_ulContextValue;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_HTTPRequestHeadersReceived_t_123::operator u64_HTTPRequestHeadersReceived_t_123() const
 {
     u64_HTTPRequestHeadersReceived_t_123 ret;
@@ -12999,7 +12999,7 @@ static void HTTPRequestHeadersReceived_t_123_w_from_u(void *dst, const void *src
     d->m_hRequest = s->m_hRequest;
     d->m_ulContextValue = s->m_ulContextValue;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_HTTPRequestHeadersReceived_t_123::operator w64_HTTPRequestHeadersReceived_t_123() const
 {
     w64_HTTPRequestHeadersReceived_t_123 ret;
@@ -13136,7 +13136,7 @@ static void ItemInstalled_t_160_u_from_w(void *dst, const void *src)
     d->m_hLegacyContent = s->m_hLegacyContent;
     d->m_unManifestID = s->m_unManifestID;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_ItemInstalled_t_160::operator u64_ItemInstalled_t_160() const
 {
     u64_ItemInstalled_t_160 ret;
@@ -13156,7 +13156,7 @@ static void ItemInstalled_t_160_w_from_u(void *dst, const void *src)
     d->m_hLegacyContent = s->m_hLegacyContent;
     d->m_unManifestID = s->m_unManifestID;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_ItemInstalled_t_160::operator w64_ItemInstalled_t_160() const
 {
     w64_ItemInstalled_t_160 ret;
@@ -13192,7 +13192,7 @@ static void ItemInstalled_t_130_u_from_w(void *dst, const void *src)
     d->m_unAppID = s->m_unAppID;
     d->m_nPublishedFileId = s->m_nPublishedFileId;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_ItemInstalled_t_130::operator u64_ItemInstalled_t_130() const
 {
     u64_ItemInstalled_t_130 ret;
@@ -13210,7 +13210,7 @@ static void ItemInstalled_t_130_w_from_u(void *dst, const void *src)
     d->m_unAppID = s->m_unAppID;
     d->m_nPublishedFileId = s->m_nPublishedFileId;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_ItemInstalled_t_130::operator w64_ItemInstalled_t_130() const
 {
     w64_ItemInstalled_t_130 ret;
@@ -13288,7 +13288,7 @@ static void JoinPartyCallback_t_u_from_w(void *dst, const void *src)
     d->m_SteamIDBeaconOwner = s->m_SteamIDBeaconOwner;
     d->m_rgchConnectString = s->m_rgchConnectString;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_JoinPartyCallback_t::operator u64_JoinPartyCallback_t() const
 {
     u64_JoinPartyCallback_t ret;
@@ -13308,7 +13308,7 @@ static void JoinPartyCallback_t_w_from_u(void *dst, const void *src)
     d->m_SteamIDBeaconOwner = s->m_SteamIDBeaconOwner;
     d->m_rgchConnectString = s->m_rgchConnectString;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_JoinPartyCallback_t::operator w64_JoinPartyCallback_t() const
 {
     w64_JoinPartyCallback_t ret;
@@ -13483,7 +13483,7 @@ static void LeaderboardEntry_t_123_u_from_w(void *dst, const void *src)
     d->m_cDetails = s->m_cDetails;
     d->m_hUGC = s->m_hUGC;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_LeaderboardEntry_t_123::operator u64_LeaderboardEntry_t_123() const
 {
     u64_LeaderboardEntry_t_123 ret;
@@ -13504,7 +13504,7 @@ static void LeaderboardEntry_t_123_w_from_u(void *dst, const void *src)
     d->m_cDetails = s->m_cDetails;
     d->m_hUGC = s->m_hUGC;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_LeaderboardEntry_t_123::operator w64_LeaderboardEntry_t_123() const
 {
     w64_LeaderboardEntry_t_123 ret;
@@ -13697,7 +13697,7 @@ static void LeaderboardScoreUploaded_t_123_u_from_w(void *dst, const void *src)
     d->m_nGlobalRankNew = s->m_nGlobalRankNew;
     d->m_nGlobalRankPrevious = s->m_nGlobalRankPrevious;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_LeaderboardScoreUploaded_t_123::operator u64_LeaderboardScoreUploaded_t_123() const
 {
     u64_LeaderboardScoreUploaded_t_123 ret;
@@ -13719,7 +13719,7 @@ static void LeaderboardScoreUploaded_t_123_w_from_u(void *dst, const void *src)
     d->m_nGlobalRankNew = s->m_nGlobalRankNew;
     d->m_nGlobalRankPrevious = s->m_nGlobalRankPrevious;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_LeaderboardScoreUploaded_t_123::operator w64_LeaderboardScoreUploaded_t_123() const
 {
     w64_LeaderboardScoreUploaded_t_123 ret;
@@ -13846,7 +13846,7 @@ static void LeaderboardUGCSet_t_123_u_from_w(void *dst, const void *src)
     d->m_eResult = s->m_eResult;
     d->m_hSteamLeaderboard = s->m_hSteamLeaderboard;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_LeaderboardUGCSet_t_123::operator u64_LeaderboardUGCSet_t_123() const
 {
     u64_LeaderboardUGCSet_t_123 ret;
@@ -13864,7 +13864,7 @@ static void LeaderboardUGCSet_t_123_w_from_u(void *dst, const void *src)
     d->m_eResult = s->m_eResult;
     d->m_hSteamLeaderboard = s->m_hSteamLeaderboard;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_LeaderboardUGCSet_t_123::operator w64_LeaderboardUGCSet_t_123() const
 {
     w64_LeaderboardUGCSet_t_123 ret;
@@ -13983,7 +13983,7 @@ static void LobbyCreated_t_123_u_from_w(void *dst, const void *src)
     d->m_eResult = s->m_eResult;
     d->m_ulSteamIDLobby = s->m_ulSteamIDLobby;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_LobbyCreated_t_123::operator u64_LobbyCreated_t_123() const
 {
     u64_LobbyCreated_t_123 ret;
@@ -14001,7 +14001,7 @@ static void LobbyCreated_t_123_w_from_u(void *dst, const void *src)
     d->m_eResult = s->m_eResult;
     d->m_ulSteamIDLobby = s->m_ulSteamIDLobby;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_LobbyCreated_t_123::operator w64_LobbyCreated_t_123() const
 {
     w64_LobbyCreated_t_123 ret;
@@ -14137,7 +14137,7 @@ static void MicroTxnAuthorizationResponse_t_123_u_from_w(void *dst, const void *
     d->m_ulOrderID = s->m_ulOrderID;
     d->m_bAuthorized = s->m_bAuthorized;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_MicroTxnAuthorizationResponse_t_123::operator u64_MicroTxnAuthorizationResponse_t_123() const
 {
     u64_MicroTxnAuthorizationResponse_t_123 ret;
@@ -14156,7 +14156,7 @@ static void MicroTxnAuthorizationResponse_t_123_w_from_u(void *dst, const void *
     d->m_ulOrderID = s->m_ulOrderID;
     d->m_bAuthorized = s->m_bAuthorized;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_MicroTxnAuthorizationResponse_t_123::operator w64_MicroTxnAuthorizationResponse_t_123() const
 {
     w64_MicroTxnAuthorizationResponse_t_123 ret;
@@ -14294,7 +14294,7 @@ static void PS3TrophiesInstalled_t_123_u_from_w(void *dst, const void *src)
     d->m_eResult = s->m_eResult;
     d->m_ulRequiredDiskSpace = s->m_ulRequiredDiskSpace;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_PS3TrophiesInstalled_t_123::operator u64_PS3TrophiesInstalled_t_123() const
 {
     u64_PS3TrophiesInstalled_t_123 ret;
@@ -14313,7 +14313,7 @@ static void PS3TrophiesInstalled_t_123_w_from_u(void *dst, const void *src)
     d->m_eResult = s->m_eResult;
     d->m_ulRequiredDiskSpace = s->m_ulRequiredDiskSpace;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_PS3TrophiesInstalled_t_123::operator w64_PS3TrophiesInstalled_t_123() const
 {
     w64_PS3TrophiesInstalled_t_123 ret;
@@ -14485,7 +14485,7 @@ static void RemoteStorageAppSyncProgress_t_123_u_from_w(void *dst, const void *s
     d->m_dAppPercentComplete = s->m_dAppPercentComplete;
     d->m_bUploading = s->m_bUploading;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_RemoteStorageAppSyncProgress_t_123::operator u64_RemoteStorageAppSyncProgress_t_123() const
 {
     u64_RemoteStorageAppSyncProgress_t_123 ret;
@@ -14506,7 +14506,7 @@ static void RemoteStorageAppSyncProgress_t_123_w_from_u(void *dst, const void *s
     d->m_dAppPercentComplete = s->m_dAppPercentComplete;
     d->m_bUploading = s->m_bUploading;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_RemoteStorageAppSyncProgress_t_123::operator w64_RemoteStorageAppSyncProgress_t_123() const
 {
     w64_RemoteStorageAppSyncProgress_t_123 ret;
@@ -14631,7 +14631,7 @@ static void RemoteStorageDeletePublishedFileResult_t_123_u_from_w(void *dst, con
     d->m_eResult = s->m_eResult;
     d->m_nPublishedFileId = s->m_nPublishedFileId;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_RemoteStorageDeletePublishedFileResult_t_123::operator u64_RemoteStorageDeletePublishedFileResult_t_123() const
 {
     u64_RemoteStorageDeletePublishedFileResult_t_123 ret;
@@ -14649,7 +14649,7 @@ static void RemoteStorageDeletePublishedFileResult_t_123_w_from_u(void *dst, con
     d->m_eResult = s->m_eResult;
     d->m_nPublishedFileId = s->m_nPublishedFileId;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_RemoteStorageDeletePublishedFileResult_t_123::operator w64_RemoteStorageDeletePublishedFileResult_t_123() const
 {
     w64_RemoteStorageDeletePublishedFileResult_t_123 ret;
@@ -14892,7 +14892,7 @@ static void RemoteStorageDownloadUGCResult_t_123_u_from_w(void *dst, const void 
     d->m_pchFileName = s->m_pchFileName;
     d->m_ulSteamIDOwner = s->m_ulSteamIDOwner;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_RemoteStorageDownloadUGCResult_t_123::operator u64_RemoteStorageDownloadUGCResult_t_123() const
 {
     u64_RemoteStorageDownloadUGCResult_t_123 ret;
@@ -14914,7 +14914,7 @@ static void RemoteStorageDownloadUGCResult_t_123_w_from_u(void *dst, const void 
     d->m_pchFileName = s->m_pchFileName;
     d->m_ulSteamIDOwner = s->m_ulSteamIDOwner;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_RemoteStorageDownloadUGCResult_t_123::operator w64_RemoteStorageDownloadUGCResult_t_123() const
 {
     w64_RemoteStorageDownloadUGCResult_t_123 ret;
@@ -15118,7 +15118,7 @@ static void RemoteStorageEnumerateUserPublishedFilesResult_t_123_u_from_w(void *
     d->m_nTotalResultCount = s->m_nTotalResultCount;
     d->m_rgPublishedFileId = s->m_rgPublishedFileId;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_RemoteStorageEnumerateUserPublishedFilesResult_t_123::operator u64_RemoteStorageEnumerateUserPublishedFilesResult_t_123() const
 {
     u64_RemoteStorageEnumerateUserPublishedFilesResult_t_123 ret;
@@ -15138,7 +15138,7 @@ static void RemoteStorageEnumerateUserPublishedFilesResult_t_123_w_from_u(void *
     d->m_nTotalResultCount = s->m_nTotalResultCount;
     d->m_rgPublishedFileId = s->m_rgPublishedFileId;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_RemoteStorageEnumerateUserPublishedFilesResult_t_123::operator w64_RemoteStorageEnumerateUserPublishedFilesResult_t_123() const
 {
     w64_RemoteStorageEnumerateUserPublishedFilesResult_t_123 ret;
@@ -15295,7 +15295,7 @@ static void RemoteStorageEnumerateUserSharedWorkshopFilesResult_t_123_u_from_w(v
     d->m_nTotalResultCount = s->m_nTotalResultCount;
     d->m_rgPublishedFileId = s->m_rgPublishedFileId;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_RemoteStorageEnumerateUserSharedWorkshopFilesResult_t_123::operator u64_RemoteStorageEnumerateUserSharedWorkshopFilesResult_t_123() const
 {
     u64_RemoteStorageEnumerateUserSharedWorkshopFilesResult_t_123 ret;
@@ -15315,7 +15315,7 @@ static void RemoteStorageEnumerateUserSharedWorkshopFilesResult_t_123_w_from_u(v
     d->m_nTotalResultCount = s->m_nTotalResultCount;
     d->m_rgPublishedFileId = s->m_rgPublishedFileId;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_RemoteStorageEnumerateUserSharedWorkshopFilesResult_t_123::operator w64_RemoteStorageEnumerateUserSharedWorkshopFilesResult_t_123() const
 {
     w64_RemoteStorageEnumerateUserSharedWorkshopFilesResult_t_123 ret;
@@ -15489,7 +15489,7 @@ static void RemoteStorageEnumerateUserSubscribedFilesResult_t_123_u_from_w(void 
     d->m_rgPublishedFileId = s->m_rgPublishedFileId;
     d->m_rgRTimeSubscribed = s->m_rgRTimeSubscribed;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_RemoteStorageEnumerateUserSubscribedFilesResult_t_123::operator u64_RemoteStorageEnumerateUserSubscribedFilesResult_t_123() const
 {
     u64_RemoteStorageEnumerateUserSubscribedFilesResult_t_123 ret;
@@ -15510,7 +15510,7 @@ static void RemoteStorageEnumerateUserSubscribedFilesResult_t_123_w_from_u(void 
     d->m_rgPublishedFileId = s->m_rgPublishedFileId;
     d->m_rgRTimeSubscribed = s->m_rgRTimeSubscribed;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_RemoteStorageEnumerateUserSubscribedFilesResult_t_123::operator w64_RemoteStorageEnumerateUserSubscribedFilesResult_t_123() const
 {
     w64_RemoteStorageEnumerateUserSubscribedFilesResult_t_123 ret;
@@ -15752,7 +15752,7 @@ static void RemoteStorageEnumerateWorkshopFilesResult_t_125_u_from_w(void *dst, 
     d->m_nAppId = s->m_nAppId;
     d->m_unStartIndex = s->m_unStartIndex;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_RemoteStorageEnumerateWorkshopFilesResult_t_125::operator u64_RemoteStorageEnumerateWorkshopFilesResult_t_125() const
 {
     u64_RemoteStorageEnumerateWorkshopFilesResult_t_125 ret;
@@ -15775,7 +15775,7 @@ static void RemoteStorageEnumerateWorkshopFilesResult_t_125_w_from_u(void *dst, 
     d->m_nAppId = s->m_nAppId;
     d->m_unStartIndex = s->m_unStartIndex;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_RemoteStorageEnumerateWorkshopFilesResult_t_125::operator w64_RemoteStorageEnumerateWorkshopFilesResult_t_125() const
 {
     w64_RemoteStorageEnumerateWorkshopFilesResult_t_125 ret;
@@ -15814,7 +15814,7 @@ static void RemoteStorageEnumerateWorkshopFilesResult_t_123_u_from_w(void *dst, 
     d->m_rgPublishedFileId = s->m_rgPublishedFileId;
     d->m_rgScore = s->m_rgScore;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_RemoteStorageEnumerateWorkshopFilesResult_t_123::operator u64_RemoteStorageEnumerateWorkshopFilesResult_t_123() const
 {
     u64_RemoteStorageEnumerateWorkshopFilesResult_t_123 ret;
@@ -15835,7 +15835,7 @@ static void RemoteStorageEnumerateWorkshopFilesResult_t_123_w_from_u(void *dst, 
     d->m_rgPublishedFileId = s->m_rgPublishedFileId;
     d->m_rgScore = s->m_rgScore;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_RemoteStorageEnumerateWorkshopFilesResult_t_123::operator w64_RemoteStorageEnumerateWorkshopFilesResult_t_123() const
 {
     w64_RemoteStorageEnumerateWorkshopFilesResult_t_123 ret;
@@ -15993,7 +15993,7 @@ static void RemoteStorageFileShareResult_t_128x_u_from_w(void *dst, const void *
     d->m_hFile = s->m_hFile;
     d->m_rgchFilename = s->m_rgchFilename;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_RemoteStorageFileShareResult_t_128x::operator u64_RemoteStorageFileShareResult_t_128x() const
 {
     u64_RemoteStorageFileShareResult_t_128x ret;
@@ -16012,7 +16012,7 @@ static void RemoteStorageFileShareResult_t_128x_w_from_u(void *dst, const void *
     d->m_hFile = s->m_hFile;
     d->m_rgchFilename = s->m_rgchFilename;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_RemoteStorageFileShareResult_t_128x::operator w64_RemoteStorageFileShareResult_t_128x() const
 {
     w64_RemoteStorageFileShareResult_t_128x ret;
@@ -16048,7 +16048,7 @@ static void RemoteStorageFileShareResult_t_123_u_from_w(void *dst, const void *s
     d->m_eResult = s->m_eResult;
     d->m_hFile = s->m_hFile;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_RemoteStorageFileShareResult_t_123::operator u64_RemoteStorageFileShareResult_t_123() const
 {
     u64_RemoteStorageFileShareResult_t_123 ret;
@@ -16066,7 +16066,7 @@ static void RemoteStorageFileShareResult_t_123_w_from_u(void *dst, const void *s
     d->m_eResult = s->m_eResult;
     d->m_hFile = s->m_hFile;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_RemoteStorageFileShareResult_t_123::operator w64_RemoteStorageFileShareResult_t_123() const
 {
     w64_RemoteStorageFileShareResult_t_123 ret;
@@ -17116,7 +17116,7 @@ static void RemoteStorageGetPublishedFileDetailsResult_t_126_u_from_w(void *dst,
     d->m_eFileType = s->m_eFileType;
     d->m_bAcceptedForUse = s->m_bAcceptedForUse;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_RemoteStorageGetPublishedFileDetailsResult_t_126::operator u64_RemoteStorageGetPublishedFileDetailsResult_t_126() const
 {
     u64_RemoteStorageGetPublishedFileDetailsResult_t_126 ret;
@@ -17153,7 +17153,7 @@ static void RemoteStorageGetPublishedFileDetailsResult_t_126_w_from_u(void *dst,
     d->m_eFileType = s->m_eFileType;
     d->m_bAcceptedForUse = s->m_bAcceptedForUse;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_RemoteStorageGetPublishedFileDetailsResult_t_126::operator w64_RemoteStorageGetPublishedFileDetailsResult_t_126() const
 {
     w64_RemoteStorageGetPublishedFileDetailsResult_t_126 ret;
@@ -17207,7 +17207,7 @@ static void RemoteStorageGetPublishedFileDetailsResult_t_123_u_from_w(void *dst,
     d->m_rgchURL = s->m_rgchURL;
     d->m_eFileType = s->m_eFileType;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_RemoteStorageGetPublishedFileDetailsResult_t_123::operator u64_RemoteStorageGetPublishedFileDetailsResult_t_123() const
 {
     u64_RemoteStorageGetPublishedFileDetailsResult_t_123 ret;
@@ -17243,7 +17243,7 @@ static void RemoteStorageGetPublishedFileDetailsResult_t_123_w_from_u(void *dst,
     d->m_rgchURL = s->m_rgchURL;
     d->m_eFileType = s->m_eFileType;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_RemoteStorageGetPublishedFileDetailsResult_t_123::operator w64_RemoteStorageGetPublishedFileDetailsResult_t_123() const
 {
     w64_RemoteStorageGetPublishedFileDetailsResult_t_123 ret;
@@ -17665,7 +17665,7 @@ static void RemoteStorageGetPublishedItemVoteDetailsResult_t_123_u_from_w(void *
     d->m_nReports = s->m_nReports;
     d->m_fScore = s->m_fScore;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_RemoteStorageGetPublishedItemVoteDetailsResult_t_123::operator u64_RemoteStorageGetPublishedItemVoteDetailsResult_t_123() const
 {
     u64_RemoteStorageGetPublishedItemVoteDetailsResult_t_123 ret;
@@ -17687,7 +17687,7 @@ static void RemoteStorageGetPublishedItemVoteDetailsResult_t_123_w_from_u(void *
     d->m_nReports = s->m_nReports;
     d->m_fScore = s->m_fScore;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_RemoteStorageGetPublishedItemVoteDetailsResult_t_123::operator w64_RemoteStorageGetPublishedItemVoteDetailsResult_t_123() const
 {
     w64_RemoteStorageGetPublishedItemVoteDetailsResult_t_123 ret;
@@ -17847,7 +17847,7 @@ static void RemoteStoragePublishFileResult_t_125_u_from_w(void *dst, const void 
     d->m_nPublishedFileId = s->m_nPublishedFileId;
     d->m_bUserNeedsToAcceptWorkshopLegalAgreement = s->m_bUserNeedsToAcceptWorkshopLegalAgreement;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_RemoteStoragePublishFileResult_t_125::operator u64_RemoteStoragePublishFileResult_t_125() const
 {
     u64_RemoteStoragePublishFileResult_t_125 ret;
@@ -17866,7 +17866,7 @@ static void RemoteStoragePublishFileResult_t_125_w_from_u(void *dst, const void 
     d->m_nPublishedFileId = s->m_nPublishedFileId;
     d->m_bUserNeedsToAcceptWorkshopLegalAgreement = s->m_bUserNeedsToAcceptWorkshopLegalAgreement;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_RemoteStoragePublishFileResult_t_125::operator w64_RemoteStoragePublishFileResult_t_125() const
 {
     w64_RemoteStoragePublishFileResult_t_125 ret;
@@ -17902,7 +17902,7 @@ static void RemoteStoragePublishFileResult_t_123_u_from_w(void *dst, const void 
     d->m_eResult = s->m_eResult;
     d->m_nPublishedFileId = s->m_nPublishedFileId;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_RemoteStoragePublishFileResult_t_123::operator u64_RemoteStoragePublishFileResult_t_123() const
 {
     u64_RemoteStoragePublishFileResult_t_123 ret;
@@ -17920,7 +17920,7 @@ static void RemoteStoragePublishFileResult_t_123_w_from_u(void *dst, const void 
     d->m_eResult = s->m_eResult;
     d->m_nPublishedFileId = s->m_nPublishedFileId;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_RemoteStoragePublishFileResult_t_123::operator w64_RemoteStoragePublishFileResult_t_123() const
 {
     w64_RemoteStoragePublishFileResult_t_123 ret;
@@ -18024,7 +18024,7 @@ static void RemoteStoragePublishedFileUpdated_t_u_from_w(void *dst, const void *
     d->m_nAppID = s->m_nAppID;
     d->m_ulUnused = s->m_ulUnused;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_RemoteStoragePublishedFileUpdated_t::operator u64_RemoteStoragePublishedFileUpdated_t() const
 {
     u64_RemoteStoragePublishedFileUpdated_t ret;
@@ -18043,7 +18043,7 @@ static void RemoteStoragePublishedFileUpdated_t_w_from_u(void *dst, const void *
     d->m_nAppID = s->m_nAppID;
     d->m_ulUnused = s->m_ulUnused;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_RemoteStoragePublishedFileUpdated_t::operator w64_RemoteStoragePublishedFileUpdated_t() const
 {
     w64_RemoteStoragePublishedFileUpdated_t ret;
@@ -18144,7 +18144,7 @@ static void RemoteStorageSetUserPublishedFileActionResult_t_123_u_from_w(void *d
     d->m_nPublishedFileId = s->m_nPublishedFileId;
     d->m_eAction = s->m_eAction;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_RemoteStorageSetUserPublishedFileActionResult_t_123::operator u64_RemoteStorageSetUserPublishedFileActionResult_t_123() const
 {
     u64_RemoteStorageSetUserPublishedFileActionResult_t_123 ret;
@@ -18163,7 +18163,7 @@ static void RemoteStorageSetUserPublishedFileActionResult_t_123_w_from_u(void *d
     d->m_nPublishedFileId = s->m_nPublishedFileId;
     d->m_eAction = s->m_eAction;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_RemoteStorageSetUserPublishedFileActionResult_t_123::operator w64_RemoteStorageSetUserPublishedFileActionResult_t_123() const
 {
     w64_RemoteStorageSetUserPublishedFileActionResult_t_123 ret;
@@ -18276,7 +18276,7 @@ static void RemoteStorageSubscribePublishedFileResult_t_123_u_from_w(void *dst, 
     d->m_eResult = s->m_eResult;
     d->m_nPublishedFileId = s->m_nPublishedFileId;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_RemoteStorageSubscribePublishedFileResult_t_123::operator u64_RemoteStorageSubscribePublishedFileResult_t_123() const
 {
     u64_RemoteStorageSubscribePublishedFileResult_t_123 ret;
@@ -18294,7 +18294,7 @@ static void RemoteStorageSubscribePublishedFileResult_t_123_w_from_u(void *dst, 
     d->m_eResult = s->m_eResult;
     d->m_nPublishedFileId = s->m_nPublishedFileId;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_RemoteStorageSubscribePublishedFileResult_t_123::operator w64_RemoteStorageSubscribePublishedFileResult_t_123() const
 {
     w64_RemoteStorageSubscribePublishedFileResult_t_123 ret;
@@ -18370,7 +18370,7 @@ static void RemoteStorageUnsubscribePublishedFileResult_t_123_u_from_w(void *dst
     d->m_eResult = s->m_eResult;
     d->m_nPublishedFileId = s->m_nPublishedFileId;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_RemoteStorageUnsubscribePublishedFileResult_t_123::operator u64_RemoteStorageUnsubscribePublishedFileResult_t_123() const
 {
     u64_RemoteStorageUnsubscribePublishedFileResult_t_123 ret;
@@ -18388,7 +18388,7 @@ static void RemoteStorageUnsubscribePublishedFileResult_t_123_w_from_u(void *dst
     d->m_eResult = s->m_eResult;
     d->m_nPublishedFileId = s->m_nPublishedFileId;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_RemoteStorageUnsubscribePublishedFileResult_t_123::operator w64_RemoteStorageUnsubscribePublishedFileResult_t_123() const
 {
     w64_RemoteStorageUnsubscribePublishedFileResult_t_123 ret;
@@ -18617,7 +18617,7 @@ static void RemoteStorageUpdatePublishedFileResult_t_125_u_from_w(void *dst, con
     d->m_nPublishedFileId = s->m_nPublishedFileId;
     d->m_bUserNeedsToAcceptWorkshopLegalAgreement = s->m_bUserNeedsToAcceptWorkshopLegalAgreement;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_RemoteStorageUpdatePublishedFileResult_t_125::operator u64_RemoteStorageUpdatePublishedFileResult_t_125() const
 {
     u64_RemoteStorageUpdatePublishedFileResult_t_125 ret;
@@ -18636,7 +18636,7 @@ static void RemoteStorageUpdatePublishedFileResult_t_125_w_from_u(void *dst, con
     d->m_nPublishedFileId = s->m_nPublishedFileId;
     d->m_bUserNeedsToAcceptWorkshopLegalAgreement = s->m_bUserNeedsToAcceptWorkshopLegalAgreement;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_RemoteStorageUpdatePublishedFileResult_t_125::operator w64_RemoteStorageUpdatePublishedFileResult_t_125() const
 {
     w64_RemoteStorageUpdatePublishedFileResult_t_125 ret;
@@ -18672,7 +18672,7 @@ static void RemoteStorageUpdatePublishedFileResult_t_123_u_from_w(void *dst, con
     d->m_eResult = s->m_eResult;
     d->m_nPublishedFileId = s->m_nPublishedFileId;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_RemoteStorageUpdatePublishedFileResult_t_123::operator u64_RemoteStorageUpdatePublishedFileResult_t_123() const
 {
     u64_RemoteStorageUpdatePublishedFileResult_t_123 ret;
@@ -18690,7 +18690,7 @@ static void RemoteStorageUpdatePublishedFileResult_t_123_w_from_u(void *dst, con
     d->m_eResult = s->m_eResult;
     d->m_nPublishedFileId = s->m_nPublishedFileId;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_RemoteStorageUpdatePublishedFileResult_t_123::operator w64_RemoteStorageUpdatePublishedFileResult_t_123() const
 {
     w64_RemoteStorageUpdatePublishedFileResult_t_123 ret;
@@ -18809,7 +18809,7 @@ static void RemoteStorageUpdateUserPublishedItemVoteResult_t_123_u_from_w(void *
     d->m_eResult = s->m_eResult;
     d->m_nPublishedFileId = s->m_nPublishedFileId;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_RemoteStorageUpdateUserPublishedItemVoteResult_t_123::operator u64_RemoteStorageUpdateUserPublishedItemVoteResult_t_123() const
 {
     u64_RemoteStorageUpdateUserPublishedItemVoteResult_t_123 ret;
@@ -18827,7 +18827,7 @@ static void RemoteStorageUpdateUserPublishedItemVoteResult_t_123_w_from_u(void *
     d->m_eResult = s->m_eResult;
     d->m_nPublishedFileId = s->m_nPublishedFileId;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_RemoteStorageUpdateUserPublishedItemVoteResult_t_123::operator w64_RemoteStorageUpdateUserPublishedItemVoteResult_t_123() const
 {
     w64_RemoteStorageUpdateUserPublishedItemVoteResult_t_123 ret;
@@ -18963,7 +18963,7 @@ static void RemoteStorageUserVoteDetails_t_123_u_from_w(void *dst, const void *s
     d->m_nPublishedFileId = s->m_nPublishedFileId;
     d->m_eVote = s->m_eVote;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_RemoteStorageUserVoteDetails_t_123::operator u64_RemoteStorageUserVoteDetails_t_123() const
 {
     u64_RemoteStorageUserVoteDetails_t_123 ret;
@@ -18982,7 +18982,7 @@ static void RemoteStorageUserVoteDetails_t_123_w_from_u(void *dst, const void *s
     d->m_nPublishedFileId = s->m_nPublishedFileId;
     d->m_eVote = s->m_eVote;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_RemoteStorageUserVoteDetails_t_123::operator w64_RemoteStorageUserVoteDetails_t_123() const
 {
     w64_RemoteStorageUserVoteDetails_t_123 ret;
@@ -19088,7 +19088,7 @@ static void RemoveAppDependencyResult_t_u_from_w(void *dst, const void *src)
     d->m_nPublishedFileId = s->m_nPublishedFileId;
     d->m_nAppID = s->m_nAppID;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_RemoveAppDependencyResult_t::operator u64_RemoveAppDependencyResult_t() const
 {
     u64_RemoveAppDependencyResult_t ret;
@@ -19107,7 +19107,7 @@ static void RemoveAppDependencyResult_t_w_from_u(void *dst, const void *src)
     d->m_nPublishedFileId = s->m_nPublishedFileId;
     d->m_nAppID = s->m_nAppID;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_RemoveAppDependencyResult_t::operator w64_RemoveAppDependencyResult_t() const
 {
     w64_RemoveAppDependencyResult_t ret;
@@ -19176,7 +19176,7 @@ static void RemoveUGCDependencyResult_t_u_from_w(void *dst, const void *src)
     d->m_nPublishedFileId = s->m_nPublishedFileId;
     d->m_nChildPublishedFileId = s->m_nChildPublishedFileId;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_RemoveUGCDependencyResult_t::operator u64_RemoveUGCDependencyResult_t() const
 {
     u64_RemoveUGCDependencyResult_t ret;
@@ -19195,7 +19195,7 @@ static void RemoveUGCDependencyResult_t_w_from_u(void *dst, const void *src)
     d->m_nPublishedFileId = s->m_nPublishedFileId;
     d->m_nChildPublishedFileId = s->m_nChildPublishedFileId;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_RemoveUGCDependencyResult_t::operator w64_RemoveUGCDependencyResult_t() const
 {
     w64_RemoveUGCDependencyResult_t ret;
@@ -19264,7 +19264,7 @@ static void RequestPlayersForGameFinalResultCallback_t_u_from_w(void *dst, const
     d->m_ullSearchID = s->m_ullSearchID;
     d->m_ullUniqueGameID = s->m_ullUniqueGameID;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_RequestPlayersForGameFinalResultCallback_t::operator u64_RequestPlayersForGameFinalResultCallback_t() const
 {
     u64_RequestPlayersForGameFinalResultCallback_t ret;
@@ -19283,7 +19283,7 @@ static void RequestPlayersForGameFinalResultCallback_t_w_from_u(void *dst, const
     d->m_ullSearchID = s->m_ullSearchID;
     d->m_ullUniqueGameID = s->m_ullUniqueGameID;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_RequestPlayersForGameFinalResultCallback_t::operator w64_RequestPlayersForGameFinalResultCallback_t() const
 {
     w64_RequestPlayersForGameFinalResultCallback_t ret;
@@ -19343,7 +19343,7 @@ static void RequestPlayersForGameProgressCallback_t_u_from_w(void *dst, const vo
     d->m_eResult = s->m_eResult;
     d->m_ullSearchID = s->m_ullSearchID;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_RequestPlayersForGameProgressCallback_t::operator u64_RequestPlayersForGameProgressCallback_t() const
 {
     u64_RequestPlayersForGameProgressCallback_t ret;
@@ -19361,7 +19361,7 @@ static void RequestPlayersForGameProgressCallback_t_w_from_u(void *dst, const vo
     d->m_eResult = s->m_eResult;
     d->m_ullSearchID = s->m_ullSearchID;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_RequestPlayersForGameProgressCallback_t::operator w64_RequestPlayersForGameProgressCallback_t() const
 {
     w64_RequestPlayersForGameProgressCallback_t ret;
@@ -19493,7 +19493,7 @@ static void RequestPlayersForGameResultCallback_t_u_from_w(void *dst, const void
     d->m_nSuggestedTeamIndex = s->m_nSuggestedTeamIndex;
     d->m_ullUniqueGameID = s->m_ullUniqueGameID;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_RequestPlayersForGameResultCallback_t::operator u64_RequestPlayersForGameResultCallback_t() const
 {
     u64_RequestPlayersForGameResultCallback_t ret;
@@ -19519,7 +19519,7 @@ static void RequestPlayersForGameResultCallback_t_w_from_u(void *dst, const void
     d->m_nSuggestedTeamIndex = s->m_nSuggestedTeamIndex;
     d->m_ullUniqueGameID = s->m_ullUniqueGameID;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_RequestPlayersForGameResultCallback_t::operator w64_RequestPlayersForGameResultCallback_t() const
 {
     w64_RequestPlayersForGameResultCallback_t ret;
@@ -19624,7 +19624,7 @@ static void SteamInputConfigurationLoaded_t_u_from_w(void *dst, const void *src)
     d->m_bUsesSteamInputAPI = s->m_bUsesSteamInputAPI;
     d->m_bUsesGamepadAPI = s->m_bUsesGamepadAPI;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_SteamInputConfigurationLoaded_t::operator u64_SteamInputConfigurationLoaded_t() const
 {
     u64_SteamInputConfigurationLoaded_t ret;
@@ -19647,7 +19647,7 @@ static void SteamInputConfigurationLoaded_t_w_from_u(void *dst, const void *src)
     d->m_bUsesSteamInputAPI = s->m_bUsesSteamInputAPI;
     d->m_bUsesGamepadAPI = s->m_bUsesGamepadAPI;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_SteamInputConfigurationLoaded_t::operator w64_SteamInputConfigurationLoaded_t() const
 {
     w64_SteamInputConfigurationLoaded_t ret;
@@ -19734,7 +19734,7 @@ static void SteamInputGamepadSlotChange_t_u_from_w(void *dst, const void *src)
     d->m_nOldGamepadSlot = s->m_nOldGamepadSlot;
     d->m_nNewGamepadSlot = s->m_nNewGamepadSlot;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_SteamInputGamepadSlotChange_t::operator u64_SteamInputGamepadSlotChange_t() const
 {
     u64_SteamInputGamepadSlotChange_t ret;
@@ -19755,7 +19755,7 @@ static void SteamInputGamepadSlotChange_t_w_from_u(void *dst, const void *src)
     d->m_nOldGamepadSlot = s->m_nOldGamepadSlot;
     d->m_nNewGamepadSlot = s->m_nNewGamepadSlot;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_SteamInputGamepadSlotChange_t::operator w64_SteamInputGamepadSlotChange_t() const
 {
     w64_SteamInputGamepadSlotChange_t ret;
@@ -19824,7 +19824,7 @@ static void SteamInventoryStartPurchaseResult_t_u_from_w(void *dst, const void *
     d->m_ulOrderID = s->m_ulOrderID;
     d->m_ulTransID = s->m_ulTransID;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_SteamInventoryStartPurchaseResult_t::operator u64_SteamInventoryStartPurchaseResult_t() const
 {
     u64_SteamInventoryStartPurchaseResult_t ret;
@@ -19843,7 +19843,7 @@ static void SteamInventoryStartPurchaseResult_t_w_from_u(void *dst, const void *
     d->m_ulOrderID = s->m_ulOrderID;
     d->m_ulTransID = s->m_ulTransID;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_SteamInventoryStartPurchaseResult_t::operator w64_SteamInventoryStartPurchaseResult_t() const
 {
     w64_SteamInventoryStartPurchaseResult_t ret;
@@ -19976,7 +19976,7 @@ static void SteamNetConnectionStatusChangedCallback_t_153a_u_from_w(void *dst, c
     d->m_info = s->m_info;
     d->m_eOldState = s->m_eOldState;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_SteamNetConnectionStatusChangedCallback_t_153a::operator u64_SteamNetConnectionStatusChangedCallback_t_153a() const
 {
     u64_SteamNetConnectionStatusChangedCallback_t_153a ret;
@@ -19995,7 +19995,7 @@ static void SteamNetConnectionStatusChangedCallback_t_153a_w_from_u(void *dst, c
     d->m_info = s->m_info;
     d->m_eOldState = s->m_eOldState;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_SteamNetConnectionStatusChangedCallback_t_153a::operator w64_SteamNetConnectionStatusChangedCallback_t_153a() const
 {
     w64_SteamNetConnectionStatusChangedCallback_t_153a ret;
@@ -20032,7 +20032,7 @@ static void SteamNetConnectionStatusChangedCallback_t_144_u_from_w(void *dst, co
     d->m_info = s->m_info;
     d->m_eOldState = s->m_eOldState;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_SteamNetConnectionStatusChangedCallback_t_144::operator u64_SteamNetConnectionStatusChangedCallback_t_144() const
 {
     u64_SteamNetConnectionStatusChangedCallback_t_144 ret;
@@ -20051,7 +20051,7 @@ static void SteamNetConnectionStatusChangedCallback_t_144_w_from_u(void *dst, co
     d->m_info = s->m_info;
     d->m_eOldState = s->m_eOldState;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_SteamNetConnectionStatusChangedCallback_t_144::operator w64_SteamNetConnectionStatusChangedCallback_t_144() const
 {
     w64_SteamNetConnectionStatusChangedCallback_t_144 ret;
@@ -20088,7 +20088,7 @@ static void SteamNetConnectionStatusChangedCallback_t_151_u_from_w(void *dst, co
     d->m_info = s->m_info;
     d->m_eOldState = s->m_eOldState;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_SteamNetConnectionStatusChangedCallback_t_151::operator u64_SteamNetConnectionStatusChangedCallback_t_151() const
 {
     u64_SteamNetConnectionStatusChangedCallback_t_151 ret;
@@ -20107,7 +20107,7 @@ static void SteamNetConnectionStatusChangedCallback_t_151_w_from_u(void *dst, co
     d->m_info = s->m_info;
     d->m_eOldState = s->m_eOldState;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_SteamNetConnectionStatusChangedCallback_t_151::operator w64_SteamNetConnectionStatusChangedCallback_t_151() const
 {
     w64_SteamNetConnectionStatusChangedCallback_t_151 ret;
@@ -20615,7 +20615,7 @@ static void SteamPartyBeaconLocation_t_u_from_w(void *dst, const void *src)
     d->m_eType = s->m_eType;
     d->m_ulLocationID = s->m_ulLocationID;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_SteamPartyBeaconLocation_t::operator u64_SteamPartyBeaconLocation_t() const
 {
     u64_SteamPartyBeaconLocation_t ret;
@@ -20633,7 +20633,7 @@ static void SteamPartyBeaconLocation_t_w_from_u(void *dst, const void *src)
     d->m_eType = s->m_eType;
     d->m_ulLocationID = s->m_ulLocationID;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_SteamPartyBeaconLocation_t::operator w64_SteamPartyBeaconLocation_t() const
 {
     w64_SteamPartyBeaconLocation_t ret;
@@ -20757,7 +20757,7 @@ static void SteamUGCRequestUGCDetailsResult_t_160_u_from_w(void *dst, const void
     d->m_details = s->m_details;
     d->m_bCachedData = s->m_bCachedData;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_SteamUGCRequestUGCDetailsResult_t_160::operator u64_SteamUGCRequestUGCDetailsResult_t_160() const
 {
     u64_SteamUGCRequestUGCDetailsResult_t_160 ret;
@@ -20775,7 +20775,7 @@ static void SteamUGCRequestUGCDetailsResult_t_160_w_from_u(void *dst, const void
     d->m_details = s->m_details;
     d->m_bCachedData = s->m_bCachedData;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_SteamUGCRequestUGCDetailsResult_t_160::operator w64_SteamUGCRequestUGCDetailsResult_t_160() const
 {
     w64_SteamUGCRequestUGCDetailsResult_t_160 ret;
@@ -20811,7 +20811,7 @@ static void SteamUGCRequestUGCDetailsResult_t_128x_u_from_w(void *dst, const voi
     d->m_details = s->m_details;
     d->m_bCachedData = s->m_bCachedData;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_SteamUGCRequestUGCDetailsResult_t_128x::operator u64_SteamUGCRequestUGCDetailsResult_t_128x() const
 {
     u64_SteamUGCRequestUGCDetailsResult_t_128x ret;
@@ -20829,7 +20829,7 @@ static void SteamUGCRequestUGCDetailsResult_t_128x_w_from_u(void *dst, const voi
     d->m_details = s->m_details;
     d->m_bCachedData = s->m_bCachedData;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_SteamUGCRequestUGCDetailsResult_t_128x::operator w64_SteamUGCRequestUGCDetailsResult_t_128x() const
 {
     w64_SteamUGCRequestUGCDetailsResult_t_128x ret;
@@ -20865,7 +20865,7 @@ static void SteamUGCRequestUGCDetailsResult_t_129_u_from_w(void *dst, const void
     d->m_details = s->m_details;
     d->m_bCachedData = s->m_bCachedData;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_SteamUGCRequestUGCDetailsResult_t_129::operator u64_SteamUGCRequestUGCDetailsResult_t_129() const
 {
     u64_SteamUGCRequestUGCDetailsResult_t_129 ret;
@@ -20883,7 +20883,7 @@ static void SteamUGCRequestUGCDetailsResult_t_129_w_from_u(void *dst, const void
     d->m_details = s->m_details;
     d->m_bCachedData = s->m_bCachedData;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_SteamUGCRequestUGCDetailsResult_t_129::operator w64_SteamUGCRequestUGCDetailsResult_t_129() const
 {
     w64_SteamUGCRequestUGCDetailsResult_t_129 ret;
@@ -20918,7 +20918,7 @@ static void SteamUGCRequestUGCDetailsResult_t_126_u_from_w(void *dst, const void
 
     d->m_details = s->m_details;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_SteamUGCRequestUGCDetailsResult_t_126::operator u64_SteamUGCRequestUGCDetailsResult_t_126() const
 {
     u64_SteamUGCRequestUGCDetailsResult_t_126 ret;
@@ -20935,7 +20935,7 @@ static void SteamUGCRequestUGCDetailsResult_t_126_w_from_u(void *dst, const void
 
     d->m_details = s->m_details;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_SteamUGCRequestUGCDetailsResult_t_126::operator w64_SteamUGCRequestUGCDetailsResult_t_126() const
 {
     w64_SteamUGCRequestUGCDetailsResult_t_126 ret;
@@ -21004,7 +21004,7 @@ static void SubmitPlayerResultResultCallback_t_u_from_w(void *dst, const void *s
     d->ullUniqueGameID = s->ullUniqueGameID;
     d->steamIDPlayer = s->steamIDPlayer;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 w64_SubmitPlayerResultResultCallback_t::operator u64_SubmitPlayerResultResultCallback_t() const
 {
     u64_SubmitPlayerResultResultCallback_t ret;
@@ -21023,7 +21023,7 @@ static void SubmitPlayerResultResultCallback_t_w_from_u(void *dst, const void *s
     d->ullUniqueGameID = s->ullUniqueGameID;
     d->steamIDPlayer = s->steamIDPlayer;
 }
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 u64_SubmitPlayerResultResultCallback_t::operator w64_SubmitPlayerResultResultCallback_t() const
 {
     w64_SubmitPlayerResultResultCallback_t ret;
@@ -21163,7 +21163,7 @@ const struct callback_def callback_data[] =
     { 5302, 162, 16, 12, CreateBeaconCallback_t_w_from_u },
 };
 #endif
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 const struct callback_def callback_data[] =
 {
     { 152, 162, 24, 16, MicroTxnAuthorizationResponse_t_123_w_from_u },

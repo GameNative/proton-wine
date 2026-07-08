@@ -6387,7 +6387,7 @@ struct w_steam_iface *create_winISteamUserStats_STEAMUSERSTATS_INTERFACE_VERSION
 
 void init_winISteamUserStats_rtti( char *base )
 {
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
     init_winISteamUserStats_STEAMUSERSTATS_INTERFACE_VERSION001_rtti( base );
     init_winISteamUserStats_STEAMUSERSTATS_INTERFACE_VERSION002_rtti( base );
     init_winISteamUserStats_STEAMUSERSTATS_INTERFACE_VERSION003_rtti( base );

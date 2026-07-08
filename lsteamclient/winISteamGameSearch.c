@@ -233,7 +233,7 @@ struct w_steam_iface *create_winISteamGameSearch_SteamMatchGameSearch001(void *u
 
 void init_winISteamGameSearch_rtti( char *base )
 {
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
     init_winISteamGameSearch_SteamMatchGameSearch001_rtti( base );
 #endif /* __x86_64__ */
 }

@@ -491,7 +491,7 @@ struct w_steam_iface *create_winISteamRemotePlay_STEAMREMOTEPLAY_INTERFACE_VERSI
 
 void init_winISteamRemotePlay_rtti( char *base )
 {
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
     init_winISteamRemotePlay_STEAMREMOTEPLAY_INTERFACE_VERSION001_rtti( base );
     init_winISteamRemotePlay_STEAMREMOTEPLAY_INTERFACE_VERSION002_rtti( base );
     init_winISteamRemotePlay_STEAMREMOTEPLAY_INTERFACE_VERSION003_rtti( base );

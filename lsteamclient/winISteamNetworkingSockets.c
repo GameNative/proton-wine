@@ -3262,7 +3262,7 @@ struct w_steam_iface *create_winISteamNetworkingSockets_SteamNetworkingSockets01
 
 void init_winISteamNetworkingSockets_rtti( char *base )
 {
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
     init_winISteamNetworkingSockets_SteamNetworkingSockets002_rtti( base );
     init_winISteamNetworkingSockets_SteamNetworkingSockets004_rtti( base );
     init_winISteamNetworkingSockets_SteamNetworkingSockets006_rtti( base );

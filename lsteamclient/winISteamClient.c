@@ -8205,7 +8205,7 @@ struct w_steam_iface *create_winISteamClient_SteamClient021(void *u_iface)
 
 void init_winISteamClient_rtti( char *base )
 {
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
     init_winISteamClient_SteamClient006_rtti( base );
     init_winISteamClient_SteamClient007_rtti( base );
     init_winISteamClient_SteamClient008_rtti( base );

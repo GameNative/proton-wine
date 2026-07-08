@@ -98,7 +98,7 @@ struct w_steam_iface *create_winISteamAppList_STEAMAPPLIST_INTERFACE_VERSION001(
 
 void init_winISteamAppList_rtti( char *base )
 {
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
     init_winISteamAppList_STEAMAPPLIST_INTERFACE_VERSION001_rtti( base );
 #endif /* __x86_64__ */
 }
