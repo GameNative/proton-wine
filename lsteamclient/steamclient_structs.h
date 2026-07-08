@@ -40,7 +40,7 @@ extern "C"
 #define W_PTR W32_PTR
 #endif
 
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 #define U64_PTR( decl, name ) decl
 #define U32_PTR( decl, name ) uint32_t name
 #define W64_PTR( decl, name ) decl
