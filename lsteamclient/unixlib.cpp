@@ -9,6 +9,41 @@
 #include <unordered_map>
 #include <vector>
 
+#if defined(__ANDROID__)
+#include <android/log.h>
+#include <unistd.h>
+
+/* Resolve __android_log_print lazily via dlsym so we don't need to link liblog.so. */
+static int lsteam_android_log( int prio, const char *tag, const char *fmt, ... )
+{
+    typedef int (*alp_t)( int, const char *, const char *, ... );
+    static alp_t alp = NULL;
+    static int tried = 0;
+    va_list ap;
+    int r = 0;
+
+    if (!tried)
+    {
+        void *h = dlopen( "liblog.so", RTLD_NOW );
+        if (h) alp = (alp_t)dlsym( h, "__android_log_print" );
+        tried = 1;
+    }
+    if (!alp) return 0;
+
+    va_start( ap, fmt );
+    {
+        char buf[1024];
+        vsnprintf( buf, sizeof(buf), fmt, ap );
+        r = alp( prio, tag, "%s", buf );
+    }
+    va_end( ap );
+    return r;
+}
+#define LSTEAM_LOGCAT(...) lsteam_android_log( ANDROID_LOG_INFO, "lsteamclient.unix", __VA_ARGS__ )
+#else
+#define LSTEAM_LOGCAT(...) ((void)0)
+#endif
+
 #if 0
 #pragma makedep unix
 #endif
@@ -683,10 +718,23 @@ static NTSTATUS steamclient_init_registry( Params *params, bool wow64 )
     int pipe, user, error;
 
     client = (u_ISteamClient_SteamClient017 *)p_CreateInterface( "SteamClient017", &error );
-    if (!(pipe = client->CreateSteamPipe()) || !(user = client->ConnectToGlobalUser( pipe )))
+    pipe = 0;
+    user = 0;
+
+    pipe = client->CreateSteamPipe();
+    if (!pipe)
     {
-        ERR( "Failed to connect to Steam\n" );
-        if (pipe) client->BReleaseSteamPipe( pipe );
+        ERR( "Failed to connect to Steam: CreateSteamPipe returned 0 (libsteamclient.so daemon not reachable). HOME=%s TMPDIR=%s\n",
+             debugstr_a(getenv("HOME")), debugstr_a(getenv("TMPDIR")) );
+        return 0;
+    }
+
+    user = client->ConnectToGlobalUser( pipe );
+    if (!user)
+    {
+        ERR( "Failed to connect to Steam: ConnectToGlobalUser(pipe=%d) returned 0 (daemon reachable but no logged-in global user). HOME=%s TMPDIR=%s\n",
+             pipe, debugstr_a(getenv("HOME")), debugstr_a(getenv("TMPDIR")) );
+        client->BReleaseSteamPipe( pipe );
         return 0;
     }
 
@@ -735,7 +783,11 @@ static NTSTATUS steamclient_init( Params *params, bool wow64 )
 #error Unknown target architecture
 #endif
 
+#if defined(__ANDROID__)
+    snprintf( path, PATH_MAX, "/data/data/app.gamenative/files/imagefs/usr/lib/libsteamclient.so" );
+#else
     snprintf( path, PATH_MAX, "%s/.steam/sdk" STEAM_ARCH "/steamclient.so", getenv( "HOME" ) );
+#endif
 #undef STEAM_ARCH
 
     if (realpath( path, resolved_path ))
@@ -745,11 +797,18 @@ static NTSTATUS steamclient_init( Params *params, bool wow64 )
     }
 #endif /* __APPLE__ */
 
+    LSTEAM_LOGCAT( "steamclient_init: about to dlopen path=\"%s\" pid=%d",
+                   path, (int)getpid() );
+
     if (!(steamclient = dlopen( path, RTLD_NOW )))
     {
+        LSTEAM_LOGCAT( "steamclient_init: dlopen FAILED for \"%s\" (dlerror=%s)",
+                       path, dlerror() );
         ERR( "unable to load native steamclient library\n" );
         return -1;
     }
+
+    LSTEAM_LOGCAT( "steamclient_init: dlopen ok handle=%p path=\"%s\"", steamclient, path );
 
 #define LOAD_FUNC( x )                                         \
     if (!(p_##x = (decltype(p_##x))dlsym( steamclient, #x )))  \
@@ -765,6 +824,9 @@ static NTSTATUS steamclient_init( Params *params, bool wow64 )
     LOAD_FUNC( Steam_ReleaseThreadLocalMemory );
     LOAD_FUNC( Steam_IsKnownInterface );
     LOAD_FUNC( Steam_NotifyMissingInterface );
+
+    LSTEAM_LOGCAT( "steamclient_init: symbols resolved CreateInterface=%p Steam_BGetCallback=%p",
+                   (void *)p_CreateInterface, (void *)p_Steam_BGetCallback );
 
     TRACE( "Loaded host steamclient from %s\n", debugstr_a(path) );
     return 0;
@@ -789,15 +851,16 @@ static NTSTATUS steamclient_get_unix_buffer( Params *params, bool wow64 )
     struct cache_entry *entry;
     struct rb_entry *ptr;
 
-    pthread_mutex_lock( &buffer_cache_lock );
-    auto iter = buffer_cache.find( params->buf );
-    if (iter != buffer_cache.end()) params->ptr = iter->second;
-    else
-    {
-        memcpy( params->ptr, (char *)params->buf, params->buf.len );
-        buffer_cache[params->buf] = params->ptr;
-    }
-    pthread_mutex_unlock( &buffer_cache_lock );
+    /* Do NOT cache/dedup by host pointer. The host reuses freed addresses, so a cache
+     * keyed by pointer is fundamentally unsafe: a hit can be stale for the current key,
+     * and worse, "refreshing" the shared buffer mutates it out from under an earlier
+     * caller that still holds it (and races other threads) -> GetLobbyData intermittently
+     * returns another key's value and the game crashes indexing on it. Each call gets its
+     * OWN fresh buffer (params->ptr, allocated buf.len by the caller) with a current copy.
+     * Only reached on the 32-bit-game / 64-bit-host path (Android); desktop takes the
+     * direct-pointer fast path in get_unix_buffer() and never gets here. */
+    (void)buffer_cache; (void)buffer_cache_lock;
+    memcpy( params->ptr, (char *)params->buf, params->buf.len );
 
     return 0;
 }
@@ -806,6 +869,11 @@ template< typename Params >
 static NTSTATUS steamclient_CreateInterface( Params *params, bool wow64 )
 {
     params->_ret = p_CreateInterface( params->name, params->return_code );
+    LSTEAM_LOGCAT( "CreateInterface(\"%s\") -> %p (rc=%d) wow64=%d",
+                   params->name ? params->name : "(null)",
+                   (void *)params->_ret,
+                   params->return_code ? *params->return_code : -1,
+                   (int)wow64 );
     return 0;
 }
 

@@ -6,6 +6,14 @@
 #include <stdint.h>
 #include <assert.h>
 
+/* Pull in libc/libc++ declarations of wcsncpy/strncpy/etc before
+ * <winbase.h> turns them into poison macros, and disable Win32's
+ * min/max macros so std::max/std::min in C++ sources don't expand. */
+#ifdef __cplusplus
+#define NOMINMAX
+#include <array>
+#endif /* __cplusplus */
+
 #include <windef.h>
 #include <winbase.h>
 #include <winternl.h>
