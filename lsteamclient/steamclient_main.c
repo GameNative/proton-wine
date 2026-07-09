@@ -82,7 +82,22 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, void *reserved)
 
 NTSTATUS steamclient_call( unsigned int code, void *args, const char *name )
 {
-    NTSTATUS status = WINE_UNIX_CALL( code, args );
+    /* CALLDIAG: time every IPC call to the unix/host side and flag stalls, so we
+     * can identify exactly WHICH call blocks long enough to break the X connection
+     * (the ~100-130ms mid-frame freeze). Logs the call name + duration on any call
+     * slower than the threshold. ERR so it shows regardless of WINEDEBUG. Remove
+     * after diagnosis. */
+    LARGE_INTEGER t0, t1, freq;
+    NTSTATUS status;
+    LONGLONG us;
+
+    QueryPerformanceCounter( &t0 );
+    status = WINE_UNIX_CALL( code, args );
+    QueryPerformanceCounter( &t1 );
+    QueryPerformanceFrequency( &freq );
+    us = freq.QuadPart ? (t1.QuadPart - t0.QuadPart) * 1000000 / freq.QuadPart : 0;
+    if (us > 30000) /* >30ms: a stall worth naming */
+        ERR( "CALLDIAG: SLOW call %s took %lld us (code=%u)\n", name, us, code );
 
     if (status == STATUS_ACCESS_VIOLATION)
     {
@@ -515,6 +530,12 @@ next_event:
     if (!(win_msg->m_pubParam = HeapAlloc( GetProcessHeap(), 0, win_msg->m_cubParam ))) return FALSE;
     last_callback_data = win_msg->m_pubParam;
     STEAMCLIENT_CALL( steamclient_callback_message_receive, &receive_params );
+
+    /* CBDIAG: log every callback the game receives so we can identify which one
+     * precedes a graceful SteamAPI_Shutdown (game being told to close). ERR so it
+     * appears regardless of WINEDEBUG channel settings. Remove after diagnosis. */
+    ERR( "CBDIAG: Steam_BGetCallback pipe=%d user=%d callbackID=%d cubParam=%u\n",
+         pipe, win_msg->m_hSteamUser, win_msg->m_iCallback, win_msg->m_cubParam );
 
     if (win_msg->m_iCallback == 0x14b) /* GameOverlayActivated_t::k_iCallback */
     {
