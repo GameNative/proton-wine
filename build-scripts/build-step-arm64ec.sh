@@ -25,7 +25,7 @@ export DLLTOOL=$LLVM_MINGW_TOOLCHAIN/llvm-dlltool
 
 export PKG_CONFIG_LIBDIR=$deps/lib/pkgconfig:$deps/share/pkgconfig
 export ACLOCAL_PATH=$deps/lib/aclocal:$deps/share/aclocal
-export CPPFLAGS="-I$deps/include --sysroot=$TOOLCHAIN/../sysroot"
+export CPPFLAGS="--sysroot=$TOOLCHAIN/../sysroot -idirafter $deps/include"
 
 export C_OPTS="-Wno-declaration-after-statement -Wno-implicit-function-declaration -Wno-int-conversion"
 export CFLAGS=$C_OPTS
@@ -134,6 +134,7 @@ do
       --with-vulkan \
       --without-wayland \
       --without-xcomposite \
+      --without-xcursor \
       --without-xfixes \
       --without-xinerama \
       --without-xrandr \
@@ -146,81 +147,82 @@ do
 
     PATCHES=(
       # android network patch
-      "common/dlls_dnsapi_libresolv_c.patch"
-      "common/dlls_dnsapi_record_c.patch"
-      "common/dlls_nsiproxy_sys_ip_c.patch"
-      "common/dlls_nsiproxy_sys_ndis_c.patch"
-      "common/dlls_nsiproxy_sys_nsi_common_h.patch"
-      "common/dlls_user32_makefile_in.patch"
-      "common/dlls_ws2_32_socket_c.patch"
-      "common/server_token_c.patch"
-      "common/server_unicode_c.patch"
+      "dlls_dnsapi_libresolv_c.patch"
+      "dlls_dnsapi_record_c.patch"
+      "dlls_nsiproxy_sys_ip_c.patch"
+      "dlls_nsiproxy_sys_ndis_c.patch"
+      "dlls_nsiproxy_sys_nsi_common_h.patch"
+      "dlls_ws2_32_socket_c.patch"
+      "server_token_c.patch"
+      "server_unicode_c.patch"
 
       # midi support
-      "common/midi_support.patch"
+      "midi_support.patch"
 
       # sdl patch
-      "common/dlls_winebus_sys_bus_sdl_c.patch"
+      "dlls_winebus_sys_bus_sdl_c.patch"
 
       # shm_utils
-      "common/dlls_ntdll_unix_esync_c.patch"
-      "common/dlls_ntdll_unix_fsync_c.patch"
-      "common/server_esync_c.patch"
-      "common/server_fsync_c.patch"
+      "dlls_ntdll_unix_esync_c.patch"
+      "dlls_ntdll_unix_fsync_c.patch"
+      "server_esync_c.patch"
+      "server_fsync_c.patch"
 
       # winex11
-      "common/dlls_winex11_drv_bitblt_c.patch"
-      "common/dlls_winex11_drv_desktop_c.patch"
-      "common/dlls_winex11_drv_keyboard_c.patch"
-      "common/dlls_winex11_drv_mouse_c.patch"
-      "common/dlls_winex11_drv_opengl_c.patch"
-      "common/dlls_winex11_drv_window_c.patch"
-      "common/dlls_winex11_drv_x11drv_h.patch"
-      "common/dlls_winex11_drv_x11drv_main_c.patch"
+      "dlls_winex11_drv_x11drv_h.patch"
+      "dlls_winex11_drv_bitblt_c.patch"
+      "dlls_winex11_drv_desktop_c.patch"
+      "dlls_winex11_drv_mouse_c.patch"
+      "dlls_winex11_drv_window_c.patch"
+      "dlls_winex11_drv_keyboard_c.patch"
+      "dlls_winex11_drv_x11drv_main_c.patch"
 
       # address space patches
-      "common/loader_preloader_c.patch"
       "arm64ec/dlls_ntdll_unix_virtual_c.patch"
+      "loader_preloader_c.patch"
 
-      # syscall Patches (use test-bylaws below)
-      # "arm64ec/dlls_wow64_syscall_c.patch"
+      # syscall Patches
+      "dlls_ntdll_unix_signal_x86_64_c.patch"
 
       # pulse Patches
-      "common/dlls_winepulse_drv_pulse_c.patch"
+      "dlls_winepulse_drv_pulse_c.patch"
 
       # desktop patches
-      "common/programs_explorer_desktop_c.patch"
+      "programs_explorer_desktop_c.patch"
 
       # path patches
-      "common/dlls_ntdll_unix_server_c.patch"
+      "dlls_ntdll_unix_server_c.patch"
 
       # winlator patches
-      "common/dlls_amd_ags_x64_unixlib_c.patch"
+      "dlls_amd_ags_x64_unixlib_c.patch"
+      "dlls_winex11_drv_opengl_c.patch"
 
       # shortcut patch
-      "common/programs_winemenubuilder_winemenubuilder_c.patch"
+      "programs_winemenubuilder_winemenubuilder_c.patch"
 
-      # xuser patches
-      "common/dlls_advapi32_advapi_c.patch"
+      # advapi32 patches
+      "dlls_advapi32_advapi_c.patch"
 
       # browser patches
-      "common/programs_winebrowser_makefile_in.patch"
-      "common/programs_winebrowser_main_c.patch"
+      "programs_winebrowser_makefile_in.patch"
+      "programs_winebrowser_main_c.patch"
 
       # clipboard patches
-      "common/dlls_user32_clipboard_c.patch"
-      "common/dlls_win32u_clipboard_c.patch"
+      "dlls_user32_clipboard_c.patch"
+      "dlls_win32u_clipboard_c.patch"
+
+      # user32 patches
+      "dlls_user32_makefile_in.patch"
 
       # fexcore patch
-      "arm64ec/dlls_ntdll_loader_c.patch"
-      "arm64ec/dlls_ntdll_unix_loader_c.patch"
-      "arm64ec/loader_wine_inf_in.patch"
-      "test-bylaws/programs_services_services_c.patch"
-      "test-bylaws/dlls_winecrt0_arm64ec_c.patch"
+      "dlls_ntdll_loader_c.patch"
+      "dlls_ntdll_unix_loader_c.patch"
+      "dlls_wow64_syscall_c.patch"
+      "loader_wine_inf_in.patch"
 
       # fix build
-      "arm64ec/dlls_wdscore_wdscore_spec.patch"
-      "arm64ec/programs_wineboot_wineboot_c.patch"
+      "programs_wineboot_wineboot_c.patch"
+      "dlls_wdscore_wdscore_spec.patch"
 
       # 1. Extended State (XSTATE/YMM) Support Patches
       "test-bylaws/dlls_ntdll_unwind_h.patch"
@@ -230,35 +232,25 @@ do
       "test-bylaws/dlls_ntdll_signal_arm64_c.patch"
       "test-bylaws/dlls_ntdll_signal_arm64ec_c.patch"
       "test-bylaws/dlls_ntdll_signal_x86_64_c.patch"
-      "test-bylaws/dlls_ntdll_unix_debug_c.patch"
-      "test-bylaws/dlls_ntdll_unix_signal_arm64_c.patch"
-      "test-bylaws/dlls_ntdll_unix_signal_arm_c.patch"
-      "test-bylaws/dlls_ntdll_unix_signal_i386_c.patch"
-      "test-bylaws/dlls_ntdll_unix_unix_private_h.patch"
       "test-bylaws/dlls_ntdll_ntdll_spec.patch"
       "test-bylaws/dlls_ntdll_ntdll_misc_h.patch"
       "test-bylaws/dlls_wow64_process_c.patch"
-      "test-bylaws/dlls_wow64_syscall_c.patch"
       "test-bylaws/dlls_wow64_wow64_spec.patch"
 
       # 3. Process and Virtual Memory Management
       "test-bylaws/dlls_wow64_virtual_c.patch"
+      "test-bylaws/server_process_c.patch"
       "test-bylaws/dlls_ntdll_unix_process_c.patch"
 
       # 4. Server and Threading Infrastructure
-      "test-bylaws/dlls_ntdll_unix_thread_c.patch"
-      "test-bylaws/server_process_c.patch"
       "test-bylaws/server_thread_h.patch"
       "test-bylaws/server_thread_c.patch"
-      "test-bylaws/server_mapping_c.patch"
+      "test-bylaws/dlls_ntdll_unix_thread_c.patch"
 
       # 5. Internal Headers
       "test-bylaws/include_winternl_h.patch"
 
-      # 6. build vcruntime140_1 with aarch64
-      "test-bylaws/dlls_vcruntime140_1_vcruntime140_1_spec.patch"
-
-      # 7. Build System (Optional)
+      # 6. Build System (Optional)
 #      "test-bylaws/tools_makedep_c.patch"
     )
 
