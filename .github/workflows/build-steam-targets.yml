@@ -1,8 +1,10 @@
 name: Build Steam Components
 
 on:
+  push:
+    branches: [ proton_10.0_add_steam_clean ]
   pull_request:
-    branches: [ main, master, proton_10.0 ]
+    branches: [ main, master, proton_10.0, proton_9.0, proton_11.0 ]
   merge_group:
     branches: [ main, master, proton_10.0 ]
   workflow_dispatch:
