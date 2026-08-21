@@ -615,6 +615,7 @@ static const WCHAR *hack_append_command_line( const WCHAR *cmd )
         {L"EverQuest 2\\LaunchPad.exe", L" --use-gl=swiftshader"},
         {L"Everquest F2P\\LaunchPad.exe", L" --use-gl=swiftshader"},
         {L"Red Tie Runner.exe", L" --use-angle=gl"},
+        {L"SocialClubHelper.exe", L" --disable-gpu --disable-gpu-compositing --disable-gpu-rasterization", "1174180"},
         {L"UnrealCEFSubProcess.exe", L" --use-gl=swiftshader", "2316580"},
         {L"UnrealCEFSubProcess.exe", L" --use-angle=d3d9", "2684500"},
     };
