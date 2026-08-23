@@ -531,7 +531,10 @@ static void destroy_thread( struct object *obj )
     if (thread->token) release_object( thread->token );
 
     if (do_esync())
+    {
         close( thread->esync_fd );
+        close( thread->esync_apc_fd );
+    }
     if (thread->fsync_idx)
     {
         fsync_free_shm_idx( thread->fsync_idx );
