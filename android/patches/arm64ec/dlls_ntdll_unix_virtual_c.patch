@@ -1,0 +1,108 @@
+diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
+index d5b93415c2a..8f55ebf95f0 100644
+--- a/dlls/ntdll/unix/virtual.c
++++ b/dlls/ntdll/unix/virtual.c
+@@ -100,6 +100,10 @@
+ #include "unix_private.h"
+ #include "wine/debug.h"
+ 
++#ifdef __ANDROID__
++#include "../../android/shm_utils/shm_utils.h"
++#endif
++
+ WINE_DEFAULT_DEBUG_CHANNEL(virtual);
+ WINE_DECLARE_DEBUG_CHANNEL(module);
+ WINE_DECLARE_DEBUG_CHANNEL(virtual_ranges);
+@@ -373,6 +377,9 @@ static void *preload_reserve_end;
+ static BOOL force_exec_prot;  /* whether to force PROT_EXEC on all PROT_READ mmaps */
+ static BOOL enable_write_exceptions;  /* raise exception on writes to executable memory */
+ 
++#define FEX_STATS_SHM_MAX_SIZE 0x400000
++static void *fex_stats_shm;
++
+ struct range_entry
+ {
+     void *base;
+@@ -413,6 +420,7 @@ void *anon_mmap_alloc( size_t size, int prot )
+ #ifdef USE_UFFD_WRITEWATCH
+ static void kernel_writewatch_init(void)
+ {
++#ifndef __ANDROID__
+     struct uffdio_api uffdio_api;
+ 
+     uffd_fd = syscall( __NR_userfaultfd, O_CLOEXEC | O_NONBLOCK | UFFD_USER_MODE_ONLY );
+@@ -434,6 +442,10 @@ static void kernel_writewatch_init(void)
+     }
+     use_kernel_writewatch = 1;
+     TRACE( "Using kernel write watches.\n" );
++#else
++    TRACE( "Kernel writewatches are not supported on Android\n" );
++    use_kernel_writewatch = 0;
++#endif
+ }
+ 
+ static void kernel_writewatch_reset( void *start, SIZE_T len )
+@@ -6558,6 +6570,49 @@ static unsigned int get_memory_image_info( HANDLE process, LPCVOID addr, MEMORY_
+     return status;
+ }
+ 
++#if defined(linux) && defined(__aarch64__)
++NTSTATUS get_memory_fex_stats_shm( HANDLE process, LPCVOID addr, MEMORY_FEX_STATS_SHM_INFORMATION *info,
++                                   SIZE_T len, SIZE_T *res_len)
++{
++    char buf[0x20];
++    int fd;
++    int oflag = O_RDWR;
++
++    if (len != sizeof(*info)) return STATUS_INFO_LENGTH_MISMATCH;
++    if (process != GetCurrentProcess()) return STATUS_INVALID_HANDLE;
++
++    sprintf( buf, "fex-%d-stats", getpid() );
++
++    if (!fex_stats_shm) {
++        fex_stats_shm = mmap( NULL, FEX_STATS_SHM_MAX_SIZE, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS |
++                              MAP_NORESERVE, -1, 0 );
++        if (fex_stats_shm == MAP_FAILED) {
++            fex_stats_shm = NULL;
++            return STATUS_INTERNAL_ERROR;
++        }
++
++        oflag |= O_CREAT | O_TRUNC;
++    }
++
++    fd = shm_open( buf, oflag, S_IRWXU | S_IRWXG | S_IRWXO );
++    if (fd == -1) return STATUS_INTERNAL_ERROR;
++
++    if (ftruncate( fd, info->map_size )) goto err;
++
++    if (mmap( fex_stats_shm, info->map_size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, fd,
++              0 ) == MAP_FAILED) goto err;
++
++    close( fd );
++
++    info->shm_base = fex_stats_shm;
++    *res_len = len;
++    return STATUS_SUCCESS;
++
++    err:
++        close( fd );
++    return STATUS_INTERNAL_ERROR;
++}
++#endif
+ 
+ /***********************************************************************
+  *             NtQueryVirtualMemory   (NTDLL.@)
+@@ -6603,6 +6658,13 @@ NTSTATUS WINAPI NtQueryVirtualMemory( HANDLE process, LPCVOID addr,
+             }
+             return STATUS_INVALID_HANDLE;
+ 
++        case MemoryFexStatsShm:
++#if defined(linux) && defined(__aarch64__)
++            return get_memory_fex_stats_shm( process, addr, buffer, len, res_len );
++#else
++            FIXME("MemoryFexStatsShm unsupported\n");
++            break;
++#endif
+         default:
+             FIXME("(%p,%p,info_class=%d,%p,%ld,%p) Unknown information class\n",
+                   process, addr, info_class, buffer, len, res_len);

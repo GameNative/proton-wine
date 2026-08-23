@@ -1,0 +1,21 @@
+diff --git a/dlls/winex11.drv/opengl.c b/dlls/winex11.drv/opengl.c
+index 8d9dc24adcc..59e7e08199a 100644
+--- a/dlls/winex11.drv/opengl.c
++++ b/dlls/winex11.drv/opengl.c
+@@ -666,7 +666,16 @@ UINT X11DRV_OpenGLInit( UINT version, const struct opengl_funcs *opengl_funcs, c
+ 
+     if(!X11DRV_WineGL_InitOpenglInfo()) goto failed;
+ 
++#ifdef __ANDROID__
++    int wine_x11forceglx = 0;
++    const char *val = getenv("WINE_X11FORCEGLX");
++    if (val)
++        wine_x11forceglx = atoi(val);
++
++    if (XQueryExtension( gdi_display, "GLX", &glx_opcode, &event_base, &error_base ) || wine_x11forceglx)
++#else
+     if (XQueryExtension( gdi_display, "GLX", &glx_opcode, &event_base, &error_base ))
++#endif
+     {
+         TRACE("GLX is up and running error_base = %d\n", error_base);
+     } else {

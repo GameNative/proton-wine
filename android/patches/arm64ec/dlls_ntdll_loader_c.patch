@@ -1,0 +1,16 @@
+diff --git a/dlls/ntdll/loader.c b/dlls/ntdll/loader.c
+index 113310a3075..36c36ace096 100644
+--- a/dlls/ntdll/loader.c
++++ b/dlls/ntdll/loader.c
+@@ -4148,6 +4148,11 @@ void WINAPI LdrShutdownThread(void)
+     /* don't do any detach calls if process is exiting */
+     if (process_detaching) return;
+ 
++    if (NtCurrentTeb()->SkipThreadAttach) {
++        heap_thread_detach();
++        return;
++    }
++
+     RtlProcessFlsData( NtCurrentTeb()->FlsSlots, 1 );
+ 
+     RtlEnterCriticalSection( &loader_section );

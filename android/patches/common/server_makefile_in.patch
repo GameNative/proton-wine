@@ -1,0 +1,12 @@
+diff --git a/server/Makefile.in b/server/Makefile.in
+index d9ac607f66f..7d6bc6798a1 100644
+--- a/server/Makefile.in
++++ b/server/Makefile.in
+@@ -52,6 +52,6 @@ SOURCES = \
+ 	winstation.c
+ 
+ UNIX_CFLAGS = $(INOTIFY_CFLAGS)
+-UNIX_LIBS   = $(LDEXECFLAGS) $(RT_LIBS) $(INOTIFY_LIBS) $(PROCSTAT_LIBS)
++UNIX_LIBS   = $(LDEXECFLAGS) $(RT_LIBS) $(INOTIFY_LIBS) $(PROCSTAT_LIBS) -lntsync_android
+ 
+ unicode_EXTRADEFS = -DBINDIR="\"${bindir}\"" -DDATADIR="\"${datadir}\""

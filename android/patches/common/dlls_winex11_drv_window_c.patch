@@ -1,0 +1,88 @@
+diff --git a/dlls/winex11.drv/window.c b/dlls/winex11.drv/window.c
+index d4f4f6fb664..83e420d075d 100644
+--- a/dlls/winex11.drv/window.c
++++ b/dlls/winex11.drv/window.c
+@@ -646,7 +646,9 @@ static void sync_window_style( struct x11drv_win_data *data )
+         TRACE( "window %p/%lx changing attributes mask %#x, serial %lu\n", data->hwnd,
+                data->whole_window, mask, NextRequest( data->display ) );
+         XChangeWindowAttributes( data->display, data->whole_window, mask, &attr );
++#ifdef HAVE_X11_EXTENSIONS_XINPUT2_H
+         x11drv_xinput2_enable( data->display, data->whole_window );
++#endif
+         sync_window_input_shape( data );
+     }
+ }
+@@ -1245,6 +1247,10 @@ static void set_initial_wm_hints( Display *display, Window window )
+     /* class hints */
+     if ((class_hints = XAllocClassHint()))
+     {
++#ifdef __ANDROID__
++        class_hints->res_name = process_name;
++        class_hints->res_class = process_name;
++#else
+         static char steam_proton[] = "steam_proton";
+         const char *app_id = getenv("SteamAppId");
+         char proton_app_class[128];
+@@ -1257,17 +1263,20 @@ static void set_initial_wm_hints( Display *display, Window window )
+             class_hints->res_name = steam_proton;
+             class_hints->res_class = steam_proton;
+         }
+-
++#endif
+         XSetClassHint( display, window, class_hints );
+         XFree( class_hints );
+     }
+ 
+     /* set the WM_CLIENT_MACHINE and WM_LOCALE_NAME properties */
+     XSetWMProperties(display, window, NULL, NULL, NULL, 0, NULL, NULL, NULL);
++
++#ifndef __ANDROID__
+     /* set the pid. together, these properties are needed so the window manager can kill us if we freeze */
+     i = getpid();
+     XChangeProperty(display, window, x11drv_atom(_NET_WM_PID),
+                     XA_CARDINAL, 32, PropModeReplace, (unsigned char *)&i, 1);
++#endif
+ 
+     XChangeProperty( display, window, x11drv_atom(XdndAware),
+                      XA_ATOM, 32, PropModeReplace, (unsigned char*)&dndVersion, 1 );
+@@ -2418,6 +2427,19 @@ void set_net_active_window( HWND hwnd, HWND previous )
+     TRACE( "requesting _NET_ACTIVE_WINDOW %p/%lx serial %lu\n", hwnd, window, data->net_active_window_serial );
+     XSendEvent( data->display, DefaultRootWindow( data->display ), False,
+                 SubstructureRedirectMask | SubstructureNotifyMask, &xev );
++    XFlush( data->display );
++
++#ifdef __ANDROID__
++    DWORD pid = 0;
++
++    NtUserGetWindowThread( hwnd, &pid );
++
++    XChangeProperty(data->display, window, x11drv_atom(_NET_WM_PID),
++                    XA_CARDINAL, 32, PropModeReplace, (unsigned char *)&pid, 1);
++
++    XChangeProperty( data->display, window, x11drv_atom(_NET_WM_HWND),
++                      XA_CARDINAL, 32, PropModeReplace, (unsigned char *)&hwnd, 2 );
++#endif
+ }
+ 
+ BOOL window_is_reparenting( HWND hwnd )
+@@ -2823,7 +2845,9 @@ static void create_whole_window( struct x11drv_win_data *data )
+     data->pending_state.rect = data->current_state.rect;
+     data->desired_state.rect = data->current_state.rect;
+ 
++#ifdef HAVE_X11_EXTENSIONS_XINPUT2_H
+     x11drv_xinput2_enable( data->display, data->whole_window );
++#endif
+     set_initial_wm_hints( data->display, data->whole_window );
+     set_wm_hints( data );
+ 
+@@ -3158,8 +3182,10 @@ BOOL X11DRV_CreateWindow( HWND hwnd )
+             if (!wcscmp( winstation_name, winsta0 ))
+             {
+                 /* listen to raw xinput event in the desktop window thread */
++#ifdef HAVE_X11_EXTENSIONS_XINPUT2_H
+                 data->xinput2_rawinput = TRUE;
+                 x11drv_xinput2_enable( data->display, DefaultRootWindow( data->display ) );
++#endif
+             }
+         }
+         /* create the cursor clipping window */

@@ -1,0 +1,19 @@
+diff --git a/dlls/ws2_32/socket.c b/dlls/ws2_32/socket.c
+index eb84558..1ac8495 100644
+--- a/dlls/ws2_32/socket.c
++++ b/dlls/ws2_32/socket.c
+@@ -582,7 +582,13 @@ BOOL WINAPI DllMain( HINSTANCE instance, DWORD reason, void *reserved )
+     switch (reason)
+     {
+     case DLL_PROCESS_ATTACH:
+-        return !__wine_init_unix_call();
++        /* On Android, ws2_32.so may fail to load due to a missing shared
++         * library dependency or Box64 translation issue.  Treat this as
++         * non-fatal so wineboot can complete; socket calls will return
++         * WSAENETDOWN later rather than aborting prefix initialization. */
++        if (__wine_init_unix_call())
++            WARN( "ws2_32 unix library init failed, socket calls will return errors\n" );
++        return TRUE;
+ 
+     case DLL_THREAD_DETACH:
+         free_per_thread_data();

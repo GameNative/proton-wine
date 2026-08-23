@@ -1,0 +1,20 @@
+diff --git a/server/unicode.c b/server/unicode.c
+index b486431..afa72d1 100644
+--- a/server/unicode.c
++++ b/server/unicode.c
+@@ -334,6 +334,15 @@ struct fd *load_intl_file(void)
+                            FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT ))) break;
+         free( path );
+     }
++    if (!fd && getenv("XDG_DATA_DIRS")) {
++        char *share_dir = getenv("XDG_DATA_DIRS");
++        char *path = malloc(strlen(share_dir) + strlen("/l_intl.nls") + 1);
++        sprintf(path, "%s/%s", share_dir, "wine/nls/l_intl.nls");
++        fd = open_fd( NULL, path, nt_name, O_RDONLY, &mode, FILE_READ_DATA,
++                      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
++                      FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT );
++        free ( path );
++    }
+     if (!fd) fatal_error( "failed to load l_intl.nls\n" );
+     unix_fd = get_unix_fd( fd );
+     /* read initial offset */

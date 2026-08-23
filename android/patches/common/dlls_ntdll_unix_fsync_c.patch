@@ -1,0 +1,14 @@
+diff --git a/dlls/ntdll/unix/fsync.c b/dlls/ntdll/unix/fsync.c
+index 25d41cac793..fd714c334e3 100644
+--- a/dlls/ntdll/unix/fsync.c
++++ b/dlls/ntdll/unix/fsync.c
+@@ -54,6 +54,9 @@
+ 
+ #include "unix_private.h"
+ #include "fsync.h"
++#ifdef __ANDROID__
++#include "../../../android/shm_utils/shm_utils.h"
++#endif
+ 
+ WINE_DEFAULT_DEBUG_CHANNEL(fsync);
+ 

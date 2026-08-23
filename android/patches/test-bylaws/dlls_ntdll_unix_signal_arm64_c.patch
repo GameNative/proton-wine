@@ -1,0 +1,68 @@
+diff --git a/dlls/ntdll/unix/signal_arm64.c b/dlls/ntdll/unix/signal_arm64.c
+index c18e6507f6c..be2fcafe5cb 100644
+--- a/dlls/ntdll/unix/signal_arm64.c
++++ b/dlls/ntdll/unix/signal_arm64.c
+@@ -237,6 +237,10 @@ void set_process_instrumentation_callback( void *callback )
+     if (callback) FIXME( "Not supported.\n" );
+ }
+ 
++static BOOL is_arm64ec_suspend_doorbell_valid(void)
++{
++    return is_arm64ec() && NtCurrentTeb()->ChpeV2CpuAreaInfo && NtCurrentTeb()->ChpeV2CpuAreaInfo->SuspendDoorbell;
++}
+ 
+ /***********************************************************************
+  *           syscall_frame_fixup_for_fastpath
+@@ -360,7 +364,18 @@ NTSTATUS signal_set_full_context( CONTEXT *context )
+     }
+     else status = NtSetContextThread( GetCurrentThread(), context );
+ 
+-    if (!status && (context->ContextFlags & CONTEXT_INTEGER) == CONTEXT_INTEGER)
++    if (is_arm64ec_suspend_doorbell_valid() && arm64_thread_data()->suspend_pending)
++    {
++        CONTEXT suspend_context;
++        *NtCurrentTeb()->ChpeV2CpuAreaInfo->SuspendDoorbell = 0;
++        arm64_thread_data()->suspend_pending = FALSE;
++        suspend_context.ContextFlags = CONTEXT_FULL | CONTEXT_EXCEPTION_REPORTING; /* TODO: check */
++        NtGetContextThread( GetCurrentThread(), &suspend_context );
++        wait_suspend( &suspend_context );
++        NtSetContextThread( GetCurrentThread(), &suspend_context );
++    }
++
++    if (!status && (context->ContextFlags & CONTEXT_INTEGER) == CONTEXT_INTEGER) /* TODO: also check with susp */
+         frame->restore_flags |= CONTEXT_INTEGER;
+ 
+     if (is_arm64ec() && !is_ec_code( frame->pc ))
+@@ -451,12 +466,20 @@ NTSTATUS WINAPI NtGetContextThread( HANDLE handle, CONTEXT *context )
+ {
+     struct syscall_frame *frame = get_syscall_frame();
+     DWORD needed_flags = context->ContextFlags & ~CONTEXT_ARM64;
+-    BOOL self = (handle == GetCurrentThread());
++    THREAD_BASIC_INFORMATION info;
++    NTSTATUS ret;
++    BOOL self;
++
++    NtQueryInformationThread( handle, ThreadBasicInformation, &info, sizeof(info), NULL );
++    self = HandleToULong( info.ClientId.UniqueThread ) == GetCurrentThreadId();
+ 
+     if (!self)
+     {
+-        NTSTATUS ret = get_thread_context( handle, context, &self, IMAGE_FILE_MACHINE_ARM64 );
+-        if (ret || !self) return ret;
++        /* Avoid exposing JIT code pointers to other processes on ARM64EC */
++        if (is_arm64ec()) NtSuspendThread( handle, NULL );
++        ret = get_thread_context( handle, context, &self, IMAGE_FILE_MACHINE_ARM64 );
++        if (is_arm64ec()) NtResumeThread( handle, NULL );
++        return ret;
+     }
+ 
+     if (needed_flags & CONTEXT_INTEGER)
+@@ -1052,6 +1075,8 @@ static BOOL handle_syscall_fault( ucontext_t *context, EXCEPTION_RECORD *rec )
+ 
+     if (!is_inside_syscall( SP_sig(context) )) return FALSE;
+ 
++    __wine_dbg_notify_syscall_fault();
++
+     TRACE( "code=%x flags=%x addr=%p pc=%p tid=%04x\n",
+            rec->ExceptionCode, rec->ExceptionFlags, rec->ExceptionAddress,
+            (void *)PC_sig(context), GetCurrentThreadId() );

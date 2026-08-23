@@ -1,0 +1,27 @@
+diff --git a/server/process.c b/server/process.c
+index 287718adc66..3ff0d68c261 100644
+--- a/server/process.c
++++ b/server/process.c
+@@ -67,6 +67,10 @@
+ 
+ #include "fsync.h"
+ 
++#ifdef __ANDROID__
++#include "../android/ntsync_android/ntsync_user.h"
++#endif
++
+ /* process object */
+ 
+ static struct list process_list = LIST_INIT(process_list);
+@@ -822,6 +826,11 @@ static void process_destroy( struct object *obj )
+     if (process->token) release_object( process->token );
+     if (process->sync) release_object( process->sync );
+     if (do_fsync()) fsync_cleanup_process_shm_indices( process->id );
++#ifdef __ANDROID__
++    /* userspace ntsync has no fd-close-on-death hook; reclaim objects whose
++     * creator process is gone */
++    ntsync_sweep_dead();
++#endif
+     list_remove( &process->rawinput_entry );
+     free( process->rawinput_devices );
+     free( process->dir_cache );

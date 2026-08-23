@@ -1,0 +1,41 @@
+diff --git a/include/winternl.h b/include/winternl.h
+index a7ba1c12974..5f39d3e7879 100644
+--- a/include/winternl.h
++++ b/include/winternl.h
+@@ -2037,8 +2037,15 @@ typedef enum _PROCESSINFOCLASS {
+     ProcessWineUnixDebuggerPid = 1100,
+     ProcessWineUnixPid = 1101,
+ #endif
++    ProcessFexHardwareTso = 2000,
++    ProcessFexUnalignAtomic,
+ } PROCESSINFOCLASS;
+ 
++// These match the prctl flag values
++#define FEX_UNALIGN_ATOMIC_EMULATE       (1ULL << 0)
++#define FEX_UNALIGN_ATOMIC_BACKPATCH     (1ULL << 1)
++#define FEX_UNALIGN_ATOMIC_STRICT_SPLIT_LOCKS    (1ULL << 2)
++
+ #define MEM_EXECUTE_OPTION_DISABLE   0x01
+ #define MEM_EXECUTE_OPTION_ENABLE    0x02
+ #define MEM_EXECUTE_OPTION_DISABLE_THUNK_EMULATION 0x04
+@@ -2460,6 +2467,7 @@ typedef enum _MEMORY_INFORMATION_CLASS {
+     MemoryWineUnixFuncs = 1000,
+     MemoryWineUnixWow64Funcs,
+ #endif
++    MemoryFexStatsShm = 2000,
+ } MEMORY_INFORMATION_CLASS;
+ 
+ typedef struct _MEMORY_SECTION_NAME
+@@ -2509,6 +2517,12 @@ typedef struct _MEMORY_REGION_INFORMATION
+     ULONG_PTR NodePreference;
+ } MEMORY_REGION_INFORMATION, *PMEMORY_REGION_INFORMATION;
+ 
++typedef struct _MEMORY_FEX_STATS_SHM_INFORMATION
++{
++    void *shm_base;
++    SIZE_T map_size;
++} MEMORY_FEX_STATS_SHM_INFORMATION, *PMEMORY_FEX_STATS_SHM_INFORMATION;
++
+ typedef struct _MEMORY_IMAGE_INFORMATION
+ {
+     PVOID ImageBase;

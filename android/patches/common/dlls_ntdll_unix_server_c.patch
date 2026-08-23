@@ -1,0 +1,46 @@
+diff --git a/dlls/ntdll/unix/server.c b/dlls/ntdll/unix/server.c
+index 112157b0dd7..d74c6a32b27 100644
+--- a/dlls/ntdll/unix/server.c
++++ b/dlls/ntdll/unix/server.c
+@@ -83,6 +83,10 @@
+ 
+ #include "fsync.h"
+ 
++#ifdef __ANDROID__
++#include "../../../android/ntsync_android/ntsync_user.h"
++#endif
++
+ WINE_DEFAULT_DEBUG_CHANNEL(server);
+ WINE_DECLARE_DEBUG_CHANNEL(syscall);
+ WINE_DECLARE_DEBUG_CHANNEL(client);
+@@ -1360,9 +1364,16 @@ static int setup_config_dir(void)
+ 
+     if (!mkdir( "dosdevices", 0777 ))
+     {
++#ifdef __ANDROID__
++        mkdir( "drive_d", 0777 );
++        symlink( "../drive_c", "dosdevices/c:" );
++        symlink( "/storage/emulated/0/", "dosdevices/d:" );
++        symlink( "/data/data/app.gamenative/files/imagefs/", "dosdevices/z:" );
++#else
+         mkdir( "drive_c", 0777 );
+         symlink( "../drive_c", "dosdevices/c:" );
+         symlink( "/", "dosdevices/z:" );
++#endif
+     }
+     else if (errno != EEXIST) fatal_perror( "cannot create %s/dosdevices", config_dir );
+ 
+@@ -1703,6 +1714,13 @@ size_t server_init_process(void)
+                 inproc_device_fd = FSYNC_USED_BY_SERVER;
+                 fsync_init( pid );
+             }
++#ifdef __ANDROID__
++            /* userspace ntsync: no device fd; attach to the shared region */
++            else if (reply->inproc_device == NTSYNC_ANDROID_USED_BY_SERVER)
++            {
++                if (!ntsync_init( NULL )) inproc_device_fd = 0;
++            }
++#endif
+             else if (reply->inproc_device)
+             {
+                 inproc_device_fd = wine_server_receive_fd( &handle );
