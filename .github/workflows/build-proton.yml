@@ -308,7 +308,7 @@ jobs:
           echo "Generated tag: ${TAG_NAME}"
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.generate_tag.outputs.tag_name }}
           name: Proton Wine 11.0-2 (${{ steps.generate_tag.outputs.tag_name }})
@@ -333,12 +333,11 @@ jobs:
             ### Features
             - Experimental userspace ntsync (via [ntsync-android](https://github.com/GameNative/ntsync-android)) + fsync
             - FEX integration (stats shm, `SkipThreadAttach` detach guard) via bylaws' arm64ec patches
+            - Integrated lsteamclient built into Proton (supports GameNative bionic Steam)
             - Stripped, `-g0 -O2` build: smaller tree, faster install (zstd-packed `.wcp`)
 
             ### Credits
-            Compile optimizations (ccache, -g0/strip, zstd packaging) are adopted from
-            [The412Banner/proton-wine](https://github.com/The412Banner/proton-wine)
-            release [build-p11-20260821](https://github.com/The412Banner/proton-wine/releases/tag/build-p11-20260821).
+            Compile optimizations (ccache, -g0/strip, zstd packaging) are adopted from [The412Banner/proton-wine](https://github.com/The412Banner/proton-wine) release [build-p11-20260821](https://github.com/The412Banner/proton-wine/releases/tag/build-p11-20260821).
 
             ### WCP Files
             **Proton Type:**
