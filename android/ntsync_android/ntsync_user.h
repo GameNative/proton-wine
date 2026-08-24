@@ -23,7 +23,9 @@
  * process that opens the same region path sees the same handles. Waits use
  * futexes on the shared pages.
  *
- * Not implemented: alertable waits (ntsync_wait_args.alert must be 0).
+ * Alertable waits are supported: if ntsync_wait_args.alert is nonzero it
+ * names an event object that aborts the wait; the wait returns success with
+ * index == count, exactly like the kernel ioctls.
  * Divergence from the kernel: closing an object other threads are waiting on
  * fails those waits with -EINVAL; objects leaked by a crashed process must
  * be reclaimed with ntsync_sweep_dead().
@@ -68,7 +70,8 @@ struct ntsync_wait_args {
     uint32_t flags;
     /* In: owner tid used to acquire mutexes. */
     uint32_t owner;
-    /* Unsupported; must be 0. */
+    /* In: optional alert event handle (0 = none); aborts the wait, which
+     * then returns success with index == count. */
     uint32_t alert;
     uint32_t pad;
 };
