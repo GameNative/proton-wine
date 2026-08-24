@@ -41,7 +41,7 @@ export DLLTOOL=$LLVM_MINGW_TOOLCHAIN/llvm-dlltool
 export PKG_CONFIG="${PKG_CONFIG:-$(command -v pkg-config)}"
 export PKG_CONFIG_LIBDIR=$deps/lib/pkgconfig:$deps/share/pkgconfig
 export ACLOCAL_PATH=$deps/lib/aclocal:$deps/share/aclocal
-export CPPFLAGS="-I$deps/include --sysroot=$TOOLCHAIN/../sysroot"
+export CPPFLAGS="--sysroot=$TOOLCHAIN/../sysroot -idirafter $deps/include"
 
 # -g0 + post-install llvm-strip keep the packaged tree small; ANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES
 # + max-page-size=16384 give 16KB page support on a single SDK 28 target.
