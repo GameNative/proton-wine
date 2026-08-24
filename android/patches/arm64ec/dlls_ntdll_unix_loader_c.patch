@@ -140,7 +140,7 @@ index f8aa468..291bf9b 100644
      set_thread_teb( teb );
  #endif
  
-+#if defined(M_PERTURB)
++#ifndef __ANDROID__
      mallopt( M_PERTURB, 0xff );
 +#endif
      init_startup_info();
@@ -150,7 +150,7 @@ index f8aa468..291bf9b 100644
      load_ntdll();
      load_wow64_ntdll( main_image_info.Machine );
      load_apiset_dll();
-+#if defined(M_PERTURB)
++#ifndef __ANDROID__
      mallopt( M_PERTURB, 0 );
 +#endif
      server_init_process_done();
