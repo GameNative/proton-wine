@@ -171,8 +171,8 @@ do
       --without-xcomposite \
       --without-xfixes \
       --without-xinerama \
-      --without-xrandr \
-      --without-xrender \
+      --with-xrandr \
+      --with-xrender \
       --without-xshape \
       --with-xshm \
       --without-xxf86vm
@@ -259,32 +259,29 @@ do
       "arm64ec/dlls_ntdll_loader_c.patch"
       "arm64ec/dlls_ntdll_unix_loader_c.patch"
 
+      # FEX unixlib loader (MemoryWineLoadUnixLibByName) support patches
+      "common/include_winternl_h.patch"
+      "common/include_wine_unixlib_h.patch"
+      "common/dlls_wow64_virtual_c.patch"
+      "common/dlls_ntdll_unix_unix_private_h.patch"
+
+      # bionic bug-fixes
+      "common/dlls_ntdll_unix_env_c.patch"
+      "common/dlls_shell32_shlfileop_c.patch"
+
       # fix build
       "arm64ec/programs_wineboot_wineboot_c.patch"
 
-      # 1. Extended State (XSTATE/YMM) Support Patches
-
-      # 2. Thread Suspension Patches
+      # 1. Thread Suspension Patches
       "test-bylaws/dlls_ntdll_unix_debug_c.patch"
       "test-bylaws/dlls_ntdll_unix_signal_arm64_c.patch"
       "test-bylaws/dlls_ntdll_unix_signal_arm_c.patch"
       "test-bylaws/dlls_ntdll_unix_signal_i386_c.patch"
-      "test-bylaws/dlls_ntdll_unix_unix_private_h.patch"
       "test-bylaws/dlls_ntdll_ntdll_misc_h.patch"
       "test-bylaws/dlls_wow64_syscall_c.patch"
 
-      # 3. Process and Virtual Memory Management
+      # 2. Process and Virtual Memory Management
       "test-bylaws/dlls_ntdll_unix_process_c.patch"
-
-      # 4. Server and Threading Infrastructure
-
-      # 5. Internal Headers
-      "test-bylaws/include_winternl_h.patch"
-
-      # 6. build vcruntime140_1 with aarch64
-
-      # 7. Build System (Optional)
-#      "test-bylaws/tools_makedep_c.patch"
     )
 
     for patch in "${PATCHES[@]}"; do

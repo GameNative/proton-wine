@@ -1,5 +1,5 @@
 diff --git a/dlls/ntdll/unix/loader.c b/dlls/ntdll/unix/loader.c
-index f8aa468..35bc233 100644
+index f8aa468..291bf9b 100644
 --- a/dlls/ntdll/unix/loader.c
 +++ b/dlls/ntdll/unix/loader.c
 @@ -340,7 +340,11 @@ static const char *get_pe_dir( WORD machine )
@@ -15,7 +15,128 @@ index f8aa468..35bc233 100644
      case IMAGE_FILE_MACHINE_ARMNT: return "/arm-windows";
      case IMAGE_FILE_MACHINE_ARM64: return "/aarch64-windows";
      default: return "";
-@@ -2451,7 +2455,9 @@ static void start_main_thread(void)
+@@ -362,6 +366,7 @@ static WORD get_alt_machine( WORD machine )
+ static void set_dll_path(void)
+ {
+     char *p, *path = getenv( "WINEDLLPATH" ), *be_runtime = getenv( "PROTON_BATTLEYE_RUNTIME" ), *eac_runtime = getenv( "PROTON_EAC_RUNTIME" );
++    char *prefix = getenv( "PREFIX" );
+     int i, count = 0;
+ 
+     if (path) for (p = path, count = 1; *p; p++) if (*p == ':') count++;
+@@ -372,6 +377,9 @@ static void set_dll_path(void)
+     if (eac_runtime)
+         count += 2;
+ 
++    if (prefix && *prefix)
++        count += 1;
++
+     dll_paths = malloc( (count + 2) * sizeof(*dll_paths) );
+     count = 0;
+ 
+@@ -420,6 +428,20 @@ static void set_dll_path(void)
+         dll_paths[count++] = p;
+     }
+ 
++    /* Winlator-bionic containers set PREFIX to the imagefs mount; components
++     * (e.g. a FEX-unix companion) drop their unixlibs under $PREFIX/lib/wine.
++     * Add it as the lowest-priority search dir so the builtin's own dir wins. */
++    if (prefix && *prefix)
++    {
++        const char suffix[] = "/lib/wine";
++
++        p = malloc( strlen(prefix) + strlen(suffix) + 1 );
++        strcpy(p, prefix);
++        strcat(p, suffix);
++
++        dll_paths[count++] = p;
++    }
++
+     for (i = 0; i < count; i++) dll_path_maxlen = max( dll_path_maxlen, strlen(dll_paths[i]) );
+     dll_paths[count] = NULL;
+ }
+@@ -1785,6 +1807,81 @@ NTSTATUS load_builtin( const struct pe_image_info *image_info, UNICODE_STRING *n
+ }
+ 
+ 
++/***********************************************************************
++ *           load_unixlib_by_name
++ */
++NTSTATUS load_unixlib_by_name( const UNICODE_STRING *nt_name, void **handle_ret )
++{
++    unsigned int i, pos, namepos, maxlen = 0;
++    unsigned int len = nt_name->Length / sizeof(WCHAR);
++    const char *so_dir = get_so_dir( current_machine );
++    char *ptr = NULL, *file, *ext = NULL;
++    void *handle = NULL;
++
++    if (!len) return STATUS_DLL_NOT_FOUND;
++
++    for (i = namepos = 0; i < len; i++)
++        if (nt_name->Buffer[i] == '/' || nt_name->Buffer[i] == '\\') break;
++
++    if (i < len)  /* explicit path */
++    {
++        UNICODE_STRING true_nt_name;
++        OBJECT_ATTRIBUTES attr;
++
++        InitializeObjectAttributes( &attr, (UNICODE_STRING *)nt_name, 0, 0, NULL );
++        if (!get_nt_and_unix_names( &attr, &true_nt_name, &file, FILE_OPEN, FALSE ))
++            handle = dlopen( file, RTLD_NOW );
++        free( true_nt_name.Buffer );
++        goto done;
++    }
++
++    if (build_dir) maxlen = strlen(build_dir) + sizeof("/dlls/") + len;
++    maxlen = max( maxlen, dll_path_maxlen + 1 ) + len + sizeof("/aarch64-unix") + sizeof(".so");
++
++    if (!(file = malloc( maxlen ))) return STATUS_NO_MEMORY;
++
++    pos = maxlen - len - 4;
++    ext = file + pos + len;
++    /* we don't want to depend on the current codepage here */
++    for (i = 0; i < len; i++)
++    {
++        if (nt_name->Buffer[namepos + i] > 127) goto done;
++        file[pos + i] = (char)nt_name->Buffer[namepos + i];
++        if (file[pos + i] >= 'A' && file[pos + i] <= 'Z') file[pos + i] += 'a' - 'A';
++        else if (file[pos + i] == '.') ext = file + pos + i;
++    }
++    file[pos + len] = 0;
++    file[--pos] = '/';
++
++    if (build_dir)
++    {
++        ptr = prepend_build_dir_path( file + pos, ".so", "", "/dlls", build_dir );
++        strcpy( ext, ".so" );
++        if ((handle = dlopen( ptr, RTLD_NOW ))) goto done;
++    }
++
++    strcpy( ext, ".so" );
++    for (i = 0; dll_paths[i]; i++)
++    {
++        ptr = prepend( file + pos, so_dir, strlen(so_dir) );
++        ptr = prepend( ptr, dll_paths[i], strlen(dll_paths[i]) );
++        WARN_(module)( "load_unixlib_by_name: trying %s\n", ptr );
++        if ((handle = dlopen( ptr, RTLD_NOW ))) goto done;
++
++        ptr = prepend( file + pos, dll_paths[i], strlen(dll_paths[i]) );
++        WARN_(module)( "load_unixlib_by_name: trying %s\n", ptr );
++        if ((handle = dlopen( ptr, RTLD_NOW ))) goto done;
++    }
++    WARN_(module)( "load_unixlib_by_name: no unixlib found for %s\n", file + pos );
++
++ done:
++    free( file );
++    if (!handle) return STATUS_DLL_NOT_FOUND;
++    *handle_ret = handle;
++    return STATUS_SUCCESS;
++}
++
++
+ /***************************************************************************
+  *	get_machine_wow64_dir
+  *
+@@ -2451,7 +2548,9 @@ static void start_main_thread(void)
      set_thread_teb( teb );
  #endif
  
@@ -25,7 +146,7 @@ index f8aa468..35bc233 100644
      init_startup_info();
      *(ULONG_PTR *)&peb->CloudFileFlags = get_image_address();
      set_load_order_app_name( main_wargv[0] );
-@@ -2460,7 +2466,9 @@ static void start_main_thread(void)
+@@ -2460,7 +2559,9 @@ static void start_main_thread(void)
      load_ntdll();
      load_wow64_ntdll( main_image_info.Machine );
      load_apiset_dll();

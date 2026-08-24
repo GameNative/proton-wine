@@ -171,8 +171,8 @@ do
       --without-xcomposite \
       --without-xfixes \
       --without-xinerama \
-      --without-xrandr \
-      --without-xrender \
+      --with-xrandr \
+      --with-xrender \
       --without-xshape \
       --without-xshm \
       --without-xxf86vm
@@ -257,6 +257,16 @@ do
 
       # loader patch
       "x86_64/dlls_ntdll_unix_loader_c.patch"
+
+      # FEX unixlib loader (MemoryWineLoadUnixLibByName) support patches
+      "common/include_winternl_h.patch"
+      "common/include_wine_unixlib_h.patch"
+      "common/dlls_wow64_virtual_c.patch"
+      "common/dlls_ntdll_unix_unix_private_h.patch"
+
+      # bionic bug-fixes
+      "common/dlls_ntdll_unix_env_c.patch"
+      "common/dlls_shell32_shlfileop_c.patch"
     )
 
     for patch in "${PATCHES[@]}"; do

@@ -1,0 +1,42 @@
+diff --git a/dlls/shell32/shlfileop.c b/dlls/shell32/shlfileop.c
+index 3f4d441..a3c0e80 100644
+--- a/dlls/shell32/shlfileop.c
++++ b/dlls/shell32/shlfileop.c
+@@ -955,14 +955,33 @@ static void file_entry_init(FILE_ENTRY *file_entry,
+     ptr = wcsrchr(file_name, '\\');
+     if (ptr)
+     {
+-        file_name_len = ptr - file_name + 1;
+-        file_entry->szDirectory = malloc(file_name_len * sizeof(WCHAR));
+-        lstrcpynW(file_entry->szDirectory, file_name, file_name_len);
++        size_t dir_len = ptr - file_name + 1;
++
++        /* For a bare drive root ("D:\" or "\") keep the trailing root
++         * backslash in the directory; otherwise szDirectory becomes a bogus
++         * drive-relative spec ("D:") and downstream path building misbehaves
++         * when FO_COPY copies between two roots. */
++        if (ptr == file_name || (ptr == file_name + 2 && file_name[1] == ':'))
++            dir_len++;
+ 
+-        file_name_len = wcslen(file_entry->szFullPath) - file_name_len + 1;
++        file_entry->szDirectory = malloc(dir_len * sizeof(WCHAR));
++        lstrcpynW(file_entry->szDirectory, file_name, dir_len);
++
++        file_name_len = wcslen(ptr + 1) + 1; /* component after the backslash */
+         file_entry->szFilename = malloc(file_name_len * sizeof(WCHAR));
+         lstrcpyW(file_entry->szFilename, ptr + 1); /* Skip over backslash. */
+     }
++    else
++    {
++        /* No path separator at all (e.g. a bare drive spec "D:"): never leave
++         * szDirectory / szFilename NULL, or do_copy_move's unconditional
++         * wcscpy(target_dir, to->szDirectory) faults when copying between
++         * drive roots. */
++        file_entry->szDirectory = malloc(file_name_len * sizeof(WCHAR));
++        lstrcpyW(file_entry->szDirectory, file_name);
++        file_entry->szFilename = malloc(file_name_len * sizeof(WCHAR));
++        lstrcpyW(file_entry->szFilename, file_name);
++    }
+ 
+     file_entry->attributes = attributes;
+     file_entry->bFromWildcard = from_wildcard;
