@@ -331,13 +331,23 @@ jobs:
             Single SDK 28 build with 16KB page size support (works on Android 9+ and Android 15+).
 
             ### Features
-            - Experimental userspace ntsync (via [ntsync-android](https://github.com/GameNative/ntsync-android)) + fsync
+            - Experimental userspace ntsync (via [ntsync-android](https://github.com/GameNative/ntsync-android) V8, commit [`d00ac47`](https://github.com/GameNative/ntsync-android/commit/d00ac47491f2a5505d2ea3a2c8533f498a9811b0)) + fsync, with wineserver-side `ntsync_event_set` support
+            - `WINE_FAST_YIELD` fast-yield hook in `NtYieldExecution`
             - FEX integration (stats shm, `SkipThreadAttach` detach guard) via bylaws' arm64ec patches
+            - FEX unixlib loader: `MemoryWineLoadUnixLibByName` / wow64 / unload support with `$PREFIX/lib/wine` fallback
+            - `WINEVMEMMAXSIZE` virtual-address cap for FEX environments
             - Integrated lsteamclient built into Proton (supports GameNative bionic Steam)
             - Stripped, `-g0 -O2` build: smaller tree, faster install (zstd-packed `.wcp`)
 
+            ### Android / bionic fixes
+            - Anonymous PE-image mapping for bionic (vc4 devices); `LC_ALL=C.UTF-8` default; shell32 drive-root path fix
+            - Android clipboard bridge (user32/win32u) and Android URL/intent launching in winebrowser
+            - dnsapi libresolv bionic port; nsiproxy interface/route enumeration without netlink; ws2_32 socket tweaks
+            - winepulse audio period fix, MIDI mapper rework, SDL gamepad init fixes
+            - winex11 window/keyboard/mouse/GL/desktop tweaks; explorer desktop sizing; `GetUserNameA` on Android
+
             ### Credits
-            Compile optimizations (ccache, -g0/strip, zstd packaging) are adopted from [The412Banner/proton-wine](https://github.com/The412Banner/proton-wine) release [build-p11-20260821](https://github.com/The412Banner/proton-wine/releases/tag/build-p11-20260821).
+            Compile optimizations (ccache, -g0/strip, zstd packaging) and runtime improvements — `WINE_FAST_YIELD` fast-yield, FEX unixlib loader, `WINEVMEMMAXSIZE` VA cap, vc4 bionic fixes (anonymous PE mappings, `LC_ALL=C.UTF-8`, shell32 drive-root fix), and xrandr/xrender enablement — are adopted from [The412Banner/proton-wine](https://github.com/The412Banner/proton-wine) release [build-p11-20260821](https://github.com/The412Banner/proton-wine/releases/tag/build-p11-20260821) (merged in commit `b08376b`).
 
             ### WCP Files
             **Proton Type:**

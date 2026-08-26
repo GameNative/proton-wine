@@ -23,7 +23,9 @@
  * process that opens the same region path sees the same handles. Waits use
  * futexes on the shared pages.
  *
- * Not implemented: alertable waits (ntsync_wait_args.alert must be 0).
+ * Alertable waits are supported: if ntsync_wait_args.alert is nonzero it
+ * names an event object that aborts the wait; the wait returns success with
+ * index == count, exactly like the kernel ioctls.
  * Divergence from the kernel: closing an object other threads are waiting on
  * fails those waits with -EINVAL; objects leaked by a crashed process must
  * be reclaimed with ntsync_sweep_dead().
@@ -68,7 +70,8 @@ struct ntsync_wait_args {
     uint32_t flags;
     /* In: owner tid used to acquire mutexes. */
     uint32_t owner;
-    /* Unsupported; must be 0. */
+    /* In: optional alert event handle (0 = none); aborts the wait, which
+     * then returns success with index == count. */
     uint32_t alert;
     uint32_t pad;
 };
@@ -82,7 +85,8 @@ struct ntsync_wait_args {
 #define NTSYNC_ANDROID_USED_BY_SERVER 0x7eadfe01
 
 /* Initialize the shared region. `path` may be NULL to use
- * $TMPDIR/ntsync_userspace.shm (the caller must export TMPDIR).
+ * $TMPDIR/ntsync_userspace.shm (the caller must export TMPDIR); a layout
+ * version is inserted before the ".shm" extension (ntsync_userspace.vN.shm).
  * Idempotent; all other functions auto-initialize on first use. */
 int32_t ntsync_init(const char *path);
 
@@ -91,7 +95,9 @@ int32_t ntsync_init(const char *path);
  * process exits. Returns the number of freed objects or a negative errno. */
 int32_t ntsync_sweep_dead(void);
 
-/* Create objects. Return 0 and store the handle, or a negative errno. */
+/* Create objects. Return 0 and store the handle, or a negative errno.
+ * Handles are never 0: slot 0 is permanently reserved because 0 is the
+ * "no alert" sentinel in ntsync_wait_args.alert. */
 int32_t ntsync_create_sem(uint32_t *out_handle, const struct ntsync_sem_args *args);
 int32_t ntsync_create_mutex(uint32_t *out_handle, const struct ntsync_mutex_args *args);
 int32_t ntsync_create_event(uint32_t *out_handle, const struct ntsync_event_args *args);
