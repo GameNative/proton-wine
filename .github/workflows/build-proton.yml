@@ -331,13 +331,20 @@ jobs:
             Single SDK 28 build with 16KB page size support (works on Android 9+ and Android 15+).
 
             ### Features
-            - Experimental userspace ntsync (via [ntsync-android](https://github.com/GameNative/ntsync-android) V8, commit [`d00ac47`](https://github.com/GameNative/ntsync-android/commit/d00ac47491f2a5505d2ea3a2c8533f498a9811b0)) + fsync, with wineserver-side `ntsync_event_set` support
+            - Experimental userspace ntsync (via [ntsync-android](https://github.com/GameNative/ntsync-android), commit [`8ebe2ea`](https://github.com/GameNative/ntsync-android/commit/8ebe2ea0cb88ad93b64ed95eed1c01ce537a3fe3)) + fsync, with wineserver-side `ntsync_event_set` support
             - `WINE_FAST_YIELD` fast-yield hook in `NtYieldExecution`
             - FEX integration (stats shm, `SkipThreadAttach` detach guard) via bylaws' arm64ec patches
             - FEX unixlib loader: `MemoryWineLoadUnixLibByName` / wow64 / unload support with `$PREFIX/lib/wine` fallback
             - `WINEVMEMMAXSIZE` virtual-address cap for FEX environments
             - Integrated lsteamclient built into Proton (supports GameNative bionic Steam)
             - Stripped, `-g0 -O2` build: smaller tree, faster install (zstd-packed `.wcp`)
+
+            ### ntsync-android changelog ([`d00ac47`..`8ebe2ea`](https://github.com/GameNative/ntsync-android/compare/d00ac47491f2a5505d2ea3a2c8533f498a9811b0...8ebe2ea0cb88ad93b64ed95eed1c01ce537a3fe3))
+            - **Auto-sweep of dead processes' objects (layout v9)** — signal ops and wait timeouts now run a rate-limited region-wide sweep (default 30 s, `NTSYNC_SWEEP_INTERVAL_SEC` to tune, `0` to disable), replacing manual `ntsync_sweep_dead()` reliance; the stuck-wait debug dump shows creator pid liveness. Fixes a plausible cause of 60 s `RtlpWaitForCriticalSection ... blocked by 0000` stalls after a Wine process crashes.
+            - **Wait-path CPU reductions** — wake-latency instrumentation is now debug-gated, `futex_wake` wakes exactly one waiter, and all per-wait heap allocations became fixed stack arrays. Measured vs. baseline: cross-process RPC **-17%**, multi-process contention **-25%**, Wine mixed load **-8%** CPU per op.
+            - **Lazy region init (layout v8)** — the ~960 KB shm file is no longer bulk-zeroed at init: mapped RSS drops from 976 kB to ~16 kB (sparse pages, negligible flash writeback), growing only as objects/waiters actually arrive.
+            - **`NTSYNC_NO_SIGUSR1_BLOCK=1` opt-out** — skips the two `pthread_sigmask` syscalls per region-lock acquisition (~13% per-op under multi-process contention). Default stays on; only safe outside Wine.
+            - **Wine-workload benchmark suite** — 7 benches (shm footprint, signaled fast path, cross-process RPC, mixed load, fork/exec multi-process contention) with a JSON baseline for regression gating.
 
             ### Android / bionic fixes
             - Anonymous PE-image mapping for bionic (vc4 devices); `LC_ALL=C.UTF-8` default; shell32 drive-root path fix
