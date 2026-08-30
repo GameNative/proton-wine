@@ -2,14 +2,19 @@ diff --git a/server/token.c b/server/token.c
 index 31fc4b8..48c15ce 100644
 --- a/server/token.c
 +++ b/server/token.c
-@@ -221,12 +221,33 @@ void init_user_sid(void)
+@@ -221,12 +221,44 @@ void init_user_sid(void)
      size_t n;
      FILE *f;
  
 +#ifdef __ANDROID__
 +    /* /etc/machine-id is absent on Android.  Fall back to a per-prefix
-+     * file so the machine SID stays stable across reboots/restarts. */
++     * file so the machine SID stays stable across reboots/restarts.
++     * GameNative sets PREFIX rather than WINEPREFIX; accept both, and
++     * bail out cleanly when neither is set or the file cannot be
++     * opened (previously f was used uninitialized when WINEPREFIX was
++     * unset -> intermittent fread(garbage) crash at wineserver start). */
 +    const char *prefix = getenv("WINEPREFIX");
++    if (!prefix) prefix = getenv("PREFIX");
 +    if (prefix)
 +    {
 +        char path[4096];
@@ -24,6 +29,12 @@ index 31fc4b8..48c15ce 100644
 +                f = fopen(path, "r");
 +            }
 +        }
++    }
++    if (!f)
++    {
++        fprintf( stderr, "init_user_sid: no WINEPREFIX/PREFIX, using zero machine id.\n" );
++        memset( machine_id, 0, sizeof(machine_id) );
++        return;
 +    }
 +#else
      f = fopen( "/etc/machine-id", "r" );
