@@ -1,0 +1,20 @@
+diff --git a/dlls/crypt32/cert.c b/dlls/crypt32/cert.c
+index 7f8f496..b804e19 100644
+--- a/dlls/crypt32/cert.c
++++ b/dlls/crypt32/cert.c
+@@ -3118,7 +3118,15 @@ BOOL WINAPI CertGetEnhancedKeyUsage(PCCERT_CONTEXT pCertContext, DWORD dwFlags,
+             ret = FALSE;
+         }
+         else
++        {
++            /* Windows sets the last error to CRYPT_E_NOT_FOUND when returning an
++             * empty usage: callers are documented to distinguish "valid for all
++             * uses" (CRYPT_E_NOT_FOUND) from "valid for no uses" (zero) via
++             * GetLastError().  libwebsockets' Windows CA-store import relies on
++             * this to accept root certificates that carry no EKU extension. */
++            SetLastError(CRYPT_E_NOT_FOUND);
+             bytesNeeded = sizeof(CERT_ENHKEY_USAGE);
++        }
+     }
+ 
+     if (ret)
