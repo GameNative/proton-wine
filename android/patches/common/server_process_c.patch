@@ -1,26 +1,29 @@
 diff --git a/server/process.c b/server/process.c
-index 287718adc66..3ff0d68c261 100644
+index 287718adc66..0aa6b0c230e 100644
 --- a/server/process.c
 +++ b/server/process.c
-@@ -67,6 +67,10 @@
+@@ -67,6 +67,12 @@
  
  #include "fsync.h"
  
 +#ifdef __ANDROID__
 +#include "../android/ntsync_android/ntsync_user.h"
++/* from inproc_sync.c: 1 when using userspace ntsync instead of /dev/ntsync */
++extern int ntsync_userspace_active(void);
 +#endif
 +
  /* process object */
  
  static struct list process_list = LIST_INIT(process_list);
-@@ -822,6 +826,11 @@ static void process_destroy( struct object *obj )
+@@ -822,6 +828,12 @@ static void process_destroy( struct object *obj )
      if (process->token) release_object( process->token );
      if (process->sync) release_object( process->sync );
      if (do_fsync()) fsync_cleanup_process_shm_indices( process->id );
 +#ifdef __ANDROID__
 +    /* userspace ntsync has no fd-close-on-death hook; reclaim objects whose
-+     * creator process is gone */
-+    ntsync_sweep_dead();
++     * creator process is gone (only when userspace ntsync is actually in use,
++     * otherwise ntsync_sweep_dead would pointlessly auto-init the shm region) */
++    if (ntsync_userspace_active()) ntsync_sweep_dead();
 +#endif
      list_remove( &process->rawinput_entry );
      free( process->rawinput_devices );
