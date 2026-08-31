@@ -1,8 +1,19 @@
 diff --git a/dlls/ntdll/unix/unix_private.h b/dlls/ntdll/unix/unix_private.h
-index 2f649ca..8700313 100644
+index 2f649ca399e..830499d63d3 100644
 --- a/dlls/ntdll/unix/unix_private.h
 +++ b/dlls/ntdll/unix/unix_private.h
-@@ -232,6 +232,7 @@ extern NTSTATUS exec_wineloader( char **argv, int socketfd, const struct pe_imag
+@@ -203,6 +203,10 @@ extern BOOL terminate_process_running;
+ extern LONG terminate_process_exit_code;
+ extern HANDLE keyed_event;
+ extern int inproc_device_fd;
++#ifdef __ANDROID__
++/* 1 when the server reported userspace ntsync instead of a /dev/ntsync fd */
++extern int ntsync_userspace;
++#endif
+ extern timeout_t server_start_time;
+ extern sigset_t server_block_set;
+ extern pthread_mutex_t fd_cache_mutex;
+@@ -232,6 +236,7 @@ extern NTSTATUS exec_wineloader( char **argv, int socketfd, const struct pe_imag
  extern NTSTATUS load_builtin( const struct pe_image_info *image_info, UNICODE_STRING *nt_name,
                                ANSI_STRING *exp_name, USHORT machine, SECTION_IMAGE_INFORMATION *info,
                                void **module, SIZE_T *size, ULONG_PTR limit_low, ULONG_PTR limit_high, off_t offset );
@@ -10,7 +21,7 @@ index 2f649ca..8700313 100644
  extern BOOL is_builtin_path( const UNICODE_STRING *path, WORD *machine );
  extern NTSTATUS load_main_exe( UNICODE_STRING *nt_name, USHORT load_machine, void **module );
  extern NTSTATUS load_start_exe( UNICODE_STRING *nt_name, void **module );
-@@ -724,4 +725,6 @@ static inline int is_gdt_sel( WORD sel )
+@@ -724,4 +729,6 @@ static inline int is_gdt_sel( WORD sel )
  
  #endif  /* defined(__i386__) || defined(__x86_64__) */
  

@@ -1,5 +1,5 @@
 diff --git a/dlls/ntdll/unix/server.c b/dlls/ntdll/unix/server.c
-index 112157b0dd7..d74c6a32b27 100644
+index 112157b0dd7..ff51533dbc7 100644
 --- a/dlls/ntdll/unix/server.c
 +++ b/dlls/ntdll/unix/server.c
 @@ -83,6 +83,10 @@
@@ -30,7 +30,7 @@ index 112157b0dd7..d74c6a32b27 100644
      }
      else if (errno != EEXIST) fatal_perror( "cannot create %s/dosdevices", config_dir );
  
-@@ -1703,6 +1714,13 @@ size_t server_init_process(void)
+@@ -1703,6 +1714,17 @@ size_t server_init_process(void)
                  inproc_device_fd = FSYNC_USED_BY_SERVER;
                  fsync_init( pid );
              }
@@ -38,7 +38,11 @@ index 112157b0dd7..d74c6a32b27 100644
 +            /* userspace ntsync: no device fd; attach to the shared region */
 +            else if (reply->inproc_device == NTSYNC_ANDROID_USED_BY_SERVER)
 +            {
-+                if (!ntsync_init( NULL )) inproc_device_fd = 0;
++                if (!ntsync_init( NULL ))
++                {
++                    inproc_device_fd = 0;
++                    ntsync_userspace = 1;
++                }
 +            }
 +#endif
              else if (reply->inproc_device)

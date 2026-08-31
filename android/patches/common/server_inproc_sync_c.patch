@@ -1,51 +1,32 @@
 diff --git a/server/inproc_sync.c b/server/inproc_sync.c
-index a7020ef8fcd..db00cd8e919 100644
+index a7020ef8fcd..c8691d1cd49 100644
 --- a/server/inproc_sync.c
 +++ b/server/inproc_sync.c
-@@ -36,10 +36,18 @@
+@@ -36,7 +36,14 @@
  
  #include "fsync.h"
  
-+#ifdef __ANDROID__
-+#include <stdlib.h>
-+#include "../android/ntsync_android/ntsync_user.h"
-+#endif
-+
 +#ifndef __ANDROID__
  #include "ntsync_tmp.h"
++#else
++#include <stdlib.h>
++/* Kernel /dev/ntsync ioctl ABI + userspace ntsync API: both are compiled
++ * in and selected at runtime (kernel ntsync if usable, userspace else). */
++#include "../android/ntsync_android/ntsync_kernel_abi.h"
 +#endif
  
--#ifdef NTSYNC_IOC_EVENT_READ
-+#if defined(NTSYNC_IOC_EVENT_READ) || defined(__ANDROID__)
+ #ifdef NTSYNC_IOC_EVENT_READ
  
-+#ifndef __ANDROID__
- #include <fcntl.h>
- #include <sys/ioctl.h>
+@@ -45,6 +52,36 @@
  #include <sys/stat.h>
-@@ -64,6 +72,49 @@ int get_inproc_device_fd(void)
-     }
-     return fd;
- }
-+#else  /* __ANDROID__ */
-+int get_inproc_device_fd(void)
+ #include <unistd.h>
+ 
++#ifdef __ANDROID__
++static int ntsync_userspace;  /* 1 when using libntsync_android instead of /dev/ntsync */
++
++int ntsync_userspace_active(void)
 +{
-+    static int fd = -2;
-+    if (fd == -2)
-+    {
-+        if (getenv( "PROTON_NO_NTSYNC" ) && atoi(getenv( "PROTON_NO_NTSYNC" )))
-+            fd = -1;
-+        else if (!ntsync_init( NULL ))
-+        {
-+            /* userspace ntsync needs no device fd; objects live in a
-+             * shared-memory region every process attaches to */
-+            fd = 0;
-+            do_fsync_cached = 0;
-+            fprintf( stderr, "ntsync: up and running (userspace).\n" );
-+        }
-+        else if (do_fsync()) fd = FSYNC_USED_BY_SERVER;
-+        else fprintf( stderr, "wineserver: using server-side synchronization.\n" );
-+    }
-+    return fd;
++    return ntsync_userspace;
 +}
 +
 +static int create_ntsync_event( const struct ntsync_event_args *args )
@@ -69,58 +50,95 @@ index a7020ef8fcd..db00cd8e919 100644
 +    return (int)handle;
 +}
 +#endif  /* __ANDROID__ */
- 
- struct inproc_sync
++
+ int get_inproc_device_fd(void)
  {
-@@ -124,7 +175,11 @@ struct inproc_sync *create_inproc_internal_sync( int manual, int signaled )
+     static int fd = -2;
+@@ -53,10 +90,39 @@ int get_inproc_device_fd(void)
+         if (getenv( "PROTON_NO_NTSYNC" ) && atoi(getenv( "PROTON_NO_NTSYNC" )))
+             fd = -1;
+         else
++        {
+             fd = open( "/dev/ntsync", O_CLOEXEC | O_RDONLY );
++#ifdef __ANDROID__
++            if (fd >= 0)
++            {
++                /* the device node can exist but be unusable (SELinux policy,
++                 * seccomp); probe it with a real object creation */
++                struct ntsync_event_args args = {0};
++                int probe = ioctl( fd, NTSYNC_IOC_CREATE_EVENT, &args );
++                if (probe < 0)
++                {
++                    close( fd );
++                    fd = -1;
++                }
++                else close( probe );
++            }
++            if (fd < 0 && !ntsync_init( NULL ))
++            {
++                /* userspace ntsync needs no device fd; objects live in a
++                 * shared-memory region every process attaches to */
++                fd = 0;
++                ntsync_userspace = 1;
++            }
++#endif
++        }
+         if (fd >= 0)
+         {
+             do_fsync_cached = 0;
++#ifdef __ANDROID__
++            if (ntsync_userspace)
++                fprintf( stderr, "ntsync: no usable /dev/ntsync, using userspace ntsync.\n" );
++            else
++#endif
+             fprintf( stderr, "ntsync: up and running.\n" );
+         }
+         else if (do_fsync()) fd = FSYNC_USED_BY_SERVER;
+@@ -124,6 +190,10 @@ struct inproc_sync *create_inproc_internal_sync( int manual, int signaled )
      else
      {
          event->type = INPROC_SYNC_INTERNAL;
 +#ifdef __ANDROID__
-+        event->fd   = create_ntsync_event( &args );
-+#else
-         event->fd   = ioctl( get_inproc_device_fd(), NTSYNC_IOC_CREATE_EVENT, &args );
++        if (ntsync_userspace) event->fd = create_ntsync_event( &args );
++        else
 +#endif
+         event->fd   = ioctl( get_inproc_device_fd(), NTSYNC_IOC_CREATE_EVENT, &args );
      }
      list_init( &event->entry );
- 
-@@ -151,7 +206,11 @@ struct inproc_sync *create_inproc_event_sync( int manual, int signaled )
+@@ -151,6 +221,10 @@ struct inproc_sync *create_inproc_event_sync( int manual, int signaled )
      else
      {
          event->type = INPROC_SYNC_EVENT;
 +#ifdef __ANDROID__
-+        event->fd   = create_ntsync_event( &args );
-+#else
-         event->fd   = ioctl( get_inproc_device_fd(), NTSYNC_IOC_CREATE_EVENT, &args );
++        if (ntsync_userspace) event->fd = create_ntsync_event( &args );
++        else
 +#endif
+         event->fd   = ioctl( get_inproc_device_fd(), NTSYNC_IOC_CREATE_EVENT, &args );
      }
      list_init( &event->entry );
- 
-@@ -178,7 +237,11 @@ struct inproc_sync *create_inproc_mutex_sync( thread_id_t owner, unsigned int co
+@@ -178,6 +252,10 @@ struct inproc_sync *create_inproc_mutex_sync( thread_id_t owner, unsigned int co
      else
      {
          mutex->type = INPROC_SYNC_MUTEX;
 +#ifdef __ANDROID__
-+        mutex->fd   = create_ntsync_mutex( &args );
-+#else
-         mutex->fd   = ioctl( get_inproc_device_fd(), NTSYNC_IOC_CREATE_MUTEX, &args );
++        if (ntsync_userspace) mutex->fd = create_ntsync_mutex( &args );
++        else
 +#endif
+         mutex->fd   = ioctl( get_inproc_device_fd(), NTSYNC_IOC_CREATE_MUTEX, &args );
      }
      list_add_tail( &inproc_mutexes, &mutex->entry );
- 
-@@ -206,7 +269,11 @@ struct inproc_sync *create_inproc_semaphore_sync( unsigned int initial, unsigned
+@@ -206,6 +284,10 @@ struct inproc_sync *create_inproc_semaphore_sync( unsigned int initial, unsigned
      else
      {
          sem->type = INPROC_SYNC_SEMAPHORE;
 +#ifdef __ANDROID__
-+        sem->fd   = create_ntsync_sem( &args );
-+#else
-         sem->fd   = ioctl( get_inproc_device_fd(), NTSYNC_IOC_CREATE_SEM, &args );
++        if (ntsync_userspace) sem->fd = create_ntsync_sem( &args );
++        else
 +#endif
+         sem->fd   = ioctl( get_inproc_device_fd(), NTSYNC_IOC_CREATE_SEM, &args );
      }
      list_init( &sem->entry );
- 
-@@ -228,18 +295,26 @@ static void inproc_sync_dump( struct object *obj, int verbose )
+@@ -228,17 +310,23 @@ static void inproc_sync_dump( struct object *obj, int verbose )
  
  void signal_inproc_sync( struct inproc_sync *sync )
  {
@@ -129,10 +147,9 @@ index a7020ef8fcd..db00cd8e919 100644
      if (debug_level) fprintf( stderr, "set_inproc_event %d\n", sync->fd );
      if (do_fsync()) fsync_set_event( sync->fd );
 +#ifdef __ANDROID__
-+    else            ntsync_event_set( sync->fd, &count );
-+#else
-     else            ioctl( sync->fd, NTSYNC_IOC_EVENT_SET, &count );
++    else if (ntsync_userspace) ntsync_event_set( sync->fd, &count );
 +#endif
+     else            ioctl( sync->fd, NTSYNC_IOC_EVENT_SET, &count );
  }
  
  void reset_inproc_sync( struct inproc_sync *sync )
@@ -142,49 +159,43 @@ index a7020ef8fcd..db00cd8e919 100644
      if (debug_level) fprintf( stderr, "reset_inproc_event %d\n", sync->fd );
      if (do_fsync()) fsync_reset_event( sync->fd );
 +#ifdef __ANDROID__
-+    else            ntsync_event_reset( sync->fd, &count );
-+#else
-     else            ioctl( sync->fd, NTSYNC_IOC_EVENT_RESET, &count );
++    else if (ntsync_userspace) ntsync_event_reset( sync->fd, &count );
 +#endif
+     else            ioctl( sync->fd, NTSYNC_IOC_EVENT_RESET, &count );
  }
  
- static int inproc_sync_signal( struct object *obj, unsigned int access, int signal )
-@@ -262,7 +337,11 @@ static void inproc_sync_destroy( struct object *obj )
+@@ -262,6 +350,9 @@ static void inproc_sync_destroy( struct object *obj )
      assert( obj->ops == &inproc_sync_ops );
      list_remove( &sync->entry );
      if (do_fsync()) fsync_free_shm_idx( sync->fd );
 +#ifdef __ANDROID__
-+    else            ntsync_close( sync->fd );
-+#else
-     else            close( sync->fd );
++    else if (ntsync_userspace) ntsync_close( sync->fd );
 +#endif
+     else            close( sync->fd );
  }
  
- void abandon_inproc_mutexes( thread_id_t tid )
-@@ -277,7 +356,13 @@ void abandon_inproc_mutexes( thread_id_t tid )
+@@ -277,7 +368,13 @@ void abandon_inproc_mutexes( thread_id_t tid )
      }
  
      LIST_FOR_EACH_ENTRY( mutex, &inproc_mutexes, struct inproc_sync, entry )
 +    {
 +#ifdef __ANDROID__
-+        ntsync_mutex_kill( mutex->fd, tid );
-+#else
-         ioctl( mutex->fd, NTSYNC_IOC_MUTEX_KILL, &tid );
++        if (ntsync_userspace) ntsync_mutex_kill( mutex->fd, tid );
++        else
 +#endif
+         ioctl( mutex->fd, NTSYNC_IOC_MUTEX_KILL, &tid );
 +    }
  }
  
  static int get_obj_inproc_sync( struct object *obj, int *type )
-@@ -359,7 +444,12 @@ DECL_HANDLER(get_inproc_sync_fd)
+@@ -359,6 +456,10 @@ DECL_HANDLER(get_inproc_sync_fd)
  
      if ((fd = get_obj_inproc_sync( obj, &reply->type )) < 0) set_error( STATUS_NOT_IMPLEMENTED );
      else if (do_fsync()) reply->fsync_shm_idx = fsync_grab_shm_idx( fd );
 +#ifdef __ANDROID__
 +    /* userspace ntsync object handle; valid in every process */
-+    else reply->fsync_shm_idx = fd;
-+#else
-     else send_client_fd( current->process, fd, req->handle );
++    else if (ntsync_userspace) reply->fsync_shm_idx = fd;
 +#endif
+     else send_client_fd( current->process, fd, req->handle );
  
      release_object( obj );
- }
