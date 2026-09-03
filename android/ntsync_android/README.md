@@ -38,15 +38,19 @@ wineserver probes for in-process sync support once at startup
 
 1. `PROTON_NO_NTSYNC=1` disables ntsync entirely (both kernel and
    userspace); wineserver falls back to server-side synchronization.
-2. Otherwise it opens `/dev/ntsync` and **probes** it with a real
+2. `PROTON_NO_KERNEL_NTSYNC=1` skips the kernel driver even when it is
+   present and working, forcing the userspace backend
+   (`ntsync: PROTON_NO_KERNEL_NTSYNC set, using userspace ntsync.`).
+   Intended for A/B testing of the two backends.
+3. Otherwise it opens `/dev/ntsync` and **probes** it with a real
    `NTSYNC_IOC_CREATE_EVENT` ioctl (the node can exist but be unusable,
    e.g. SELinux policy or seccomp). If the probe succeeds, the kernel
    driver is used, exactly like upstream Proton.
-3. If the device is missing or the probe fails, it tries
+4. If the device is missing or the probe fails, it tries
    `ntsync_init()`; on success all processes attach to the shared-memory
    region and use the userspace implementation
    (`ntsync: no usable /dev/ntsync, using userspace ntsync.`).
-4. If that also fails, wineserver falls back to server-side
+5. If that also fails, wineserver falls back to server-side
    synchronization.
 
 wineserver tells each client which backend is in use through the
