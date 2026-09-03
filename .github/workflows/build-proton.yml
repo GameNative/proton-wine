@@ -331,7 +331,7 @@ jobs:
             Single SDK 28 build with 16KB page size support (works on Android 9+ and Android 15+).
 
             ### Features
-            - Runtime ntsync backend selection: kernel `/dev/ntsync` when present and usable (probed by wineserver at startup), otherwise experimental userspace ntsync via [ntsync-android](https://github.com/GameNative/ntsync-android) (commit [`7ce6435`](https://github.com/GameNative/ntsync-android/commit/7ce6435e5979b1cb5341aa4b299f31e8937fe121)) — plus fsync and wineserver-side `ntsync_event_set` support; `PROTON_NO_NTSYNC=1` disables ntsync entirely
+            - Runtime ntsync backend selection: kernel `/dev/ntsync` when present and usable (probed by wineserver at startup), otherwise experimental userspace ntsync via [ntsync-android](https://github.com/GameNative/ntsync-android) (commit [`7ce6435`](https://github.com/GameNative/ntsync-android/commit/7ce6435e5979b1cb5341aa4b299f31e8937fe121)) — plus fsync and wineserver-side `ntsync_event_set` support; `PROTON_NO_NTSYNC=1` disables ntsync entirely, `PROTON_NO_KERNEL_NTSYNC=1` forces the userspace backend
             - `WINE_FAST_YIELD` fast-yield hook in `NtYieldExecution`
             - FEX integration (stats shm, `SkipThreadAttach` detach guard) via bylaws' arm64ec patches
             - FEX unixlib loader: `MemoryWineLoadUnixLibByName` / wow64 / unload support with `$PREFIX/lib/wine` fallback
@@ -340,8 +340,8 @@ jobs:
             - Stripped, `-g0 -O2` build: smaller tree, faster install (zstd-packed `.wcp`)
 
             ### ntsync changes in this build
-            - **Runtime kernel/userspace backend detection (proton-wine side)** — ntsync is no longer hard-selected at compile time. wineserver probes `/dev/ntsync` at startup with a real `NTSYNC_IOC_CREATE_EVENT` ioctl (catches SELinux/seccomp-blocked nodes): if the kernel driver is present and usable it is used directly; otherwise the build falls back to the userspace ntsync-android shm backend. Backend is chosen once per session and applies to all processes.
-            - **No shm region on kernel-ntsync devices** — the dead-process sweep is now gated on the userspace backend being active, so the ~960 KB shm file is never initialized when the kernel driver handles ntsync.
+            - **`PROTON_NO_KERNEL_NTSYNC=1` forces the userspace backend** — new runtime escape hatch for A/B testing: wineserver skips `/dev/ntsync` even when the kernel driver is present and working, and initializes the userspace ntsync-android shm backend instead. The forced backend is identifiable in logs: `ntsync: PROTON_NO_KERNEL_NTSYNC set, using userspace ntsync.`
+            - Runtime kernel/userspace backend detection (probed `NTSYNC_IOC_CREATE_EVENT`, userspace fallback, no shm region on kernel-ntsync devices) shipped in the previous build and is unchanged.
             - ntsync-android library is unchanged since the last build ([`7ce6435`](https://github.com/GameNative/ntsync-android/commit/7ce6435e5979b1cb5341aa4b299f31e8937fe121)); `PROTON_NO_NTSYNC=1` still disables both backends.
 
             ### Android / bionic fixes
