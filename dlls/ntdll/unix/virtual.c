@@ -837,6 +837,40 @@ static void reserve_area( void *addr, void *end )
 }
 
 
+/*
+ * CEF's V8 sandbox normally reserves a 1 TB placeholder.  On 39-bit ARM64
+ * hosts V8 falls back to a 128 GB partial reservation, but by the time the
+ * renderer initializes, native mappings have fragmented every suitably
+ * aligned range.  Keep one range intact from process startup.  Adding it to
+ * Wine's reserved-area list lets VirtualAlloc2 replace the PROT_NONE mapping
+ * when V8 creates its placeholder.
+ */
+static void reserve_rdr2_v8_sandbox(void)
+{
+#if defined(__aarch64__) && defined(_WIN64)
+    static const char app_id[] = "1174180";
+    const char *steam_game_id = getenv( "SteamGameId" );
+    const char *steam_app_id = getenv( "SteamAppId" );
+    void *base = (void *)0x2000000000;
+    size_t size = 0x2000000000;
+
+    if ((!steam_game_id || strcmp( steam_game_id, app_id )) &&
+        (!steam_app_id || strcmp( steam_app_id, app_id ))) return;
+    if (is_beyond_limit( base, size, host_addr_space_limit )) return;
+    if (mmap_is_in_reserved_area( base, size ) == 1) return;
+
+    if (anon_mmap_tryfixed( base, size, PROT_NONE, MAP_NORESERVE ) == base)
+    {
+        mmap_add_reserved_area( base, size );
+        FIXME( "HACK: reserved RDR2 V8 sandbox address space %p-%p.\n",
+               base, (char *)base + size );
+    }
+    else WARN( "failed to reserve RDR2 V8 sandbox address space %p-%p.\n",
+               base, (char *)base + size );
+#endif
+}
+
+
 static void mmap_init( const struct preload_info *preload_info )
 {
 #ifndef _WIN64
@@ -3957,6 +3991,9 @@ void virtual_init(void)
     size = (char *)address_space_start - (char *)0x10000;
     if (size && mmap_is_in_reserved_area( (void*)0x10000, size ) == 1)
         anon_mmap_fixed( (void *)0x10000, size, PROT_READ | PROT_WRITE, 0 );
+
+    /* Keep alloc_virtual_heap() from carving its bookkeeping data out of this area. */
+    reserve_rdr2_v8_sandbox();
 }
 
 

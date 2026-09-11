@@ -1281,8 +1281,40 @@ __ASM_GLOBAL_FUNC( "#KiUserEmulationDispatcher",
 /*******************************************************************
  *		dispatch_syscall
  */
+static ULONG translate_rdr2_syscall( ULONG syscall, ULONG_PTR pc )
+{
+    static int is_rdr2 = -1;
+    WCHAR appid[8];
+    SIZE_T len;
+
+    if (syscall != 0xf2 || pc < 0x140000000ull || pc >= 0x150000000ull) return syscall;
+
+    /* RDR2's protection code bypasses ntdll and issues NtGetContextThread
+     * using the Windows 10 2009 service number 0xf2.  FEX reports it through
+     * STATUS_EMULATION_SYSCALL, but Wine 11 assigns NtGetContextThread the
+     * generated service number 0x97.  The other direct syscalls used by RDR2
+     * have explicit Windows-compatible IDs in ntdll.spec. */
+    if (is_rdr2 == -1)
+    {
+        is_rdr2 = (!RtlQueryEnvironmentVariable( NULL, L"SteamGameId", 11, appid,
+                                               ARRAY_SIZE(appid), &len ) && len == 7 &&
+                   (!wcsncmp( appid, L"1174180", 7 ) || !wcsncmp( appid, L"1404210", 7 ))) ||
+                  (!RtlQueryEnvironmentVariable( NULL, L"SteamAppId", 10, appid,
+                                               ARRAY_SIZE(appid), &len ) && len == 7 &&
+                   (!wcsncmp( appid, L"1174180", 7 ) || !wcsncmp( appid, L"1404210", 7 )));
+        if (is_rdr2) WARN( "RDR2 direct syscall at %p: 0xf2 -> %#x (NtGetContextThread).\n",
+                           (void *)pc, __id_NtGetContextThread );
+    }
+
+    /* Only translate direct calls made by the game/launcher image.  Calls
+     * through Wine's ntdll already carry Wine's own generated service IDs. */
+    return is_rdr2 ? __id_NtGetContextThread : syscall;
+}
+
 static void dispatch_syscall( ARM64_NT_CONTEXT *context )
 {
+    context->X8 = translate_rdr2_syscall( context->X8, context->Pc );
+
     if (context->X8 < __nb_syscalls)  /* syscall number in rax */
     {
         context->X0 = context->X4;  /* get first param from r10 */
