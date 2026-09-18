@@ -267,6 +267,9 @@ do
       # bionic bug-fixes
       "common/dlls_ntdll_unix_env_c.patch"
       "common/dlls_shell32_shlfileop_c.patch"
+
+      # rsaenh
+      "common/dlls_rsaenh_rsaenh_c.patch"
     )
 
     for patch in "${PATCHES[@]}"; do

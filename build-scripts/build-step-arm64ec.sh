@@ -269,6 +269,9 @@ do
       "common/dlls_ntdll_unix_env_c.patch"
       "common/dlls_shell32_shlfileop_c.patch"
 
+      # rsaenh
+      "common/dlls_rsaenh_rsaenh_c.patch"
+
       # fix build
       "arm64ec/programs_wineboot_wineboot_c.patch"
 

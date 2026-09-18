@@ -1,0 +1,99 @@
+diff --git a/dlls/rsaenh/rsaenh.c b/dlls/rsaenh/rsaenh.c
+index b0555db..de15f08 100644
+--- a/dlls/rsaenh/rsaenh.c
++++ b/dlls/rsaenh/rsaenh.c
+@@ -694,10 +694,22 @@ static inline BOOL init_hash(CRYPTHASH *pCryptHash) {
+                     /* A number of hash algorithms (e. g., _SHA256) are supported for HMAC even for providers
+                      * which don't list the algorithm, so print a fixme here. */
+                     FIXME("Hash algroithm %#x not found.\n", pCryptHash->pHMACInfo->HashAlgid);
++                    SetLastError(NTE_BAD_ALGID);
+                     return FALSE;
+                 }
+                 pCryptHash->dwHashSize = pAlgInfo->dwDefaultLen >> 3;
+                 init_hash_impl(pCryptHash->pHMACInfo->HashAlgid, &pCryptHash->hash);
++                if (!pCryptHash->hash.desc)
++                {
++                    /* init_hash_impl() unconditionally returns TRUE, even for an algorithm
++                     * it has no case for (e.g. CALG_SSL3_SHAMD5), leaving hash.desc unset.
++                     * Catch that here instead of letting the next update_hash_impl() call
++                     * dereference a NULL descriptor. */
++                    FIXME("HMAC inner hash algorithm %#lx has no implementation.\n",
++                          pCryptHash->pHMACInfo->HashAlgid);
++                    SetLastError(NTE_BAD_ALGID);
++                    return FALSE;
++                }
+                 update_hash_impl(&pCryptHash->hash, pCryptHash->pHMACInfo->pbInnerString,
+                                  pCryptHash->pHMACInfo->cbInnerString);
+             }
+@@ -4803,7 +4815,7 @@ BOOL WINAPI RSAENH_CPSetHashParam(HCRYPTPROV hProv, HCRYPTHASH hHash, DWORD dwPa
+                 pCryptHash->pHMACInfo->pbOuterString[i] ^= pCryptKey->abKeyValue[i];
+             }
+             
+-            init_hash(pCryptHash);
++            if (!init_hash(pCryptHash)) return FALSE;
+             return TRUE;
+ 
+         case HP_HASHVAL:
+@@ -5013,34 +5025,47 @@ BOOL WINAPI RSAENH_CPVerifySignature(HCRYPTPROV hProv, HCRYPTHASH hHash, const B
+         return FALSE;
+     }
+ 
++    /* Pin the key object for the rest of this call. lookup_handle() only
++     * holds the handle table's critical section long enough to fetch the
++     * pointer, so without an explicit reference a concurrent
++     * CryptDestroyKey(hPubKey) on another thread can free pCryptKey->context
++     * (the rsaenh RSA bignums) via free_key_impl/rsa_free while it is still
++     * being read below by decrypt_block_impl. Steam's networking code
++     * verifies ticket signatures against a short-lived imported public key
++     * and tears it down right after, on a different thread than the one
++     * doing the verify, which raced this exact window and surfaced as
++     * decrypt_block_impl reading "uninitialized" RSA key state.
++     */
++    InterlockedIncrement(&pCryptKey->header.refcount);
++
+     /* in Microsoft implementation, the signature length is checked before
+      * the signature pointer.
+      */
+     if (dwSigLen != pCryptKey->dwKeyLen)
+     {
+         SetLastError(NTE_BAD_SIGNATURE);
+-        return FALSE;
++        goto cleanup;
+     }
+ 
+     if (!hHash || !pbSignature)
+     {
+         SetLastError(ERROR_INVALID_PARAMETER);
+-        return FALSE;
++        goto cleanup;
+     }
+ 
+     if (sDescription) {
+         if (!RSAENH_CPHashData(hProv, hHash, (const BYTE*)sDescription,
+                                 (DWORD)lstrlenW(sDescription)*sizeof(WCHAR), 0))
+         {
+-            return FALSE;
++            goto cleanup;
+         }
+     }
+-    
++
+     dwHashLen = sizeof(DWORD);
+-    if (!RSAENH_CPGetHashParam(hProv, hHash, HP_ALGID, (BYTE*)&aiAlgid, &dwHashLen, 0)) return FALSE;
+-    
++    if (!RSAENH_CPGetHashParam(hProv, hHash, HP_ALGID, (BYTE*)&aiAlgid, &dwHashLen, 0)) goto cleanup;
++
+     dwHashLen = RSAENH_MAX_HASH_SIZE;
+-    if (!RSAENH_CPGetHashParam(hProv, hHash, HP_HASHVAL, abHashValue, &dwHashLen, 0)) return FALSE;
++    if (!RSAENH_CPGetHashParam(hProv, hHash, HP_HASHVAL, abHashValue, &dwHashLen, 0)) goto cleanup;
+ 
+     pbConstructed = malloc(dwSigLen);
+     if (!pbConstructed) {
+@@ -5075,6 +5100,7 @@ BOOL WINAPI RSAENH_CPVerifySignature(HCRYPTPROV hProv, HCRYPTHASH hHash, const B
+     SetLastError(NTE_BAD_SIGNATURE);
+ 
+ cleanup:
++    release_handle(&handle_table, hPubKey, RSAENH_MAGIC_KEY);
+     free(pbConstructed);
+     free(pbDecrypted);
+     return res;
