@@ -4318,10 +4318,16 @@ void virtual_free_teb( TEB *teb )
         NtFreeVirtualMemory( GetCurrentProcess(), &teb->DeallocationStack, &size, MEM_RELEASE );
     }
 #ifdef __aarch64__
+    /* the cpu area sits past the read-only kernel stack guard region, so release the
+     * view from its base; free through a local so the write-back leaves no dangling
+     * pointer in the teb, which signal_arm64.c reads on live threads
+     */
     if (teb->ChpeV2CpuAreaInfo)
     {
+        void *base = (char *)teb->ChpeV2CpuAreaInfo - kernel_stack_guard_size;
         size = 0;
-        NtFreeVirtualMemory( GetCurrentProcess(), (void **)&teb->ChpeV2CpuAreaInfo, &size, MEM_RELEASE );
+        NtFreeVirtualMemory( GetCurrentProcess(), &base, &size, MEM_RELEASE );
+        teb->ChpeV2CpuAreaInfo = NULL;
     }
 #endif
     if (thread_data->kernel_stack)
