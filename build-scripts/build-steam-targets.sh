@@ -99,7 +99,7 @@ esac
 # returns) sees the llvm-mingw toolchain. Without this, winebuild falls back
 # to the system clang's llvm-dlltool, which on Ubuntu is LLVM 18 and lacks
 # the -N flag needed for ARM64EC import libraries.
-LLVM_MINGW_TOOLCHAIN="${LLVM_MINGW_TOOLCHAIN:-$HOME/toolchains/llvm-mingw-20250920-ucrt-ubuntu-22.04-x86_64/bin}"
+LLVM_MINGW_TOOLCHAIN="${LLVM_MINGW_TOOLCHAIN:-$HOME/toolchains/llvm-mingw-20260908-ucrt-ubuntu-22.04-x86_64/bin}"
 if [ -d "$LLVM_MINGW_TOOLCHAIN" ]; then
   export PATH="$LLVM_MINGW_TOOLCHAIN:$PATH"
   export DLLTOOL="$LLVM_MINGW_TOOLCHAIN/llvm-dlltool"

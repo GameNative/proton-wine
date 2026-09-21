@@ -97,20 +97,23 @@ jobs:
           unzip -q android-ndk-r27d-linux.zip
           mv android-ndk-r27d 27.3.13750724
 
+      # Upstream llvm-mingw (LLVM 23.1.1). Replaces bylaws/llvm-mingw 20250920,
+      # whose Arm64EC varargs exit thunks pass x4/x5 as literal arguments instead
+      # of copying the stack payload (fixed in llvm/llvm-project 16bd5ce118).
       - name: Cache LLVM MinGW toolchain
         id: cache-llvm-mingw
         uses: actions/cache@v4
         with:
-          path: ~/toolchains/llvm-mingw-20250920-ucrt-ubuntu-22.04-x86_64
-          key: bylaws-llvm-mingw-20250920
+          path: ~/toolchains/llvm-mingw-20260908-ucrt-ubuntu-22.04-x86_64
+          key: mstorsjo-llvm-mingw-20260908
 
       - name: Set up LLVM MinGW toolchain
         if: steps.cache-llvm-mingw.outputs.cache-hit != 'true'
         run: |
           mkdir -p $HOME/toolchains
           cd $HOME/toolchains
-          wget https://github.com/bylaws/llvm-mingw/releases/download/20250920/llvm-mingw-20250920-ucrt-ubuntu-22.04-x86_64.tar.xz
-          tar -xf llvm-mingw-20250920-ucrt-ubuntu-22.04-x86_64.tar.xz
+          wget https://github.com/mstorsjo/llvm-mingw/releases/download/20260908/llvm-mingw-20260908-ucrt-ubuntu-22.04-x86_64.tar.xz
+          tar -xf llvm-mingw-20260908-ucrt-ubuntu-22.04-x86_64.tar.xz
 
       - name: Check out ntsync-android (userspace ntsync)
         uses: actions/checkout@v4
@@ -191,6 +194,16 @@ jobs:
           else
             bash build-scripts/build-step-arm64ec.sh --install
           fi
+
+      # The build scripts do not propagate make failures; refuse to package an
+      # incomplete tree.
+      - name: Verify build output for ${{ matrix.arch }}
+        run: |
+          OUT=$HOME/compiled-files-${{ matrix.arch }}
+          for f in ntdll.dll sechost.dll user32.dll ntdll.so; do
+            find "$OUT/lib/wine" -name "$f" | grep -q . || { echo "missing $f"; exit 1; }
+          done
+          du -sh "$OUT"
 
       - name: Download prefixPack.txz for ${{ matrix.arch }}
         run: |

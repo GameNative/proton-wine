@@ -10,7 +10,7 @@ export install_dir=$deps/../opt/wine
 
 #export TOOLCHAIN="$HOME/Android/android-ndk-r27d/toolchains/llvm/prebuilt/linux-x86_64/bin"
 export TOOLCHAIN="$HOME/Android/Sdk/ndk/27.3.13750724/toolchains/llvm/prebuilt/linux-x86_64/bin"
-export LLVM_MINGW_TOOLCHAIN="$HOME/toolchains/llvm-mingw-20250920-ucrt-ubuntu-22.04-x86_64/bin"
+export LLVM_MINGW_TOOLCHAIN="$HOME/toolchains/llvm-mingw-20260908-ucrt-ubuntu-22.04-x86_64/bin"
 export TARGET=aarch64-linux-android28
 export PATH=$LLVM_MINGW_TOOLCHAIN:$PATH
 
@@ -48,7 +48,9 @@ export CPPFLAGS="--sysroot=$TOOLCHAIN/../sysroot -idirafter $deps/include"
 export C_OPTS="-g0 -O2 -DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES -Wno-declaration-after-statement -Wno-implicit-function-declaration -Wno-int-conversion"
 export CFLAGS=$C_OPTS
 export CXXFLAGS=$C_OPTS
-export CROSSCFLAGS="-g0 -O2"
+# clang 23 promotes these legacy-C diagnostics to errors; the Android patches
+# (e.g. the user32 clipboard bridge) trip them.
+export CROSSCFLAGS="-g0 -O2 -Wno-error=incompatible-pointer-types -Wno-error=int-conversion -Wno-error=incompatible-function-pointer-types -Wno-error=implicit-function-declaration -Wno-error=implicit-int"
 export LDFLAGS="-L$deps/lib -Wl,-rpath=$RUNTIME_PATH/lib -Wl,-z,max-page-size=16384"
 
 export FREETYPE_CFLAGS="-I$deps/include/freetype2"
