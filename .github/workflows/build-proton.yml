@@ -212,7 +212,8 @@ jobs:
               "binPath": "bin",
               "libPath": "lib",
               "prefixPack": "prefixPack.txz"
-            }
+            },
+            "withWayland": true
           }
           EOF
 
@@ -228,7 +229,8 @@ jobs:
               "binPath": "bin",
               "libPath": "lib",
               "prefixPack": "prefixPack.txz"
-            }
+            },
+            "withWayland": true
           }
           EOF
 
