@@ -344,7 +344,7 @@ do
     "binPath": "bin",
     "libPath": "lib",
     "prefixPack": "prefixPack.txz"
-  },
+  }
 }
 EOF
 

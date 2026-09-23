@@ -213,7 +213,7 @@ jobs:
               "binPath": "bin",
               "libPath": "lib",
               "prefixPack": "prefixPack.txz"
-            },
+            }
           }
           EOF
 
@@ -230,7 +230,7 @@ jobs:
               "binPath": "bin",
               "libPath": "lib",
               "prefixPack": "prefixPack.txz"
-            },
+            }
           }
           EOF
 
