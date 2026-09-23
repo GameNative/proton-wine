@@ -339,12 +339,12 @@ do
   "versionCode": $WCP_VERSION_CODE,
   "description": "Proton 11.0-2 $ARCH_NAME (bionic) — stock Valve + userspace ntsync + fsync + Android fixes. SDK 28 + 16KB pages. Needs a fresh $ARCH_NAME container.",
   "files": [],
+  "wayland": true,
   "wine": {
     "binPath": "bin",
     "libPath": "lib",
     "prefixPack": "prefixPack.txz"
   },
-  "withWayland": true
 }
 EOF
 

@@ -208,12 +208,12 @@ jobs:
             "versionCode": 1,
             "description": "Proton 11.0-2 ${ARCH_NAME} (bionic) — stock Valve + runtime ntsync (kernel driver, userspace fallback) + fsync + Android fixes. SDK 28 + 16KB pages. Needs a fresh arm64ec container.",
             "files": [],
+            "wayland": true,
             "wine": {
               "binPath": "bin",
               "libPath": "lib",
               "prefixPack": "prefixPack.txz"
             },
-            "withWayland": true
           }
           EOF
 
@@ -225,12 +225,12 @@ jobs:
             "versionCode": 0,
             "description": "Proton 11.0-2 ${ARCH_NAME} (bionic) — stock Valve + runtime ntsync (kernel driver, userspace fallback) + fsync + Android fixes. SDK 28 + 16KB pages. Needs a fresh arm64ec container.",
             "files": [],
+            "wayland": true,
             "wine": {
               "binPath": "bin",
               "libPath": "lib",
               "prefixPack": "prefixPack.txz"
             },
-            "withWayland": true
           }
           EOF
 
