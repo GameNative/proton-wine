@@ -62,6 +62,14 @@ export GSTREAMER_CFLAGS="-I$deps/include/gstreamer-1.0 -I$deps/include/glib-2.0 
 export GSTREAMER_LIBS="-L$deps/lib -lgstgl-1.0 -lgstapp-1.0 -lgstvideo-1.0 -lgstaudio-1.0 -lglib-2.0 -lgobject-2.0 -lgio-2.0 -lgsttag-1.0 -lgstbase-1.0 -lgstreamer-1.0"
 export FFMPEG_CFLAGS="-I$deps/include/libavutil -I$deps/include/libavcodec -I$deps/include/libavformat"
 export FFMPEG_LIBS="-L$deps/lib -lavutil -lavcodec -lavformat"
+export WAYLAND_CLIENT_CFLAGS="-I$deps/include"
+export WAYLAND_CLIENT_LIBS="-L$deps/lib -lwayland-client"
+export WAYLAND_EGL_CFLAGS="-I$deps/include"
+export WAYLAND_EGL_LIBS="-L$deps/lib -lwayland-egl"
+export XKBCOMMON_CFLAGS="-I$deps/include"
+export XKBCOMMON_LIBS="-L$deps/lib -lxkbcommon"
+export XKBREGISTRY_CFLAGS="-I$deps/include"
+export XKBREGISTRY_LIBS="-L$deps/lib -lxkbregistry"
 
 for arg in "$@"
 do
@@ -167,7 +175,7 @@ do
       --without-v4l2 \
       --without-vosk \
       --with-vulkan \
-      --without-wayland \
+      --with-wayland \
       --without-xcomposite \
       --without-xfixes \
       --without-xinerama \
@@ -346,6 +354,7 @@ do
   "versionCode": $WCP_VERSION_CODE,
   "description": "Proton 11.0-2 $ARCH_NAME (bionic) — stock Valve + userspace ntsync + fsync + Android fixes. SDK 28 + 16KB pages. Needs a fresh $ARCH_NAME container.",
   "files": [],
+  "wayland": true,
   "wine": {
     "binPath": "bin",
     "libPath": "lib",
