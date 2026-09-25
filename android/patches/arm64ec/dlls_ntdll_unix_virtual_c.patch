@@ -1,5 +1,5 @@
 diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
-index d5b9341..82c5931 100644
+index d5b93415..0bab2067 100644
 --- a/dlls/ntdll/unix/virtual.c
 +++ b/dlls/ntdll/unix/virtual.c
 @@ -100,6 +100,10 @@
@@ -213,7 +213,25 @@ index d5b9341..82c5931 100644
      /* try to find space in a reserved area for the views and pages protection table */
  #ifdef _WIN64
      pages_vprot_size = ((size_t)host_addr_space_limit >> page_shift >> pages_vprot_shift) + 1;
-@@ -5435,7 +5490,8 @@ static NTSTATUS allocate_virtual_memory( void **ret, SIZE_T *size_ptr, ULONG typ
+@@ -4380,10 +4435,16 @@ void virtual_free_teb( TEB *teb )
+         NtFreeVirtualMemory( GetCurrentProcess(), &teb->DeallocationStack, &size, MEM_RELEASE );
+     }
+ #ifdef __aarch64__
++    /* the cpu area sits past the read-only kernel stack guard region, so release the
++     * view from its base; free through a local so the write-back leaves no dangling
++     * pointer in the teb, which signal_arm64.c reads on live threads
++     */
+     if (teb->ChpeV2CpuAreaInfo)
+     {
++        void *base = (char *)teb->ChpeV2CpuAreaInfo - kernel_stack_guard_size;
+         size = 0;
+-        NtFreeVirtualMemory( GetCurrentProcess(), (void **)&teb->ChpeV2CpuAreaInfo, &size, MEM_RELEASE );
++        NtFreeVirtualMemory( GetCurrentProcess(), &base, &size, MEM_RELEASE );
++        teb->ChpeV2CpuAreaInfo = NULL;
+     }
+ #endif
+     if (thread_data->kernel_stack)
+@@ -5435,7 +5496,8 @@ static NTSTATUS allocate_virtual_memory( void **ret, SIZE_T *size_ptr, ULONG typ
  
      /* Round parameters to a page boundary */
  
@@ -223,7 +241,7 @@ index d5b9341..82c5931 100644
  
      if (*ret)
      {
-@@ -6558,6 +6614,49 @@ static unsigned int get_memory_image_info( HANDLE process, LPCVOID addr, MEMORY_
+@@ -6558,6 +6620,49 @@ static unsigned int get_memory_image_info( HANDLE process, LPCVOID addr, MEMORY_
      return status;
  }
  
@@ -273,7 +291,7 @@ index d5b9341..82c5931 100644
  
  /***********************************************************************
   *             NtQueryVirtualMemory   (NTDLL.@)
-@@ -6603,6 +6702,44 @@ NTSTATUS WINAPI NtQueryVirtualMemory( HANDLE process, LPCVOID addr,
+@@ -6603,6 +6708,44 @@ NTSTATUS WINAPI NtQueryVirtualMemory( HANDLE process, LPCVOID addr,
              }
              return STATUS_INVALID_HANDLE;
  
