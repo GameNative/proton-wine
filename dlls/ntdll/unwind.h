@@ -61,6 +61,10 @@ static inline UINT eflags_to_cpsr( UINT eflags )
     if (eflags & 0x0080) ret |= 0x80000000;  /* negative */
     if (eflags & 0x0100) ret |= 0x00200000;  /* trap */
     if (eflags & 0x0800) ret |= 0x10000000;  /* overflow */
+    /* parity and aux carry have no AArch64 equivalent; carry them in RES0 bits 26/27 so the
+     * emulator gets them back on continue (only NZCV ever reaches the hardware) */
+    if (eflags & 0x0004) ret |= 0x04000000;  /* parity */
+    if (eflags & 0x0010) ret |= 0x08000000;  /* aux carry */
     return ret;
 }
 
@@ -73,6 +77,8 @@ static inline UINT cpsr_to_eflags( UINT cpsr )
     if (cpsr & 0x20000000) ret |= 0x0001;  /* carry */
     if (cpsr & 0x40000000) ret |= 0x0040;  /* zero */
     if (cpsr & 0x80000000) ret |= 0x0080;  /* negative */
+    if (cpsr & 0x04000000) ret |= 0x0004;  /* parity */
+    if (cpsr & 0x08000000) ret |= 0x0010;  /* aux carry */
     return ret;
 }
 
