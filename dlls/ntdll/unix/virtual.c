@@ -270,6 +270,7 @@ struct file_view
 #define VPROT_PLACEHOLDER      0x0400
 #define VPROT_FREE_PLACEHOLDER 0x0800
 #define VPROT_NATIVE           0x1000
+#define VPROT_TAIL             0x2000  /* rest of the last allocation granule is mapped too */
 
 /* Conversion from VPROT_* to Win32 flags */
 static const BYTE VIRTUAL_Win32Flags[16] =
@@ -1873,6 +1874,40 @@ static void unregister_view( struct file_view *view )
 }
 
 
+static size_t view_tail_size( const struct file_view *view )
+{
+    char *end = (char *)view->base + view->size;
+    return (char *)ROUND_ADDR( end + granularity_mask, granularity_mask ) - end;
+}
+
+static void unmap_view_tail( struct file_view *view )
+{
+    if (!(view->protect & VPROT_TAIL)) return;
+    unmap_area( (char *)view->base + view->size, view_tail_size( view ) );
+    view->protect &= ~VPROT_TAIL;
+}
+
+static void map_view_tail( struct file_view *view )
+{
+    char *start = (char *)view->base + view->size;
+    size_t size = view_tail_size( view );
+    int unix_prot = get_unix_prot( view->protect );
+    int reserved;
+
+    if (!size || ((UINT_PTR)view->base & granularity_mask)) return;
+    if (!(view->protect & VPROT_COMMITTED)) return;
+    if (view->protect & (VPROT_SYSTEM | VPROT_NATIVE | VPROT_PLACEHOLDER | VPROT_WRITEWATCH | VPROT_GUARD)) return;
+    if (find_view_range( start, size )) return;
+
+    reserved = mmap_is_in_reserved_area( start, size );
+    if (reserved == 1)
+    {
+        if (anon_mmap_fixed( start, size, unix_prot, 0 ) != start) return;
+    }
+    else if (reserved || anon_mmap_tryfixed( start, size, unix_prot, 0 ) != start) return;
+    view->protect |= VPROT_TAIL;
+}
+
 /***********************************************************************
  *           delete_view
  *
@@ -1881,6 +1916,7 @@ static void unregister_view( struct file_view *view )
 static void delete_view( struct file_view *view ) /* [in] View */
 {
     if (!(view->protect & VPROT_SYSTEM)) unmap_area( view->base, view->size );
+    unmap_view_tail( view );
     set_page_vprot( view->base, view->size, 0 );
     if (view->protect & VPROT_ARM64EC) clear_arm64ec_range( view->base, view->size );
     unregister_view( view );
@@ -2728,6 +2764,8 @@ static NTSTATUS decommit_pages( struct file_view *view, char *base, size_t size 
 static NTSTATUS remove_pages_from_view( struct file_view *view, char *base, size_t size )
 {
     assert( size < view->size );
+
+    unmap_view_tail( view );
 
     if (view->base != base && base + size != (char *)view->base + view->size)
     {
@@ -5495,6 +5533,7 @@ static NTSTATUS allocate_virtual_memory( void **ret, SIZE_T *size_ptr, ULONG typ
             {
                 base = view->base;
                 if (vprot & VPROT_EXEC || force_exec_prot) mprotect_range( base, size, 0, 0 );
+                else if (!is_dos_memory) map_view_tail( view );
             }
         }
     }
