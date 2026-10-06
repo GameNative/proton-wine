@@ -2518,6 +2518,12 @@ static void fixup_effective_user_space_limit( const void **effective_user_space_
     }
     if (cached)
         *effective_user_space_limit = min( *effective_user_space_limit, (void *)0x700000000000 );
+#ifdef __ANDROID__
+    {
+        UINT_PTR top = (UINT_PTR)host_addr_space_limit + granularity_mask + 1;
+        *effective_user_space_limit = min( *effective_user_space_limit, (void *)(top / 2) );
+    }
+#endif
 #endif
 }
 
