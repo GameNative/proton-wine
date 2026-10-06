@@ -298,7 +298,11 @@ void init_memory(void)
 {
     host_page_mask = sysconf( _SC_PAGESIZE ) - 1;
     free_map_addr( 0x60000000, 0x1c000000 );
+#ifdef __ANDROID__
+    free_available_high_map_addr( 0x180000000000, 0x40000000000 );
+#else
     free_available_high_map_addr( 0x600000000000, 0x100000000000 );
+#endif
 }
 
 static void ranges_dump( struct object *obj, int verbose )
