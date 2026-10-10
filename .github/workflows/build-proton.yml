@@ -36,6 +36,14 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Resolve the package version
+        run: |
+          V="11.0-2"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            V="11.0-2.${{ github.event.pull_request.number }}"
+          fi
+          echo "PROTON_VERSION=$V" >> $GITHUB_ENV
+
       - name: Set up build environment
         run: |
           sudo dpkg --add-architecture i386
@@ -204,7 +212,7 @@ jobs:
           cat > $GITHUB_WORKSPACE/profile.json << EOF
           {
             "type": "Proton",
-            "versionName": "11.0-2-${ARCH_NAME}",
+            "versionName": "${PROTON_VERSION}-${ARCH_NAME}",
             "versionCode": 1,
             "description": "Proton 11.0-2 ${ARCH_NAME} (bionic) — stock Valve + runtime ntsync (kernel driver, userspace fallback) + fsync + Android fixes. SDK 28 + 16KB pages. Needs a fresh arm64ec container.",
             "files": [],
@@ -220,7 +228,7 @@ jobs:
           cat > $GITHUB_WORKSPACE/profile-wine.json << EOF
           {
             "type": "Wine",
-            "versionName": "11.0-2-${ARCH_NAME}",
+            "versionName": "${PROTON_VERSION}-${ARCH_NAME}",
             "versionCode": 0,
             "description": "Proton 11.0-2 ${ARCH_NAME} (bionic) — stock Valve + runtime ntsync (kernel driver, userspace fallback) + fsync + Android fixes. SDK 28 + 16KB pages. Needs a fresh arm64ec container.",
             "files": [],
@@ -250,13 +258,13 @@ jobs:
           # faster than xz. -T0 = all cores, -19 = high ratio (small download).
           cp $GITHUB_WORKSPACE/prefixPack.txz .
           cp $GITHUB_WORKSPACE/profile.json .
-          tar -I 'zstd -T0 -19' -cf proton-11.0-2-$ARCH_NAME.wcp bin lib share prefixPack.txz profile.json
-          mv proton-11.0-2-$ARCH_NAME.wcp $GITHUB_WORKSPACE/
+          tar -I 'zstd -T0 -19' -cf proton-$PROTON_VERSION-$ARCH_NAME.wcp bin lib share prefixPack.txz profile.json
+          mv proton-$PROTON_VERSION-$ARCH_NAME.wcp $GITHUB_WORKSPACE/
 
           # Create Wine WCP for CMOD & Ludashi - wcp.xz format
           cp $GITHUB_WORKSPACE/profile-wine.json profile.json
-          tar cJf proton-wine-11.0-2-$ARCH_NAME.wcp.xz bin lib share prefixPack.txz profile.json
-          mv proton-wine-11.0-2-$ARCH_NAME.wcp.xz $GITHUB_WORKSPACE/
+          tar cJf proton-wine-$PROTON_VERSION-$ARCH_NAME.wcp.xz bin lib share prefixPack.txz profile.json
+          mv proton-wine-$PROTON_VERSION-$ARCH_NAME.wcp.xz $GITHUB_WORKSPACE/
 
       - name: Upload build artifacts
         run: |
@@ -271,14 +279,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: proton-${{ env.ARCH_NAME }}
-          path: proton-11.0-2-${{ env.ARCH_NAME }}.wcp
+          path: proton-${{ env.PROTON_VERSION }}-${{ env.ARCH_NAME }}.wcp
           retention-days: 30
 
       - name: Upload Wine build artifacts for ${{ matrix.arch }}
         uses: actions/upload-artifact@v4
         with:
           name: proton-wine-${{ env.ARCH_NAME }}
-          path: proton-wine-11.0-2-${{ env.ARCH_NAME }}.wcp.xz
+          path: proton-wine-${{ env.PROTON_VERSION }}-${{ env.ARCH_NAME }}.wcp.xz
           retention-days: 30
 
   release:
