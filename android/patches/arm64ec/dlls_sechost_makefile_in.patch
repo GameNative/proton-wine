@@ -1,0 +1,13 @@
+diff --git a/dlls/sechost/Makefile.in b/dlls/sechost/Makefile.in
+index ec1eb100683..25439e94090 100644
+--- a/dlls/sechost/Makefile.in
++++ b/dlls/sechost/Makefile.in
+@@ -1,7 +1,6 @@
+ MODULE    = sechost.dll
+ IMPORTLIB = sechost
+-IMPORTS   = kernelbase
+-DELAYIMPORTS = rpcrt4
++IMPORTS   = kernelbase rpcrt4
+ 
+ SOURCES = \
+ 	plugplay.idl \

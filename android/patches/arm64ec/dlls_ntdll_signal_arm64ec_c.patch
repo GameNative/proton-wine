@@ -1,0 +1,36 @@
+diff --git a/dlls/ntdll/signal_arm64ec.c b/dlls/ntdll/signal_arm64ec.c
+index 8790f070948..da269677e61 100644
+--- a/dlls/ntdll/signal_arm64ec.c
++++ b/dlls/ntdll/signal_arm64ec.c
+@@ -732,8 +732,19 @@ static void notify_map_view_of_section( HANDLE handle, void *addr, SIZE_T size,
+     NTSTATUS status;
+ 
+     if (!pNotifyMapViewOfSection) return;
+-    if (!NtCurrentTeb()->Tib.ArbitraryUserPointer) return;
+-    if (NtQuerySection( handle, SectionImageInformation, &info, sizeof(info), NULL )) return;
++
++    /* The queried image information is not used; this call only ever served to check that the
++     * handle names a real section. Together with the ArbitraryUserPointer guard below it made
++     * this notification fire only for image loads performed by the loader, so the emulator was
++     * never told about views of non-image sections and could not know such a range holds guest
++     * code. Protectors that dodge W^X by double-mapping one pagefile-backed section - executable
++     * at one address, writable at another - depend on exactly that mapping being tracked
++     * (Blizzard's *_loader.dll among them), and they map it directly rather than through the
++     * loader. Notify for a non-image section unconditionally; keep the original guards for
++     * image sections so loader behaviour is unchanged. */
++    status = NtQuerySection( handle, SectionImageInformation, &info, sizeof(info), NULL );
++    if (status && status != STATUS_SECTION_NOT_IMAGE) return;
++    if (!status && !NtCurrentTeb()->Tib.ArbitraryUserPointer) return;
+     status = pNotifyMapViewOfSection( NULL, addr, NULL, size, alloc, protect );
+     if (NT_SUCCESS(status)) return;
+     NtUnmapViewOfSection( GetCurrentProcess(), addr );
+@@ -1901,6 +1912,9 @@ NTSTATUS __attribute__((naked)) __wine_unix_call_arm64ec( unixlib_handle_t handl
+ 
+ NTSTATUS (WINAPI *__wine_unix_call_dispatcher_arm64ec)( unixlib_handle_t, unsigned int, void * ) = __wine_unix_call_arm64ec;
+ 
++/* Tells the emulator that EFlags PF/AF survive context conversion in cpsr bits 26/27 (see eflags_to_cpsr) */
++ULONG __wine_arm64ec_extended_eflags = 1;
++
+ static void __attribute__((naked)) arm64x_check_call_early(void)
+ {
+     asm( "mov x11, x9\n\t"
