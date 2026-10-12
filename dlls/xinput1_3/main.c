@@ -123,6 +123,59 @@ static HANDLE start_event;
 static HANDLE update_event;
 static HANDLE steam_overlay_event;
 
+/* Temporary, executable-scoped diagnostics; do not change input semantics. */
+static BOOL diagnose_input;
+static SRWLOCK diagnostic_lock = {0};
+static struct input_diagnostic
+{
+    BOOL seen, enabled;
+    DWORD result, overlay, tick, lines;
+    WORD raw_buttons, buttons;
+} input_diagnostics[2][XUSER_MAX_COUNT + 1];
+
+static void diagnose_state(BOOL extended, DWORD index, DWORD result, const XINPUT_STATE *state,
+                           WORD raw_buttons, BOOL enabled, DWORD overlay)
+{
+    struct input_diagnostic *last;
+    DWORD error, tick;
+    WORD buttons = 0;
+
+    if (!diagnose_input) return;
+    error = GetLastError();
+    tick = GetTickCount();
+    if (result == ERROR_SUCCESS)
+    {
+        buttons = state->Gamepad.wButtons;
+        /* XInputGetState removes GUIDE immediately after this helper returns. */
+        if (!extended) buttons &= ~XINPUT_GAMEPAD_GUIDE;
+    }
+
+    AcquireSRWLockExclusive(&diagnostic_lock);
+    last = &input_diagnostics[extended][min(index, XUSER_MAX_COUNT)];
+    if (last->lines < 512 && (!last->seen || last->result != result || last->buttons != buttons ||
+        last->raw_buttons != raw_buttons || last->enabled != enabled || last->overlay != overlay ||
+        tick - last->tick >= 5000))
+    {
+        MESSAGE("GN_XINPUT_DIAG pid=%04lx tid=%04lx module=%p tick=%lu api=%s index=%lu "
+                "ret=%lu valid=%u packet=%lu raw_wButtons=%04x wButtons=%04x enabled=%d overlay_wait=%#lx\n",
+                GetCurrentProcessId(), GetCurrentThreadId(), xinput_instance, tick,
+                extended ? "XInputGetStateEx" : "XInputGetState", index, result, result == ERROR_SUCCESS,
+                result == ERROR_SUCCESS ? state->dwPacketNumber : 0, raw_buttons, buttons, enabled, overlay);
+        last->seen = TRUE;
+        last->result = result;
+        last->buttons = buttons;
+        last->raw_buttons = raw_buttons;
+        last->enabled = enabled;
+        last->overlay = overlay;
+        last->tick = tick;
+        if (++last->lines == 512)
+            MESSAGE("GN_XINPUT_DIAG module=%p api=%s index=%lu logging limit reached\n",
+                    xinput_instance, extended ? "XInputGetStateEx" : "XInputGetState", index);
+    }
+    ReleaseSRWLockExclusive(&diagnostic_lock);
+    SetLastError(error);
+}
+
 static void check_value_caps(struct xinput_controller *controller, USHORT usage, HIDP_VALUE_CAPS *caps)
 {
     switch (usage)
@@ -790,6 +843,9 @@ static void controller_unlock(struct xinput_controller *controller)
 
 BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
 {
+    WCHAR path[MAX_PATH], *name;
+    DWORD len;
+
     TRACE("inst %p, reason %lu, reserved %p.\n", inst, reason, reserved);
 
     switch (reason)
@@ -797,6 +853,14 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
     case DLL_PROCESS_ATTACH:
         xinput_instance = inst;
         DisableThreadLibraryCalls(inst);
+        len = GetModuleFileNameW(NULL, path, ARRAY_SIZE(path));
+        if (len && len < ARRAY_SIZE(path))
+        {
+            name = wcsrchr(path, '\\');
+            diagnose_input = !wcsicmp(name ? name + 1 : path, L"BC.exe");
+        }
+        if (diagnose_input)
+            MESSAGE("GN_XINPUT_DIAG v1 module=%p enabled; transitions and 5s heartbeat, no input override\n", inst);
         break;
     }
     return TRUE;
@@ -844,21 +908,33 @@ DWORD WINAPI DECLSPEC_HOTPATCH XInputSetState(DWORD index, XINPUT_VIBRATION *vib
 
 /* Some versions of SteamOverlayRenderer hot-patch XInputGetStateEx() and call
  * XInputGetState() in the hook, so we need a wrapper. */
-static DWORD xinput_get_state(DWORD index, XINPUT_STATE *state)
+static DWORD xinput_get_state(DWORD index, XINPUT_STATE *state, BOOL extended)
 {
-    if (!state) return ERROR_BAD_ARGUMENTS;
+    DWORD result = ERROR_BAD_ARGUMENTS, overlay = WAIT_FAILED;
+    WORD raw_buttons = 0;
+    BOOL enabled = FALSE;
+
+    if (!state) goto done;
 
     start_update_thread();
 
-    if (index >= XUSER_MAX_COUNT) return ERROR_BAD_ARGUMENTS;
-    if (!controller_lock(&controllers[index])) return ERROR_DEVICE_NOT_CONNECTED;
+    if (index >= XUSER_MAX_COUNT) goto done;
+    result = ERROR_DEVICE_NOT_CONNECTED;
+    if (!controller_lock(&controllers[index])) goto done;
 
-    if (WaitForSingleObject(steam_overlay_event, 0) == WAIT_OBJECT_0) memset(state, 0, sizeof(*state));
+    overlay = WaitForSingleObject(steam_overlay_event, 0);
+    if (overlay == WAIT_OBJECT_0) memset(state, 0, sizeof(*state));
     else *state = controllers[index].state;
+
+    raw_buttons = controllers[index].state.Gamepad.wButtons;
+    enabled = controllers[index].enabled;
 
     controller_unlock(&controllers[index]);
 
-    return ERROR_SUCCESS;
+    result = ERROR_SUCCESS;
+done:
+    diagnose_state(extended, index, result, state, raw_buttons, enabled, overlay);
+    return result;
 }
 
 DWORD WINAPI DECLSPEC_HOTPATCH XInputGetState(DWORD index, XINPUT_STATE *state)
@@ -867,7 +943,7 @@ DWORD WINAPI DECLSPEC_HOTPATCH XInputGetState(DWORD index, XINPUT_STATE *state)
 
     TRACE("index %lu, state %p.\n", index, state);
 
-    ret = xinput_get_state(index, state);
+    ret = xinput_get_state(index, state, FALSE);
     if (ret != ERROR_SUCCESS) return ret;
 
     /* The main difference between this and the Ex version is the media guide button */
@@ -880,7 +956,7 @@ DWORD WINAPI DECLSPEC_HOTPATCH XInputGetStateEx(DWORD index, XINPUT_STATE *state
 {
     TRACE("index %lu, state %p.\n", index, state);
 
-    return xinput_get_state(index, state);
+    return xinput_get_state(index, state, TRUE);
 }
 
 static const int JS_STATE_OFF = 0;
