@@ -50,12 +50,14 @@ jobs:
           if [ "${{ matrix.variant }}" = "gamenative" ]; then
             echo "PROTON_VARIANT=gamenative" >> $GITHUB_ENV
             echo "VARIANT_SUFFIX=-1" >> $GITHUB_ENV
+            echo "PKG_PREFIX=proton-gamenative" >> $GITHUB_ENV
             echo "LLVM_MINGW_REPO=mstorsjo" >> $GITHUB_ENV
             echo "LLVM_MINGW_VERSION=20260908" >> $GITHUB_ENV
             echo "LLVM_MINGW_TOOLCHAIN=$HOME/toolchains/llvm-mingw-20260908-ucrt-ubuntu-22.04-x86_64/bin" >> $GITHUB_ENV
             echo "CROSSCFLAGS_EXTRA=-Wno-error=incompatible-pointer-types -Wno-error=int-conversion -Wno-error=incompatible-function-pointer-types -Wno-error=implicit-function-declaration -Wno-error=implicit-int" >> $GITHUB_ENV
           else
             echo "VARIANT_SUFFIX=" >> $GITHUB_ENV
+            echo "PKG_PREFIX=proton" >> $GITHUB_ENV
             echo "LLVM_MINGW_REPO=bylaws" >> $GITHUB_ENV
             echo "LLVM_MINGW_VERSION=20250920" >> $GITHUB_ENV
           fi
@@ -236,7 +238,7 @@ jobs:
 
           DESC="Proton 11.0-2 ${ARCH_NAME} (bionic) — stock Valve + runtime ntsync (kernel driver, userspace fallback) + fsync + Android fixes. SDK 28 + 16KB pages. Needs a fresh arm64ec container."
           if [ -n "$PROTON_VARIANT" ]; then
-            DESC="Proton 11.0-2 ${ARCH_NAME} GameNative variant — stock build plus fixes for protected launchers (Battle.net), built with LLVM 23. Pair with the GameNative FEXCore. Needs a fresh arm64ec container."
+            DESC="proton-gamenative 11.0-2 ${ARCH_NAME} — stock Proton plus fixes for protected launchers (Battle.net), built with LLVM 23. Pair with the GameNative FEXCore. Needs a fresh arm64ec container."
           fi
 
           # Generate Proton profile.json
@@ -289,13 +291,13 @@ jobs:
           # faster than xz. -T0 = all cores, -19 = high ratio (small download).
           cp $GITHUB_WORKSPACE/prefixPack.txz .
           cp $GITHUB_WORKSPACE/profile.json .
-          tar -I 'zstd -T0 -19' -cf proton-$PROTON_VERSION-$ARCH_NAME$VARIANT_SUFFIX.wcp bin lib share prefixPack.txz profile.json
-          mv proton-$PROTON_VERSION-$ARCH_NAME$VARIANT_SUFFIX.wcp $GITHUB_WORKSPACE/
+          tar -I 'zstd -T0 -19' -cf $PKG_PREFIX-$PROTON_VERSION-$ARCH_NAME.wcp bin lib share prefixPack.txz profile.json
+          mv $PKG_PREFIX-$PROTON_VERSION-$ARCH_NAME.wcp $GITHUB_WORKSPACE/
 
           # Create Wine WCP for CMOD & Ludashi - wcp.xz format
           cp $GITHUB_WORKSPACE/profile-wine.json profile.json
-          tar cJf proton-wine-$PROTON_VERSION-$ARCH_NAME$VARIANT_SUFFIX.wcp.xz bin lib share prefixPack.txz profile.json
-          mv proton-wine-$PROTON_VERSION-$ARCH_NAME$VARIANT_SUFFIX.wcp.xz $GITHUB_WORKSPACE/
+          tar cJf $PKG_PREFIX-wine-$PROTON_VERSION-$ARCH_NAME.wcp.xz bin lib share prefixPack.txz profile.json
+          mv $PKG_PREFIX-wine-$PROTON_VERSION-$ARCH_NAME.wcp.xz $GITHUB_WORKSPACE/
 
       - name: Upload build artifacts
         run: |
@@ -309,15 +311,15 @@ jobs:
       - name: Upload Proton build artifacts for ${{ matrix.arch }}
         uses: actions/upload-artifact@v4
         with:
-          name: proton-${{ env.ARCH_NAME }}${{ env.VARIANT_SUFFIX }}
-          path: proton-${{ env.PROTON_VERSION }}-${{ env.ARCH_NAME }}${{ env.VARIANT_SUFFIX }}.wcp
+          name: ${{ env.PKG_PREFIX }}-${{ env.ARCH_NAME }}
+          path: ${{ env.PKG_PREFIX }}-${{ env.PROTON_VERSION }}-${{ env.ARCH_NAME }}.wcp
           retention-days: 30
 
       - name: Upload Wine build artifacts for ${{ matrix.arch }}
         uses: actions/upload-artifact@v4
         with:
-          name: proton-wine-${{ env.ARCH_NAME }}${{ env.VARIANT_SUFFIX }}
-          path: proton-wine-${{ env.PROTON_VERSION }}-${{ env.ARCH_NAME }}${{ env.VARIANT_SUFFIX }}.wcp.xz
+          name: ${{ env.PKG_PREFIX }}-wine-${{ env.ARCH_NAME }}
+          path: ${{ env.PKG_PREFIX }}-wine-${{ env.PROTON_VERSION }}-${{ env.ARCH_NAME }}.wcp.xz
           retention-days: 30
 
   release:
@@ -398,8 +400,8 @@ jobs:
             - `proton-11.0-2-x86_64.wcp` - For GameNative
             - `proton-11.0-2-arm64ec.wcp` - For GameNative
 
-            **GameNative variant** (stock plus `android/patches/variants/gamenative`, LLVM 23; pair with the GameNative FEXCore):
-            - `proton-11.0-2-arm64ec-1.wcp`, `proton-11.0-2-x86_64-1.wcp`
+            **GameNative variant** (stock plus `android/patches/variants/gamenative`, LLVM 23; pair with the GameNative FEXCore). Shows in the app as `proton-11.0-2-<arch>-1`; the app's version parser only takes digits there:
+            - `proton-gamenative-11.0-2-arm64ec.wcp`, `proton-gamenative-11.0-2-x86_64.wcp`
 
             **Wine Type:**
             - `proton-wine-11.0-2-x86_64.wcp.xz` - For Winlator for CMOD & Ludashi
