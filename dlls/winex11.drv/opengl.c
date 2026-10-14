@@ -552,6 +552,9 @@ static BOOL x11drv_egl_surface_create( HWND hwnd, BOOL raw, int format, struct o
         return FALSE;
     }
 
+    gl->diagnostic_window = window;
+    gl->diagnostic_frames = 0;
+
     TRACE( "Created drawable %s with client window %lx\n", debugstr_opengl_drawable( &gl->base ), window );
     XFlush( gdi_display );
 
@@ -1512,7 +1515,7 @@ static void barony_sample_gl( struct gl_drawable *gl, unsigned int width, unsign
     funcs->p_glBindBuffer( GL_PIXEL_PACK_BUFFER, 0 );
     funcs->p_glBindFramebuffer( GL_READ_FRAMEBUFFER, 0 );
     funcs->p_glGetIntegerv( GL_READ_BUFFER, &read_buffer );
-    funcs->p_glReadBuffer( gl->base.doublebuffer ? GL_BACK : GL_FRONT );
+    funcs->p_glReadBuffer( use_egl || gl->base.doublebuffer ? GL_BACK : GL_FRONT );
     status = funcs->p_glCheckFramebufferStatus( GL_READ_FRAMEBUFFER );
     memset( pixels, 0xa5, sizeof(pixels) );
     if (status == GL_FRAMEBUFFER_COMPLETE)
@@ -1527,7 +1530,7 @@ static void barony_sample_gl( struct gl_drawable *gl, unsigned int width, unsign
 
     MESSAGE( "[BARONY_GL_DIAG] frame=%u window=%lx size=%ux%u draw_fbo=%d draw_status=%#x default_read_status=%#x buffer=%s\n",
              gl->diagnostic_frames, gl->diagnostic_window, width, height, draw_fbo, draw_status, status,
-             gl->base.doublebuffer ? "back" : "front" );
+             use_egl || gl->base.doublebuffer ? "back" : "front" );
     for (i = 0; i < 9; ++i)
         MESSAGE( "[BARONY_GL_DIAG] frame=%u gl_sample=%u rgba=%02x%02x%02x%02x (a5 sentinel if unread)\n",
                  gl->diagnostic_frames, i, pixels[i][0], pixels[i][1], pixels[i][2], pixels[i][3] );
@@ -1580,6 +1583,7 @@ static BOOL x11drv_surface_swap( struct opengl_drawable *base )
     if (ctx && gl->diagnostic_window && barony_diagnostic_enabled() && gl->diagnostic_frames < 6000)
     {
         ++gl->diagnostic_frames;
+        if (gl->diagnostic_frames == 1) MESSAGE( "[BARONY_GL_DIAG] backend=GLX diagnostic-v2\n" );
         diagnostic = gl->diagnostic_frames <= 3 || !(gl->diagnostic_frames % 300);
         if (diagnostic && pglXQueryDrawable && funcs->p_glCheckFramebufferStatus &&
             funcs->p_glBindFramebuffer && funcs->p_glBindBuffer)
@@ -1638,8 +1642,32 @@ static void x11drv_egl_surface_flush( struct opengl_drawable *base, UINT flags )
 static BOOL x11drv_egl_surface_swap( struct opengl_drawable *base )
 {
     struct gl_drawable *gl = impl_from_opengl_drawable( base );
+    BOOL diagnostic = FALSE;
+    EGLint width = 0, height = 0;
 
     TRACE( "%s\n", debugstr_opengl_drawable( base ) );
+
+    if (funcs->p_eglGetCurrentContext() && gl->diagnostic_window &&
+        barony_diagnostic_enabled() && gl->diagnostic_frames < 6000)
+    {
+        ++gl->diagnostic_frames;
+        if (gl->diagnostic_frames == 1) MESSAGE( "[BARONY_GL_DIAG] backend=EGL diagnostic-v2\n" );
+        diagnostic = gl->diagnostic_frames <= 3 || !(gl->diagnostic_frames % 300);
+        if (diagnostic && funcs->p_glCheckFramebufferStatus && funcs->p_glBindFramebuffer &&
+            funcs->p_glBindBuffer && funcs->p_eglGetCurrentSurface( EGL_READ ) == base->surface &&
+            funcs->p_eglGetCurrentSurface( EGL_DRAW ) == base->surface)
+        {
+            funcs->p_eglQuerySurface( egl->display, base->surface, EGL_WIDTH, &width );
+            funcs->p_eglQuerySurface( egl->display, base->surface, EGL_HEIGHT, &height );
+            diagnostic = width > 0 && height > 0 && width <= 16384 && height <= 16384;
+        }
+        else diagnostic = FALSE;
+        if (diagnostic)
+        {
+            MESSAGE( "[BARONY_GL_DIAG] backend=EGL\n" );
+            barony_sample_gl( gl, width, height );
+        }
+    }
 
     if (!funcs->p_eglSwapBuffers( egl->display, gl->base.surface ) && funcs->p_eglGetError() == EGL_BAD_SURFACE
         && !funcs->p_eglGetCurrentContext())
@@ -1656,6 +1684,7 @@ static BOOL x11drv_egl_surface_swap( struct opengl_drawable *base )
         XFlush( gdi_display );
 
     client_surface_present( base->client );
+    if (diagnostic) barony_sample_x11( gl, width, height );
     return TRUE;
 }
 
