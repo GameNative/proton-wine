@@ -150,6 +150,78 @@ DWORD WINAPI RtlRunOnceComplete( RTL_RUN_ONCE *once, ULONG flags, void *context 
 
 static void *no_debug_info_marker = (void *)(ULONG_PTR)-1;
 
+enum crit_section_atomic_op
+{
+    CRIT_SECTION_CMPXCHG,
+    CRIT_SECTION_ADD,
+    CRIT_SECTION_EXCHANGE
+};
+
+/* Packed Steam critical sections can reach native ARM64EC code with a
+ * halfword-aligned LockCount. On affected hosts an unaligned atomic updates
+ * only part of the counter (-1 -> 0xffff0000 instead of 0), losing wakeups.
+ * Use a naturally aligned CAS covering the field, preserving adjacent bytes.
+ * Do not handle fields crossing an eight-byte boundary here.
+ */
+static BOOL packed_crit_section_atomic( LONG *dest, LONG value, LONG compare,
+                                       enum crit_section_atomic_op op, LONG *result )
+{
+#ifdef __arm64ec__
+    ULONG_PTR offset = (ULONG_PTR)dest & 7;
+    const WCHAR *image, *name;
+    LONGLONG *aligned;
+    ULONGLONG old, next, observed, mask;
+    ULONG previous, replacement, shift;
+
+    if (!(offset & 3) || offset > 4) return FALSE;
+    image = NtCurrentTeb()->Peb->ProcessParameters->ImagePathName.Buffer;
+    name = wcsrchr( image, '\\' );
+    if (wcsicmp( name ? name + 1 : image, L"TronGame-Win64-Shipping.exe" )) return FALSE;
+
+    aligned = (LONGLONG *)((ULONG_PTR)dest & ~(ULONG_PTR)7);
+    shift = offset * 8;
+    mask = (ULONGLONG)0xffffffff << shift;
+    old = InterlockedCompareExchange64( aligned, 0, 0 );
+    for (;;)
+    {
+        previous = (old >> shift) & 0xffffffff;
+        if (op == CRIT_SECTION_CMPXCHG && previous != (ULONG)compare) break;
+        replacement = op == CRIT_SECTION_ADD ? previous + (ULONG)value : (ULONG)value;
+        next = (old & ~mask) | ((ULONGLONG)replacement << shift);
+        observed = InterlockedCompareExchange64( aligned, next, old );
+        if (observed == old) break;
+        old = observed;
+    }
+    *result = previous;
+    return TRUE;
+#else
+    return FALSE;
+#endif
+}
+
+static LONG crit_section_cmpxchg( LONG *dest, LONG value, LONG compare )
+{
+    LONG previous;
+    if (packed_crit_section_atomic( dest, value, compare, CRIT_SECTION_CMPXCHG, &previous ))
+        return previous;
+    return InterlockedCompareExchange( dest, value, compare );
+}
+
+static LONG crit_section_add( LONG *dest, LONG value )
+{
+    LONG previous;
+    if (!packed_crit_section_atomic( dest, value, 0, CRIT_SECTION_ADD, &previous ))
+        previous = InterlockedExchangeAdd( dest, value );
+    return (ULONG)previous + (ULONG)value;
+}
+
+static void crit_section_exchange( LONG *dest, LONG value )
+{
+    LONG previous;
+    if (!packed_crit_section_atomic( dest, value, 0, CRIT_SECTION_EXCHANGE, &previous ))
+        InterlockedExchange( dest, value );
+}
+
 /* Follow the first operations on packed critical sections, before a timeout
  * loses the transition that produced the bad counter. Never repair the state. */
 static void trace_tron_unaligned_cs( RTL_CRITICAL_SECTION *crit, const char *operation, LONG result )
@@ -191,6 +263,7 @@ static void trace_tron_unaligned_cs( RTL_CRITICAL_SECTION *crit, const char *ope
             ERR( "TRON_LOCK_STEP sample %ld op %s capture unavailable\n", captures, operation );
         }
         __ENDTRY
+        if (captures == 64) ERR( "TRON_LOCK_STEP capture limit reached; further operations are not logged\n" );
     }
     InterlockedExchange( &active, 0 );
 }
@@ -222,7 +295,7 @@ static inline NTSTATUS wait_semaphore( RTL_CRITICAL_SECTION *crit, int timeout )
     else
     {
         LONG *lock = (LONG *)&crit->LockSemaphore;
-        while (!InterlockedCompareExchange( lock, 0, 1 ))
+        while (!crit_section_cmpxchg( lock, 0, 1 ))
         {
             static const LONG zero;
             /* this may wait longer than specified in case of multiple wake-ups */
@@ -427,7 +500,7 @@ NTSTATUS WINAPI RtlpUnWaitCriticalSection( RTL_CRITICAL_SECTION *crit )
     else
     {
         LONG *lock = (LONG *)&crit->LockSemaphore;
-        InterlockedExchange( lock, 1 );
+        crit_section_exchange( lock, 1 );
         RtlWakeAddressSingle( lock );
         ret = STATUS_SUCCESS;
     }
@@ -454,13 +527,13 @@ NTSTATUS WINAPI RtlEnterCriticalSection( RTL_CRITICAL_SECTION *crit )
             if (crit->LockCount > 0) break;  /* more than one waiter, don't bother spinning */
             if (crit->LockCount == -1)       /* try again */
             {
-                if (InterlockedCompareExchange( &crit->LockCount, 0, -1 ) == -1) goto done;
+                if (crit_section_cmpxchg( &crit->LockCount, 0, -1 ) == -1) goto done;
             }
             YieldProcessor();
         }
     }
 
-    count_after = InterlockedIncrement( &crit->LockCount );
+    count_after = crit_section_add( &crit->LockCount, 1 );
     trace_tron_unaligned_cs( crit, "enter-increment", count_after );
     if (count_after)
     {
@@ -491,7 +564,7 @@ BOOL WINAPI RtlTryEnterCriticalSection( RTL_CRITICAL_SECTION *crit )
     LONG previous;
 
     trace_tron_unaligned_cs( crit, "try-before", 0 );
-    previous = InterlockedCompareExchange( &crit->LockCount, 0, -1 );
+    previous = crit_section_cmpxchg( &crit->LockCount, 0, -1 );
     trace_tron_unaligned_cs( crit, "try-compare-exchange", previous );
     if (previous == -1)
     {
@@ -501,7 +574,7 @@ BOOL WINAPI RtlTryEnterCriticalSection( RTL_CRITICAL_SECTION *crit )
     }
     else if (crit->OwningThread == ULongToHandle(GetCurrentThreadId()))
     {
-        InterlockedIncrement( &crit->LockCount );
+        crit_section_add( &crit->LockCount, 1 );
         crit->RecursionCount++;
         ret = TRUE;
     }
@@ -536,13 +609,13 @@ NTSTATUS WINAPI RtlLeaveCriticalSection( RTL_CRITICAL_SECTION *crit )
     trace_tron_unaligned_cs( crit, "leave-before", 0 );
     if (--crit->RecursionCount)
     {
-        if (crit->RecursionCount > 0) InterlockedDecrement( &crit->LockCount );
+        if (crit->RecursionCount > 0) crit_section_add( &crit->LockCount, -1 );
         else ERR( "section %p %s is not acquired\n", crit, debugstr_a( crit_section_get_name( crit )));
     }
     else
     {
         crit->OwningThread = 0;
-        if (InterlockedDecrement( &crit->LockCount ) >= 0)
+        if (crit_section_add( &crit->LockCount, -1 ) >= 0)
         {
             /* someone is waiting */
             RtlpUnWaitCriticalSection( crit );
