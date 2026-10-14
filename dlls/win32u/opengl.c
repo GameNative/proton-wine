@@ -2986,10 +2986,10 @@ static BOOL win32u_wgl_context_flush( struct wgl_context *context, void (*flush)
     {
         diagnostic_id = InterlockedIncrement( &diagnostic_flush_count );
         if (diagnostic_id > 0 && diagnostic_id <= 16)
-            ERR( "[WGL_FLUSH_DIAG] id=%ld callback=%p flags=%#x begin\n", diagnostic_id, flush, flags );
+            ERR( "[WGL_FLUSH_DIAG] id=%d callback=%p flags=%#x begin\n", (int)diagnostic_id, flush, flags );
         flush();
         if (diagnostic_id > 0 && diagnostic_id <= 16)
-            ERR( "[WGL_FLUSH_DIAG] id=%ld callback=%p flags=%#x end\n", diagnostic_id, flush, flags );
+            ERR( "[WGL_FLUSH_DIAG] id=%d callback=%p flags=%#x end\n", (int)diagnostic_id, flush, flags );
     }
     if (flush == funcs->p_glFinish) flags |= GL_FLUSH_FINISHED;
     opengl_drawable_flush( draw, interval, flags );
