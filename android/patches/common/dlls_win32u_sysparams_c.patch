@@ -1,0 +1,51 @@
+diff --git a/dlls/win32u/sysparams.c b/dlls/win32u/sysparams.c
+index 83685fa5882..d4cc3b466d2 100644
+--- a/dlls/win32u/sysparams.c
++++ b/dlls/win32u/sysparams.c
+@@ -2310,8 +2310,8 @@ static void add_modes( const DEVMODEW *current, UINT host_modes_count, const DEV
+ {
+     struct device_manager_ctx *ctx = param;
+     DEVMODEW dummy, physical, detached = *current, virtual, *virtual_modes = NULL;
+-    UINT virtual_count, modes_count = host_modes_count;
+-    const DEVMODEW *modes = host_modes;
++    UINT virtual_count, modes_count = host_modes_count, i;
++    const DEVMODEW *modes = host_modes, *maximum = &physical, *mode;
+     struct source *source;
+ 
+     TRACE( "current %s, host_modes_count %u, host_modes %p, param %p\n", debugstr_devmodew( current ),
+@@ -2320,6 +2320,17 @@ static void add_modes( const DEVMODEW *current, UINT host_modes_count, const DEV
+     assert( !list_empty( &sources ) );
+     source = LIST_ENTRY( list_tail( &sources ), struct source, entry );
+ 
++    /* in virtual desktop mode, bound the mode list by the desktop size, not the current mode */
++    if (is_virtual_desktop())
++    {
++        for (i = 0, mode = host_modes; i < host_modes_count; i++, mode = NEXT_DEVMODEW(mode))
++        {
++            if (maximum != &physical && mode->dmPelsWidth * mode->dmPelsHeight <=
++                maximum->dmPelsWidth * maximum->dmPelsHeight) continue;
++            maximum = mode;
++        }
++    }
++
+     if (emulate_modeset)
+     {
+         modes = current;
+@@ -2328,7 +2339,7 @@ static void add_modes( const DEVMODEW *current, UINT host_modes_count, const DEV
+     else if (emulate_modelist)
+     {
+         physical = *current;
+-        if ((virtual_modes = get_virtual_modes( current, &physical, host_modes, host_modes_count, &virtual_count )))
++        if ((virtual_modes = get_virtual_modes( current, maximum, host_modes, host_modes_count, &virtual_count )))
+         {
+             modes_count = virtual_count;
+             modes = virtual_modes;
+@@ -2360,7 +2371,7 @@ static void add_modes( const DEVMODEW *current, UINT host_modes_count, const DEV
+         if (!read_source_mode( source->key, ENUM_CURRENT_SETTINGS, &virtual ) || is_detached_mode( &virtual ))
+             virtual = physical;
+ 
+-        if ((virtual_modes = get_virtual_modes( current, &physical, host_modes, host_modes_count, &virtual_count )))
++        if ((virtual_modes = get_virtual_modes( current, maximum, host_modes, host_modes_count, &virtual_count )))
+         {
+             modes_count = virtual_count;
+             modes = virtual_modes;

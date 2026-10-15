@@ -189,6 +189,7 @@ do
       "common/dlls_user32_makefile_in.patch"
       "common/dlls_ws2_32_socket_c.patch"
       "common/dlls_crypt32_cert_c.patch"
+      "common/dlls_win32u_sysparams_c.patch"
       "common/server_token_c.patch"
       "common/server_unicode_c.patch"
 
