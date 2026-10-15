@@ -1,5 +1,5 @@
 diff --git a/dlls/winex11.drv/opengl.c b/dlls/winex11.drv/opengl.c
-index 8d9dc24adcc..59e7e08199a 100644
+index 8d9dc24adcc..14fb770f015 100644
 --- a/dlls/winex11.drv/opengl.c
 +++ b/dlls/winex11.drv/opengl.c
 @@ -666,7 +666,16 @@ UINT X11DRV_OpenGLInit( UINT version, const struct opengl_funcs *opengl_funcs, c
@@ -19,3 +19,15 @@ index 8d9dc24adcc..59e7e08199a 100644
      {
          TRACE("GLX is up and running error_base = %d\n", error_base);
      } else {
+@@ -1261,6 +1270,11 @@ static BOOL x11drv_context_create( int format, void *share, const int *attribLis
+                 pContextAttribList += 2;
+                 break;
+             case WGL_CONTEXT_OPENGL_NO_ERROR_ARB:
++                if (!has_extension( glxExtensions, "GLX_ARB_create_context_no_error" ))
++                {
++                    TRACE( "dropping WGL_CONTEXT_OPENGL_NO_ERROR_ARB %#x, GLX has no create_context_no_error\n", attribList[1] );
++                    break;
++                }
+                 pContextAttribList[0] = GLX_CONTEXT_OPENGL_NO_ERROR_ARB;
+                 pContextAttribList[1] = attribList[1];
+                 pContextAttribList += 2;
