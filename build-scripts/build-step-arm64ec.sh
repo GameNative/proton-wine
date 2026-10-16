@@ -277,6 +277,13 @@ do
       # fix build
       "arm64ec/programs_wineboot_wineboot_c.patch"
 
+      # emulator notifications for protected launchers (Battle.net); the non-image view
+      # notification only fires for a FEX that exports BTCpu64NotifyNonImageViews
+      "arm64ec/dlls_ntdll_ntdll_spec.patch"
+      "arm64ec/dlls_ntdll_signal_arm64ec_c.patch"
+      "arm64ec/dlls_ntdll_unwind_h.patch"
+      "arm64ec/dlls_sechost_makefile_in.patch"
+
       # 1. Thread Suspension Patches
       "test-bylaws/dlls_ntdll_unix_debug_c.patch"
       "test-bylaws/dlls_ntdll_unix_signal_arm64_c.patch"
