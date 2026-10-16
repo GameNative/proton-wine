@@ -224,6 +224,7 @@ do
       # address space patches
       "common/loader_preloader_c.patch"
       "x86_64/dlls_ntdll_unix_virtual_c.patch"
+      "common/server_mapping_c_image_pool.patch"
 
       # syscall Patches
       "x86_64/dlls_ntdll_unix_signal_x86_64_c.patch"

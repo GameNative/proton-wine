@@ -224,6 +224,7 @@ do
       # address space patches
       "common/loader_preloader_c.patch"
       "arm64ec/dlls_ntdll_unix_virtual_c.patch"
+      "common/server_mapping_c_image_pool.patch"
 
       # syscall Patches (use test-bylaws below)
       # "arm64ec/dlls_wow64_syscall_c.patch"

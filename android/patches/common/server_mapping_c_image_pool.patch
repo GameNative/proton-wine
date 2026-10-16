@@ -1,0 +1,22 @@
+diff --git a/server/mapping.c b/server/mapping.c
+index 2b3ebd1826c..c7be9cac946 100644
+--- a/server/mapping.c
++++ b/server/mapping.c
+@@ -298,7 +298,17 @@ void init_memory(void)
+ {
+     host_page_mask = sysconf( _SC_PAGESIZE ) - 1;
+     free_map_addr( 0x60000000, 0x1c000000 );
++#ifdef __ANDROID__
++    /* bionic maps its heap reserve, CFI shadow and libraries at random addresses below the
++     * stack, which on a 39-bit kernel covers the 0x6000000000-0x7000000000 range the probe
++     * below would settle on. A client whose random layout overlaps an assigned address falls
++     * back to its own search and maps the builtin at a different base than its parent, which
++     * breaks Steam's overlay injection (it calls the parent's kernel32 address in the child).
++     * Keep the 64-bit pool below that range. */
++    free_available_high_map_addr( 0x5000000000, 0x1000000000 );
++#else
+     free_available_high_map_addr( 0x600000000000, 0x100000000000 );
++#endif
+ }
+ 
+ static void ranges_dump( struct object *obj, int verbose )
