@@ -293,6 +293,48 @@ NTSTATUS WINAPI RtlDeleteCriticalSection( RTL_CRITICAL_SECTION *crit )
 }
 
 
+/* Diagnostic only: do not acquire the loader lock to resolve these frames.
+ * The existing loaddll trace supplies module names for the allocation bases. */
+static void trace_tron_critical_section_timeout( RTL_CRITICAL_SECTION *crit )
+{
+    static LONG active, captures;
+    const WCHAR *image = NtCurrentTeb()->Peb->ProcessParameters->ImagePathName.Buffer;
+    const WCHAR *name = wcsrchr( image, '\\' );
+    MEMORY_BASIC_INFORMATION info;
+    void *frames[16];
+    ULONG count, i;
+
+    if (wcsicmp( name ? name + 1 : image, L"TronGame-Win64-Shipping.exe" )) return;
+    if (InterlockedCompareExchange( &active, 1, 0 )) return;
+    if (captures++ < 8)
+    {
+        ERR( "TRON_LOCK_DIAG section %p lock_count %ld recursion %ld owner %p semaphore %p spin %#Ix alignment %Iu\n",
+             crit, crit->LockCount, crit->RecursionCount, crit->OwningThread,
+             crit->LockSemaphore, crit->SpinCount, (ULONG_PTR)crit % sizeof(void *) );
+        __TRY
+        {
+            count = RtlCaptureStackBackTrace( 0, ARRAY_SIZE(frames), frames, NULL );
+            ERR( "TRON_LOCK_DIAG section %p frames %lu\n", crit, count );
+            for (i = 0; i < count; ++i)
+            {
+                if (!NtQueryVirtualMemory( NtCurrentProcess(), frames[i], MemoryBasicInformation,
+                                           &info, sizeof(info), NULL ))
+                    ERR( "TRON_LOCK_DIAG section %p frame %lu pc %p allocation %p offset %#Ix type %#lx\n",
+                         crit, i, frames[i], info.AllocationBase,
+                         (ULONG_PTR)frames[i] - (ULONG_PTR)info.AllocationBase, info.Type );
+                else
+                    ERR( "TRON_LOCK_DIAG section %p frame %lu pc %p mapping unavailable\n", crit, i, frames[i] );
+            }
+        }
+        __EXCEPT_ALL
+        {
+            ERR( "TRON_LOCK_DIAG section %p stack capture unavailable\n", crit );
+        }
+        __ENDTRY
+    }
+    InterlockedExchange( &active, 0 );
+}
+
 /******************************************************************************
  *      RtlpWaitForCriticalSection   (NTDLL.@)
  */
@@ -319,6 +361,7 @@ NTSTATUS WINAPI RtlpWaitForCriticalSection( RTL_CRITICAL_SECTION *crit )
 
         ERR( "section %p %s wait timed out in thread %04lx, blocked by %04lx, retrying (%u sec)\n",
              crit, debugstr_a(crit_section_get_name(crit)), GetCurrentThreadId(), HandleToULong(crit->OwningThread), timeout );
+        trace_tron_critical_section_timeout( crit );
     }
     if (crit_section_has_debuginfo( crit )) crit->DebugInfo->ContentionCount++;
     return STATUS_SUCCESS;
