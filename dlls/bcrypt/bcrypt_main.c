@@ -38,6 +38,9 @@ WINE_DEFAULT_DEBUG_CHANNEL(bcrypt);
 
 #define UNIX_CALL( func, params ) WINE_UNIX_CALL( unix_ ## func, params )
 
+static BOOL use_local_aes_cbc;
+static int aes_cipher;
+
 
 NTSTATUS WINAPI BCryptAddContextFunction( ULONG table, const WCHAR *ctx, ULONG iface, const WCHAR *func, ULONG pos )
 {
@@ -1182,6 +1185,63 @@ static BOOL is_equal_vector( const UCHAR *vector, ULONG len, const UCHAR *vector
     return !memcmp( vector, vector2, len );
 }
 
+/* The Unix symmetric backend uses private[0]. Keep the PE CBC context separate. */
+static void local_cbc_reset( struct key *key )
+{
+    symmetric_CBC *cbc = (void *)(ULONG_PTR)key->private[1];
+
+    if (!cbc) return;
+    cbc_done( cbc );
+    SecureZeroMemory( cbc, sizeof(*cbc) );
+    free( cbc );
+    key->private[1] = 0;
+}
+
+static NTSTATUS local_cbc_crypt( struct key *key, const UCHAR *input, ULONG input_len,
+                               UCHAR *output, ULONG output_len, BOOL encrypt )
+{
+    symmetric_CBC *cbc = (void *)(ULONG_PTR)key->private[1];
+    UCHAR zero_iv[16] = {0};
+    int ret;
+
+    if (input_len % sizeof(zero_iv)) return STATUS_INVALID_BUFFER_SIZE;
+    if (output_len < input_len) return STATUS_BUFFER_TOO_SMALL;
+    if (!cbc)
+    {
+        if (key->u.s.vector && key->u.s.vector_len != sizeof(zero_iv)) return STATUS_INVALID_PARAMETER;
+        if (!(cbc = malloc( sizeof(*cbc) ))) return STATUS_NO_MEMORY;
+        ret = cbc_start( aes_cipher, key->u.s.vector ? key->u.s.vector : zero_iv,
+                         key->u.s.secret, key->u.s.secret_len, 0, cbc );
+        if (ret != CRYPT_OK)
+        {
+            SecureZeroMemory( cbc, sizeof(*cbc) );
+            free( cbc );
+            return STATUS_INTERNAL_ERROR;
+        }
+        key->private[1] = (ULONG_PTR)cbc;
+        FIXME( "cbc workaround: using bundled AES-CBC backend\n" );
+    }
+    ret = encrypt ? cbc_encrypt( input, output, input_len, cbc )
+                  : cbc_decrypt( input, output, input_len, cbc );
+    return ret == CRYPT_OK ? STATUS_SUCCESS : STATUS_INTERNAL_ERROR;
+}
+
+static NTSTATUS key_symmetric_encrypt_block( struct key_symmetric_encrypt_params *params )
+{
+    if (use_local_aes_cbc && params->key->alg_id == ALG_ID_AES && params->key->u.s.mode == CHAIN_MODE_CBC)
+        return local_cbc_crypt( params->key, params->input, params->input_len,
+                                params->output, params->output_len, TRUE );
+    return UNIX_CALL( key_symmetric_encrypt, params );
+}
+
+static NTSTATUS key_symmetric_decrypt_block( struct key_symmetric_decrypt_params *params )
+{
+    if (use_local_aes_cbc && params->key->alg_id == ALG_ID_AES && params->key->u.s.mode == CHAIN_MODE_CBC)
+        return local_cbc_crypt( params->key, params->input, params->input_len,
+                                params->output, params->output_len, FALSE );
+    return UNIX_CALL( key_symmetric_decrypt, params );
+}
+
 static NTSTATUS key_symmetric_set_vector( struct key *key, UCHAR *vector, ULONG vector_len, BOOL force_reset )
 {
     BOOL needs_reset = force_reset || !is_equal_vector( key->u.s.vector, key->u.s.vector_len, vector, vector_len );
@@ -1195,7 +1255,11 @@ static NTSTATUS key_symmetric_set_vector( struct key *key, UCHAR *vector, ULONG 
         memcpy( key->u.s.vector, vector, vector_len );
         key->u.s.vector_len = vector_len;
     }
-    if (needs_reset) UNIX_CALL( key_symmetric_vector_reset, key );
+    if (needs_reset)
+    {
+        local_cbc_reset( key );
+        UNIX_CALL( key_symmetric_vector_reset, key );
+    }
     return STATUS_SUCCESS;
 }
 
@@ -1227,6 +1291,7 @@ static void key_destroy( struct key *key )
 {
     if (is_symmetric_key( key ))
     {
+        local_cbc_reset( key );
         UNIX_CALL( key_symmetric_destroy, key );
         free( key->u.s.vector );
         free( key->u.s.secret );
@@ -1327,7 +1392,7 @@ static NTSTATUS key_symmetric_decrypt( struct key *key, UCHAR *input, ULONG inpu
         decrypt_params.input_len = input_len;
         decrypt_params.output = output;
         decrypt_params.output_len = output_len;
-        if ((status = UNIX_CALL( key_symmetric_decrypt, &decrypt_params ))) return status;
+        if ((status = key_symmetric_decrypt_block( &decrypt_params ))) return status;
 
         tag_params.key = key;
         tag_params.tag = tag;
@@ -1353,6 +1418,10 @@ static NTSTATUS key_symmetric_decrypt( struct key *key, UCHAR *input, ULONG inpu
     if (key->u.s.mode == CHAIN_MODE_ECB && iv) return STATUS_INVALID_PARAMETER;
     if ((status = key_symmetric_set_vector( key, iv, iv_len, flags & BCRYPT_BLOCK_PADDING ))) return status;
 
+    FIXME( "cbc diagnostic: decrypt alg %u mode %u block %lu input %lu output %lu iv %lu flags %#lx in_place %u\n",
+           key->alg_id, key->u.s.mode, key->u.s.block_size, input_len, output_len, iv_len, flags,
+           input == output );
+
     decrypt_params.key = key;
     decrypt_params.input = input;
     decrypt_params.input_len = key->u.s.block_size;
@@ -1360,7 +1429,7 @@ static NTSTATUS key_symmetric_decrypt( struct key *key, UCHAR *input, ULONG inpu
     decrypt_params.output_len = key->u.s.block_size;
     while (bytes_left >= key->u.s.block_size)
     {
-        if ((status = UNIX_CALL( key_symmetric_decrypt, &decrypt_params ))) return status;
+        if ((status = key_symmetric_decrypt_block( &decrypt_params ))) return status;
         if (key->u.s.mode == CHAIN_MODE_ECB && (status = key_symmetric_set_vector( key, NULL, 0, TRUE )))
             return status;
         bytes_left -= key->u.s.block_size;
@@ -1373,7 +1442,9 @@ static NTSTATUS key_symmetric_decrypt( struct key *key, UCHAR *input, ULONG inpu
         UCHAR *buf, *dst = decrypt_params.output;
         if (!(buf = malloc( key->u.s.block_size ))) return STATUS_NO_MEMORY;
         decrypt_params.output = buf;
-        status = UNIX_CALL( key_symmetric_decrypt, &decrypt_params );
+        FIXME( "cbc diagnostic: final padded block input %u output %lu\n",
+               decrypt_params.input_len, decrypt_params.output_len );
+        status = key_symmetric_decrypt_block( &decrypt_params );
         if (!status && buf[ key->u.s.block_size - 1 ] <= key->u.s.block_size)
         {
             *ret_len -= buf[ key->u.s.block_size - 1 ];
@@ -1388,7 +1459,13 @@ static NTSTATUS key_symmetric_decrypt( struct key *key, UCHAR *input, ULONG inpu
     {
         if (key->u.s.vector && input_len >= key->u.s.vector_len)
         {
-            memcpy( key->u.s.vector, input + input_len - key->u.s.vector_len, key->u.s.vector_len );
+            if (key->u.s.mode == CHAIN_MODE_CBC && key->private[1])
+            {
+                unsigned long len = key->u.s.vector_len;
+                /* In-place decryption has already overwritten the input ciphertext. */
+                cbc_getiv( key->u.s.vector, &len, (void *)(ULONG_PTR)key->private[1] );
+            }
+            else memcpy( key->u.s.vector, input + input_len - key->u.s.vector_len, key->u.s.vector_len );
             if (iv) memcpy( iv, key->u.s.vector, min( iv_len, key->u.s.vector_len ));
         }
         else if (key->u.s.vector)
@@ -1532,7 +1609,7 @@ static NTSTATUS key_symmetric_encrypt( struct key *key,  UCHAR *input, ULONG inp
         encrypt_params.input_len = input_len;
         encrypt_params.output = output;
         encrypt_params.output_len = output_len;
-        if ((status = UNIX_CALL( key_symmetric_encrypt, &encrypt_params ))) return status;
+        if ((status = key_symmetric_encrypt_block( &encrypt_params ))) return status;
 
         tag_params.key = key;
         tag_params.tag = auth_info->pbTag;
@@ -1559,7 +1636,7 @@ static NTSTATUS key_symmetric_encrypt( struct key *key,  UCHAR *input, ULONG inp
     encrypt_params.output_len = key->u.s.block_size;
     while (bytes_left >= key->u.s.block_size)
     {
-        if ((status = UNIX_CALL( key_symmetric_encrypt, &encrypt_params )))
+        if ((status = key_symmetric_encrypt_block( &encrypt_params )))
             return status;
         if (key->u.s.mode == CHAIN_MODE_ECB && (status = key_symmetric_set_vector( key, NULL, 0, TRUE )))
             return status;
@@ -1574,7 +1651,7 @@ static NTSTATUS key_symmetric_encrypt( struct key *key,  UCHAR *input, ULONG inp
         memcpy( buf, encrypt_params.input, bytes_left );
         memset( buf + bytes_left, key->u.s.block_size - bytes_left, key->u.s.block_size - bytes_left );
         encrypt_params.input = buf;
-        status = UNIX_CALL( key_symmetric_encrypt, &encrypt_params );
+        status = key_symmetric_encrypt_block( &encrypt_params );
         free( buf );
     }
 
@@ -2825,10 +2902,20 @@ NTSTATUS WINAPI BCryptKeyDerivation( BCRYPT_KEY_HANDLE handle, BCryptBufferDesc 
 
 BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
 {
+    WCHAR path[MAX_PATH] = {0}, *name;
+
     switch (reason)
     {
     case DLL_PROCESS_ATTACH:
         DisableThreadLibraryCalls( hinst );
+        if (GetModuleFileNameW( NULL, path, ARRAY_SIZE(path) ) < ARRAY_SIZE(path))
+        {
+            name = wcsrchr( path, '\\' );
+            name = name ? name + 1 : path;
+            /* Work around the bionic GnuTLS/Nettle CBC abort without changing other processes. */
+            use_local_aes_cbc = !wcsicmp( name, L"APlagueTaleInnocence_x64.exe" );
+            if (use_local_aes_cbc && (aes_cipher = register_cipher( &aes_desc )) < 0) return FALSE;
+        }
         if (!__wine_init_unix_call())
         {
             if (UNIX_CALL( process_attach, NULL)) __wine_unixlib_handle = 0;
