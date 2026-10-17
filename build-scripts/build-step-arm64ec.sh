@@ -225,6 +225,7 @@ do
       "common/loader_preloader_c.patch"
       "arm64ec/dlls_ntdll_unix_virtual_c.patch"
       "common/server_mapping_c_image_pool.patch"
+      "common/dlls_ntdll_unix_virtual_c_relocate_high_allocs.patch"
 
       # syscall Patches (use test-bylaws below)
       # "arm64ec/dlls_wow64_syscall_c.patch"
