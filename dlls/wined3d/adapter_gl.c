@@ -1133,7 +1133,8 @@ static void fixup_extensions(struct wined3d_gl_info *gl_info, struct wined3d_cap
      * just persistent_map, so query buffers and chunk allocation agree. */
     if (sizeof(void *) == 4 && gl_info->supported[ARB_BUFFER_STORAGE]
             && strstr(gl_renderer, "zink") && strstr(gl_renderer, "Wrapper")
-            && wined3d_get_app_name(app_name, ARRAY_SIZE(app_name)) && !stricmp(app_name, "Sacred.exe"))
+            && wined3d_get_app_name(app_name, ARRAY_SIZE(app_name))
+            && (!stricmp(app_name, "Sacred.exe") || !stricmp(app_name, "SacredReborn.exe")))
     {
         gl_info->supported[ARB_BUFFER_STORAGE] = FALSE;
         MESSAGE("Sacred: using non-persistent buffers to avoid WOW64 placed-map failure.\n");

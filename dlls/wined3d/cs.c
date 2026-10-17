@@ -3504,6 +3504,13 @@ struct cs_profile
         unsigned int count;
         LONGLONG total, maximum;
     } op[CS_PROFILE_COUNT];
+    struct
+    {
+        enum wined3d_resource_type type;
+        unsigned int flags, count;
+        LONGLONG total;
+    } map[8];
+    unsigned int map_overflow;
 };
 
 static ULONGLONG cs_profile_cpu_time(void)
@@ -3520,7 +3527,8 @@ static void cs_profile_init(struct cs_profile *profile)
 {
     char name[MAX_PATH];
 
-    if (!wined3d_get_app_name(name, ARRAY_SIZE(name)) || stricmp(name, "Sacred.exe"))
+    if (!wined3d_get_app_name(name, ARRAY_SIZE(name))
+            || (stricmp(name, "Sacred.exe") && stricmp(name, "SacredReborn.exe")))
         return;
     if (!QueryPerformanceFrequency(&profile->frequency) || !profile->frequency.QuadPart)
         return;
@@ -3530,7 +3538,8 @@ static void cs_profile_init(struct cs_profile *profile)
     MESSAGE("CS_PROFILE enabled: CPU-side command wall times; 5-second windows, at most 60 reports.\n");
 }
 
-static void cs_profile_record(struct cs_profile *profile, unsigned int op, const LARGE_INTEGER *start)
+static void cs_profile_record(struct cs_profile *profile, unsigned int op, const LARGE_INTEGER *start,
+        const struct wined3d_cs_map *map)
 {
     bool printed[CS_PROFILE_COUNT];
     LARGE_INTEGER now;
@@ -3545,6 +3554,22 @@ static void cs_profile_record(struct cs_profile *profile, unsigned int op, const
     profile->op[op].total += elapsed;
     if (elapsed > profile->op[op].maximum)
         profile->op[op].maximum = elapsed;
+    if (map)
+    {
+        for (i = 0; i < ARRAY_SIZE(profile->map); ++i)
+        {
+            if (profile->map[i].count && (profile->map[i].type != map->resource->type
+                    || profile->map[i].flags != map->flags))
+                continue;
+            profile->map[i].type = map->resource->type;
+            profile->map[i].flags = map->flags;
+            ++profile->map[i].count;
+            profile->map[i].total += elapsed;
+            break;
+        }
+        if (i == ARRAY_SIZE(profile->map))
+            ++profile->map_overflow;
+    }
     if (now.QuadPart - profile->start.QuadPart < 5 * profile->frequency.QuadPart)
         return;
 
@@ -3572,6 +3597,16 @@ static void cs_profile_record(struct cs_profile *profile, unsigned int op, const
                 best == CS_PROFILE_QUERY ? "QUERY_POLL" : best == CS_PROFILE_WAIT ? "IDLE_WAIT" : debug_cs_op(best),
                 profile->op[best].count, profile->op[best].total * ms, profile->op[best].maximum * ms);
     }
+    for (i = 0; i < ARRAY_SIZE(profile->map); ++i)
+        if (profile->map[i].count)
+            MESSAGE("CS_PROFILE_MAP thread=%lu window=%u type=%s flags=%#x count=%u wall_ms=%.3f\n",
+                    GetCurrentThreadId(), profile->reports, debug_d3dresourcetype(profile->map[i].type),
+                    profile->map[i].flags, profile->map[i].count, profile->map[i].total * ms);
+    if (profile->map_overflow)
+        MESSAGE("CS_PROFILE_MAP thread=%lu window=%u overflow_count=%u\n",
+                GetCurrentThreadId(), profile->reports, profile->map_overflow);
+    memset(profile->map, 0, sizeof(profile->map));
+    profile->map_overflow = 0;
     memset(profile->op, 0, sizeof(profile->op));
     QueryPerformanceCounter(&profile->start);
     profile->cpu_start = cs_profile_cpu_time();
@@ -3611,7 +3646,8 @@ static inline bool wined3d_cs_execute_next(struct wined3d_cs *cs, struct wined3d
         wined3d_cs_op_handlers[opcode](cs, packet->data);
         wined3d_cs_command_unlock(cs);
         if (profile && profile->enabled)
-            cs_profile_record(profile, opcode, &start);
+            cs_profile_record(profile, opcode, &start,
+                    opcode == WINED3D_CS_OP_MAP ? (const struct wined3d_cs_map *)packet->data : NULL);
         TRACE("%s at %p executed.\n", debug_cs_op(opcode), packet);
     }
 
@@ -3679,7 +3715,7 @@ static DWORD WINAPI wined3d_cs_run(void *ctx)
             poll_queries(cs);
             wined3d_cs_command_unlock(cs);
             if (profile.enabled)
-                cs_profile_record(&profile, CS_PROFILE_QUERY, &start);
+                cs_profile_record(&profile, CS_PROFILE_QUERY, &start, NULL);
             poll = 0;
         }
 
@@ -3700,7 +3736,7 @@ static DWORD WINAPI wined3d_cs_run(void *ctx)
                             QueryPerformanceCounter(&start);
                         wined3d_cs_wait_event(cs);
                         if (profile.enabled)
-                            cs_profile_record(&profile, CS_PROFILE_WAIT, &start);
+                            cs_profile_record(&profile, CS_PROFILE_WAIT, &start, NULL);
                     }
                 }
                 continue;
