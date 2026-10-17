@@ -20,6 +20,7 @@ jobs:
     strategy:
       matrix:
         arch: [x86_64, aarch64]
+        variant: [stock, gamenative]
       fail-fast: false
 
     steps:
@@ -43,6 +44,23 @@ jobs:
             V="11.0-2.${{ github.event.pull_request.number }}"
           fi
           echo "PROTON_VERSION=$V" >> $GITHUB_ENV
+          # The gamenative variant: stock plus android/patches/variants/gamenative, built with
+          # upstream llvm-mingw 20260908 (LLVM 23; fixes the Arm64EC varargs exit thunks that
+          # bylaws 20250920 gets wrong). Version names carry a trailing variant number.
+          if [ "${{ matrix.variant }}" = "gamenative" ]; then
+            echo "PROTON_VARIANT=gamenative" >> $GITHUB_ENV
+            echo "VARIANT_SUFFIX=-1" >> $GITHUB_ENV
+            echo "PKG_PREFIX=proton-gamenative" >> $GITHUB_ENV
+            echo "LLVM_MINGW_REPO=mstorsjo" >> $GITHUB_ENV
+            echo "LLVM_MINGW_VERSION=20260908" >> $GITHUB_ENV
+            echo "LLVM_MINGW_TOOLCHAIN=$HOME/toolchains/llvm-mingw-20260908-ucrt-ubuntu-22.04-x86_64/bin" >> $GITHUB_ENV
+            echo "CROSSCFLAGS_EXTRA=-Wno-error=incompatible-pointer-types -Wno-error=int-conversion -Wno-error=incompatible-function-pointer-types -Wno-error=implicit-function-declaration -Wno-error=implicit-int" >> $GITHUB_ENV
+          else
+            echo "VARIANT_SUFFIX=" >> $GITHUB_ENV
+            echo "PKG_PREFIX=proton" >> $GITHUB_ENV
+            echo "LLVM_MINGW_REPO=bylaws" >> $GITHUB_ENV
+            echo "LLVM_MINGW_VERSION=20250920" >> $GITHUB_ENV
+          fi
 
       - name: Set up build environment
         run: |
@@ -101,16 +119,16 @@ jobs:
         id: cache-llvm-mingw
         uses: actions/cache@v4
         with:
-          path: ~/toolchains/llvm-mingw-20250920-ucrt-ubuntu-22.04-x86_64
-          key: bylaws-llvm-mingw-20250920
+          path: ~/toolchains/llvm-mingw-${{ env.LLVM_MINGW_VERSION }}-ucrt-ubuntu-22.04-x86_64
+          key: ${{ env.LLVM_MINGW_REPO }}-llvm-mingw-${{ env.LLVM_MINGW_VERSION }}
 
       - name: Set up LLVM MinGW toolchain
         if: steps.cache-llvm-mingw.outputs.cache-hit != 'true'
         run: |
           mkdir -p $HOME/toolchains
           cd $HOME/toolchains
-          wget https://github.com/bylaws/llvm-mingw/releases/download/20250920/llvm-mingw-20250920-ucrt-ubuntu-22.04-x86_64.tar.xz
-          tar -xf llvm-mingw-20250920-ucrt-ubuntu-22.04-x86_64.tar.xz
+          wget https://github.com/$LLVM_MINGW_REPO/llvm-mingw/releases/download/$LLVM_MINGW_VERSION/llvm-mingw-$LLVM_MINGW_VERSION-ucrt-ubuntu-22.04-x86_64.tar.xz
+          tar -xf llvm-mingw-$LLVM_MINGW_VERSION-ucrt-ubuntu-22.04-x86_64.tar.xz
 
       - name: Check out ntsync-android (userspace ntsync)
         uses: actions/checkout@v4
@@ -126,13 +144,13 @@ jobs:
       # ccache — caches compiled objects across runs (per-arch, rolling restore-keys).
       # Adopted from The412Banner/proton-wine. The build scripts wrap clang/clang++
       # in ccache automatically when it is on PATH.
-      - name: Cache ccache (${{ matrix.arch }})
+      - name: Cache ccache (${{ matrix.arch }}, ${{ matrix.variant }})
         uses: actions/cache@v4
         with:
           path: ~/.ccache
-          key: ccache-p11-${{ matrix.arch }}-${{ github.sha }}
+          key: ccache-p11-${{ matrix.arch }}${{ env.VARIANT_SUFFIX }}-${{ github.sha }}
           restore-keys: |
-            ccache-p11-${{ matrix.arch }}-
+            ccache-p11-${{ matrix.arch }}${{ env.VARIANT_SUFFIX }}-
 
       - name: Run autogen.sh for ${{ matrix.arch }}
         run: bash autogen.sh
@@ -192,6 +210,16 @@ jobs:
             bash build-scripts/build-step-arm64ec.sh --install
           fi
 
+      # The build scripts do not propagate make failures; refuse to package an
+      # incomplete tree.
+      - name: Verify build output for ${{ matrix.arch }}
+        run: |
+          OUT=$HOME/compiled-files-${{ matrix.arch }}
+          for f in ntdll.dll sechost.dll user32.dll ntdll.so; do
+            find "$OUT/lib/wine" -name "$f" | grep -q . || { echo "missing $f"; exit 1; }
+          done
+          du -sh "$OUT"
+
       - name: Download prefixPack.txz for ${{ matrix.arch }}
         run: |
           if [ "${{ matrix.arch }}" == "x86_64" ]; then
@@ -208,13 +236,18 @@ jobs:
             ARCH_NAME="arm64ec"
           fi
 
+          DESC="Proton 11.0-2 ${ARCH_NAME} (bionic) — stock Valve + runtime ntsync (kernel driver, userspace fallback) + fsync + Android fixes. SDK 28 + 16KB pages. Needs a fresh arm64ec container."
+          if [ -n "$PROTON_VARIANT" ]; then
+            DESC="proton-gamenative 11.0-2 ${ARCH_NAME} — stock Proton plus fixes for protected launchers (Battle.net), built with LLVM 23. Pair with the GameNative FEXCore. Needs a fresh arm64ec container."
+          fi
+
           # Generate Proton profile.json
           cat > $GITHUB_WORKSPACE/profile.json << EOF
           {
             "type": "Proton",
-            "versionName": "${PROTON_VERSION}-${ARCH_NAME}",
+            "versionName": "${PROTON_VERSION}-${ARCH_NAME}${VARIANT_SUFFIX}",
             "versionCode": 1,
-            "description": "Proton 11.0-2 ${ARCH_NAME} (bionic) — stock Valve + runtime ntsync (kernel driver, userspace fallback) + fsync + Android fixes. SDK 28 + 16KB pages. Needs a fresh arm64ec container.",
+            "description": "${DESC}",
             "files": [],
             "wine": {
               "binPath": "bin",
@@ -228,9 +261,9 @@ jobs:
           cat > $GITHUB_WORKSPACE/profile-wine.json << EOF
           {
             "type": "Wine",
-            "versionName": "${PROTON_VERSION}-${ARCH_NAME}",
+            "versionName": "${PROTON_VERSION}-${ARCH_NAME}${VARIANT_SUFFIX}",
             "versionCode": 0,
-            "description": "Proton 11.0-2 ${ARCH_NAME} (bionic) — stock Valve + runtime ntsync (kernel driver, userspace fallback) + fsync + Android fixes. SDK 28 + 16KB pages. Needs a fresh arm64ec container.",
+            "description": "${DESC}",
             "files": [],
             "wine": {
               "binPath": "bin",
@@ -258,13 +291,13 @@ jobs:
           # faster than xz. -T0 = all cores, -19 = high ratio (small download).
           cp $GITHUB_WORKSPACE/prefixPack.txz .
           cp $GITHUB_WORKSPACE/profile.json .
-          tar -I 'zstd -T0 -19' -cf proton-$PROTON_VERSION-$ARCH_NAME.wcp bin lib share prefixPack.txz profile.json
-          mv proton-$PROTON_VERSION-$ARCH_NAME.wcp $GITHUB_WORKSPACE/
+          tar -I 'zstd -T0 -19' -cf $PKG_PREFIX-$PROTON_VERSION-$ARCH_NAME.wcp bin lib share prefixPack.txz profile.json
+          mv $PKG_PREFIX-$PROTON_VERSION-$ARCH_NAME.wcp $GITHUB_WORKSPACE/
 
           # Create Wine WCP for CMOD & Ludashi - wcp.xz format
           cp $GITHUB_WORKSPACE/profile-wine.json profile.json
-          tar cJf proton-wine-$PROTON_VERSION-$ARCH_NAME.wcp.xz bin lib share prefixPack.txz profile.json
-          mv proton-wine-$PROTON_VERSION-$ARCH_NAME.wcp.xz $GITHUB_WORKSPACE/
+          tar cJf $PKG_PREFIX-wine-$PROTON_VERSION-$ARCH_NAME.wcp.xz bin lib share prefixPack.txz profile.json
+          mv $PKG_PREFIX-wine-$PROTON_VERSION-$ARCH_NAME.wcp.xz $GITHUB_WORKSPACE/
 
       - name: Upload build artifacts
         run: |
@@ -278,15 +311,15 @@ jobs:
       - name: Upload Proton build artifacts for ${{ matrix.arch }}
         uses: actions/upload-artifact@v4
         with:
-          name: proton-${{ env.ARCH_NAME }}
-          path: proton-${{ env.PROTON_VERSION }}-${{ env.ARCH_NAME }}.wcp
+          name: ${{ env.PKG_PREFIX }}-${{ env.ARCH_NAME }}
+          path: ${{ env.PKG_PREFIX }}-${{ env.PROTON_VERSION }}-${{ env.ARCH_NAME }}.wcp
           retention-days: 30
 
       - name: Upload Wine build artifacts for ${{ matrix.arch }}
         uses: actions/upload-artifact@v4
         with:
-          name: proton-wine-${{ env.ARCH_NAME }}
-          path: proton-wine-${{ env.PROTON_VERSION }}-${{ env.ARCH_NAME }}.wcp.xz
+          name: ${{ env.PKG_PREFIX }}-wine-${{ env.ARCH_NAME }}
+          path: ${{ env.PKG_PREFIX }}-wine-${{ env.PROTON_VERSION }}-${{ env.ARCH_NAME }}.wcp.xz
           retention-days: 30
 
   release:
@@ -366,6 +399,9 @@ jobs:
             **Proton Type:**
             - `proton-11.0-2-x86_64.wcp` - For GameNative
             - `proton-11.0-2-arm64ec.wcp` - For GameNative
+
+            **GameNative variant** (stock plus `android/patches/variants/gamenative`, LLVM 23; pair with the GameNative FEXCore). Shows in the app as `proton-11.0-2-<arch>-1`; the app's version parser only takes digits there:
+            - `proton-gamenative-11.0-2-arm64ec.wcp`, `proton-gamenative-11.0-2-x86_64.wcp`
 
             **Wine Type:**
             - `proton-wine-11.0-2-x86_64.wcp.xz` - For Winlator for CMOD & Ludashi
