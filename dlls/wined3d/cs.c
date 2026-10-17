@@ -3159,6 +3159,18 @@ static bool wined3d_cs_map_upload_bo(struct wined3d_device_context *context, str
     const struct wined3d_format *format = resource->format;
     size_t size;
 
+    /* Internal streaming buffers are filled before every draw and are never
+     * exposed to the application. Without persistent mapping, each append
+     * otherwise requires synchronous MAP and UNMAP queue round trips. Use the
+     * existing heap upload path instead: unmap queues an owned copy before
+     * the draw, and the CS frees it after uploading. Keep DISCARD on its normal
+     * path so ring wrap still renames the buffer. Do not apply this to ordinary
+     * application buffers, which can be drawn from while still mapped. */
+    if (flags == (WINED3D_MAP_WRITE | WINED3D_MAP_NOOVERWRITE)
+            && resource->type == WINED3D_RTYPE_BUFFER
+            && buffer_from_resource(resource)->staged_streaming_uploads)
+        flags = WINED3D_MAP_WRITE;
+
     if (flags & (WINED3D_MAP_DISCARD | WINED3D_MAP_NOOVERWRITE))
     {
         struct wined3d_device *device = context->device;

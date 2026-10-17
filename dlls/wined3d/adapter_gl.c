@@ -4922,6 +4922,8 @@ static void wined3d_adapter_gl_init_d3d_info(struct wined3d_adapter_gl *adapter_
     struct wined3d_d3d_info *d3d_info = &adapter_gl->a.d3d_info;
     struct wined3d_vertex_caps vertex_caps;
     struct shader_caps shader_caps;
+    const char *renderer;
+    char app_name[MAX_PATH];
     GLfloat f[2];
 
     adapter_gl->a.shader_backend->shader_get_caps(&adapter_gl->a, &shader_caps);
@@ -4977,6 +4979,14 @@ static void wined3d_adapter_gl_init_d3d_info(struct wined3d_adapter_gl *adapter_
     d3d_info->filling_convention_offset = gl_info->filling_convention_offset;
     d3d_info->persistent_map = !!gl_info->supported[ARB_BUFFER_STORAGE];
     d3d_info->ffp_hlsl = wined3d_settings.ffp_hlsl;
+
+    renderer = (const char *)gl_info->gl_ops.gl.p_glGetString(GL_RENDERER);
+    d3d_info->staged_streaming_uploads = sizeof(void *) == 4 && !d3d_info->persistent_map
+            && renderer && strstr(renderer, "zink") && strstr(renderer, "Wrapper")
+            && wined3d_get_app_name(app_name, ARRAY_SIZE(app_name))
+            && !stricmp(app_name, "SacredReborn.exe");
+    if (d3d_info->staged_streaming_uploads)
+        MESSAGE("SacredReborn: staging internal NOOVERWRITE streaming uploads on the command queue.\n");
 
     if (gl_info->supported[ARB_TEXTURE_MULTISAMPLE])
         d3d_info->multisample_draw_location = WINED3D_LOCATION_TEXTURE_RGB;
