@@ -1138,9 +1138,35 @@ HRESULT wined3d_unordered_access_view_gl_init(struct wined3d_unordered_access_vi
 void wined3d_unordered_access_view_gl_update(struct wined3d_unordered_access_view_gl *uav_gl,
         struct wined3d_context_gl *context_gl);
 
+enum wined3d_present_profile_phase
+{
+    PRESENT_PROFILE_CONTEXT,
+    PRESENT_PROFILE_PREPARE,
+    PRESENT_PROFILE_LOAD,
+    PRESENT_PROFILE_BLIT,
+    PRESENT_PROFILE_FINISH,
+    PRESENT_PROFILE_SWAP,
+    PRESENT_PROFILE_GDI,
+    PRESENT_PROFILE_TAIL,
+    PRESENT_PROFILE_PHASE_COUNT,
+};
+
+struct wined3d_present_profile
+{
+    bool enabled;
+    unsigned int reports, frames, invalid_contexts;
+    LARGE_INTEGER frequency, window_start, stamp;
+    struct
+    {
+        unsigned int count;
+        LONGLONG total, maximum;
+    } phase[PRESENT_PROFILE_PHASE_COUNT];
+};
+
 struct wined3d_swapchain_gl
 {
     struct wined3d_swapchain s;
+    struct wined3d_present_profile present_profile;
 };
 
 static inline struct wined3d_swapchain_gl *wined3d_swapchain_gl(struct wined3d_swapchain *swapchain)
