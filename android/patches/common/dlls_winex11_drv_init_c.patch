@@ -1,0 +1,19 @@
+diff --git a/dlls/winex11.drv/init.c b/dlls/winex11.drv/init.c
+index 479ff421a39..d1612e0c4f3 100644
+--- a/dlls/winex11.drv/init.c
++++ b/dlls/winex11.drv/init.c
+@@ -556,7 +556,14 @@ static BOOL disable_opwr(void)
+     if (disable == -1)
+     {
+         const char *e = getenv( "WINE_DISABLE_VULKAN_OPWR" );
++#ifdef __ANDROID__
++        /* Other process rendering needs XComposite to keep the surface offscreen, which
++         * Android X servers don't provide: the surface shows up at the screen origin.
++         * Failing it makes Chromium-based launchers fall back to software compositing. */
++        disable = !e || atoi( e );
++#else
+         disable = e && atoi( e );
++#endif
+     }
+     return disable;
+ }

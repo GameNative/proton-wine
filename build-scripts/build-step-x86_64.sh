@@ -221,6 +221,15 @@ do
       "common/dlls_winex11_drv_x11drv_h.patch"
       "common/dlls_winex11_drv_x11drv_main_c.patch"
 
+      # Android window and pointer fixes (Battle.net windows, clipped-cursor clicks,
+      # emulated fullscreen letterbox and mode switches)
+      "common/dlls_winex11_drv_window_c_net_wm_hwnd.patch"
+      "common/dlls_winex11_drv_init_c.patch"
+      "common/dlls_winex11_drv_mouse_c_clip_regrab.patch"
+      "common/dlls_winex11_drv_mouse_c_clip_grab_foreground.patch"
+      "common/dlls_winex11_drv_window_c_letterbox.patch"
+      "common/dlls_win32u_sysparams_c_virtual_physical.patch"
+
       # address space patches
       "common/loader_preloader_c.patch"
       "x86_64/dlls_ntdll_unix_virtual_c.patch"
