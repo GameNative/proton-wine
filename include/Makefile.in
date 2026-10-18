@@ -991,6 +991,7 @@ SOURCES = \
 	wine/server.h \
 	wine/server_protocol.h \
 	wine/strmbase.h \
+	wine/swap_profile.h \
 	wine/svcctl.idl \
 	wine/test.h \
 	wine/unixlib.h \
