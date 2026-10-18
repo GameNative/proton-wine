@@ -60,6 +60,7 @@ static void swap_profile_begin( const struct opengl_funcs *funcs )
 {
     if (!swap_profile.checked)
     {
+        static const WCHAR target[] = {'S','a','c','r','e','d','R','e','b','o','r','n','.','e','x','e',0};
         const WCHAR *p, *name = NtCurrentTeb()->Peb->ProcessParameters->ImagePathName.Buffer;
         const char *renderer;
 
@@ -68,7 +69,7 @@ static void swap_profile_begin( const struct opengl_funcs *funcs )
         if (sizeof(void *) != 4 && !NtCurrentTeb()->WowTebOffset) return;
         if ((p = wcsrchr( name, '/' ))) name = p + 1;
         if ((p = wcsrchr( name, '\\' ))) name = p + 1;
-        if (wcsicmp( name, L"SacredReborn.exe" )) return;
+        if (wcsicmp( name, target )) return;
         renderer = (const char *)funcs->p_glGetString( GL_RENDERER );
         if (!renderer || !strstr( renderer, "zink" ) || !strstr( renderer, "Wrapper" )) return;
         swap_profile.enabled = TRUE;
