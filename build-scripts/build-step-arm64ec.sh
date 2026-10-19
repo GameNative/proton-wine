@@ -285,6 +285,9 @@ do
       # rsaenh
       "common/dlls_rsaenh_rsaenh_c.patch"
 
+      # hide the wine_get_* ntdll exports (wine-staging HideWineExports, or WINE_HIDE_EXPORTS=1)
+      "common/dlls_ntdll_loader_c_hide_wine_exports.patch"
+
       # fix build
       "arm64ec/programs_wineboot_wineboot_c.patch"
 
