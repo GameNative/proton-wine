@@ -13,6 +13,11 @@ on:
   pull_request:
     branches: [ proton_11.0-2 ]
   workflow_dispatch:
+    inputs:
+      version_code:
+        description: 'profile.json versionCode (content id proton-11.0-2-<arch>-<versionCode>)'
+        required: false
+        default: '1'
 
 jobs:
   build:
@@ -43,6 +48,9 @@ jobs:
             V="11.0-2.${{ github.event.pull_request.number }}"
           fi
           echo "PROTON_VERSION=$V" >> $GITHUB_ENV
+          VC="${{ github.event.inputs.version_code || '1' }}"
+          case "$VC" in ''|*[!0-9]*) echo "version_code must be a number: $VC"; exit 1 ;; esac
+          echo "PROTON_VERSION_CODE=$VC" >> $GITHUB_ENV
 
       - name: Set up build environment
         run: |
@@ -213,7 +221,7 @@ jobs:
           {
             "type": "Proton",
             "versionName": "${PROTON_VERSION}-${ARCH_NAME}",
-            "versionCode": 1,
+            "versionCode": ${PROTON_VERSION_CODE},
             "description": "Proton 11.0-2 ${ARCH_NAME} (bionic) — stock Valve + runtime ntsync (kernel driver, userspace fallback) + fsync + Android fixes. SDK 28 + 16KB pages. Needs a fresh arm64ec container.",
             "files": [],
             "wine": {
@@ -312,6 +320,10 @@ jobs:
         run: |
           DATE=$(date +%Y%m%d)
           TAG_NAME="proton-11.0-2-${DATE}"
+          VC="${{ github.event.inputs.version_code || '1' }}"
+          if [ "$VC" != "1" ]; then
+            TAG_NAME="${TAG_NAME}-vc${VC}"
+          fi
           echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
           echo "Generated tag: ${TAG_NAME}"
 
