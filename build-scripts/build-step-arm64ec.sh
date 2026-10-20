@@ -298,6 +298,9 @@ do
       "arm64ec/dlls_ntdll_unwind_h.patch"
       "arm64ec/dlls_sechost_makefile_in.patch"
 
+      # follow the fast-forward prolog of ARM64EC -import exports (Wine bug 60463)
+      "arm64ec/dlls_ntdll_signal_arm64ec_c_ffwd_import.patch"
+
       # 1. Thread Suspension Patches
       "test-bylaws/dlls_ntdll_unix_debug_c.patch"
       "test-bylaws/dlls_ntdll_unix_signal_arm64_c.patch"

@@ -4,6 +4,7 @@
 # steps apply android/patches, so patches to tools/ are applied in this step.
 TOOLS_PATCHES="
   tools/tools_winebuild_arm64ec_x86_64_asm.patch
+  tools/tools_winebuild_spec32_c_import_thunks.patch
 "
 
 for patch in $TOOLS_PATCHES; do
