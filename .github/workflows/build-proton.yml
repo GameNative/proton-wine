@@ -142,7 +142,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: wine-tools
-          key: wine-tools-${{ hashFiles('configure.ac', 'configure') }}
+          key: wine-tools-${{ hashFiles('configure.ac', 'configure', 'tools/**', 'android/patches/tools/**', 'build-scripts/build-step0.sh') }}
 
       - name: Build wine-tools (step 0)
         if: steps.cache-wine-tools.outputs.cache-hit != 'true'
