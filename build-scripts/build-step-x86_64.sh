@@ -286,6 +286,9 @@ do
 
       # hide the wine_get_* ntdll exports (wine-staging HideWineExports, or WINE_HIDE_EXPORTS=1)
       "common/dlls_ntdll_loader_c_hide_wine_exports.patch"
+
+      # cache the ProcessorInformation power query for 500 ms (Wine bug 60462)
+      "common/dlls_ntdll_unix_system_c_power_cache.patch"
     )
 
     for patch in "${PATCHES[@]}"; do

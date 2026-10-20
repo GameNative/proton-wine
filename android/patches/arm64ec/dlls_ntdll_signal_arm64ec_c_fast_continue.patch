@@ -1,0 +1,68 @@
+ntdll: Resume x64 code from NtContinue without a syscall on ARM64EC.
+
+When NtContinue targets x64 code, the unix side only sets the context and
+returns into KiUserEmulationDispatcher, and that return takes the SIGUSR2 slow
+path: about 87 us per handled guest exception. For a non-alertable continue
+with a full context to non-EC code, call dispatch_emulation directly instead.
+Fall back to the syscall when a suspend is pending, a debugger is attached,
+there is no emulator, or the current frame could overlap the target stack.
+Applies on top of dlls_ntdll_signal_arm64ec_c.patch and
+dlls_ntdll_signal_arm64ec_c_ffwd_import.patch.
+
+diff --git a/dlls/ntdll/signal_arm64ec.c b/dlls/ntdll/signal_arm64ec.c
+index e1275e6e639..72e3b980e35 100644
+--- a/dlls/ntdll/signal_arm64ec.c
++++ b/dlls/ntdll/signal_arm64ec.c
+@@ -64,6 +64,8 @@ static NTSTATUS (WINAPI *pThreadInit)(void);
+ static void     (WINAPI *pThreadTerm)(HANDLE,LONG);
+ static void     (WINAPI *pUpdateProcessorInformation)(SYSTEM_CPU_INFORMATION*);
+ 
++void dispatch_emulation( ARM64_NT_CONTEXT *arm_ctx );
++
+ static BOOLEAN emulated_processor_features[PROCESSOR_FEATURE_MAX];
+ static BYTE KiUserExceptionDispatcher_orig[16]; /* to detect patching */
+ extern void KiUserExceptionDispatcher_thunk(void) asm("EXP+#KiUserExceptionDispatcher");
+@@ -665,19 +667,43 @@ NTSTATUS SYSCALL_API NtAllocateVirtualMemoryEx( HANDLE process, PVOID *ret, SIZE
+     return status;
+ }
+ 
++static BOOL can_continue_in_emulator( const CONTEXT *context, ULONG_PTR frame )
++{
++    CHPE_V2_CPU_AREA_INFO *cpu_area = get_arm64ec_cpu_area();
++
++    if (!pBeginSimulation) return FALSE;
++    if ((context->ContextFlags & CONTEXT_AMD64_FULL) != CONTEXT_AMD64_FULL) return FALSE;
++    if (RtlIsEcCode( context->Rip )) return FALSE;
++    if (frame >= context->Rsp &&
++        (frame < cpu_area->EmulatorStackLimit || frame > cpu_area->EmulatorStackBase)) return FALSE;
++    if (NtCurrentTeb()->Peb->BeingDebugged) return FALSE;
++    if (cpu_area->SuspendDoorbell && *cpu_area->SuspendDoorbell) return FALSE;
++    return TRUE;
++}
++
+ NTSTATUS SYSCALL_API NtContinue( CONTEXT *context, BOOLEAN alertable )
+ {
+     ARM64_NT_CONTEXT arm_ctx;
+ 
+     context_x64_to_arm( &arm_ctx, (ARM64EC_NT_CONTEXT *)context );
++    if (!alertable && can_continue_in_emulator( context, (ULONG_PTR)__builtin_frame_address(0) ))
++        dispatch_emulation( &arm_ctx );
+     return syscall_NtContinue( &arm_ctx, alertable );
+ }
+ 
+ NTSTATUS SYSCALL_API NtContinueEx( CONTEXT *context, KCONTINUE_ARGUMENT *args )
+ {
+     ARM64_NT_CONTEXT arm_ctx;
++    BOOL alertable;
++
++    if ((UINT_PTR)args > 0xff)
++        alertable = args->ContinueFlags & KCONTINUE_FLAG_TEST_ALERT;
++    else
++        alertable = !!args;
+ 
+     context_x64_to_arm( &arm_ctx, (ARM64EC_NT_CONTEXT *)context );
++    if (!alertable && can_continue_in_emulator( context, (ULONG_PTR)__builtin_frame_address(0) ))
++        dispatch_emulation( &arm_ctx );
+     return syscall_NtContinueEx( &arm_ctx, args );
+ }
+ 

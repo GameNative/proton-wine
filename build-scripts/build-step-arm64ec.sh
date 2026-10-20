@@ -288,6 +288,9 @@ do
       # hide the wine_get_* ntdll exports (wine-staging HideWineExports, or WINE_HIDE_EXPORTS=1)
       "common/dlls_ntdll_loader_c_hide_wine_exports.patch"
 
+      # cache the ProcessorInformation power query for 500 ms (Wine bug 60462)
+      "common/dlls_ntdll_unix_system_c_power_cache.patch"
+
       # fix build
       "arm64ec/programs_wineboot_wineboot_c.patch"
 
@@ -300,6 +303,9 @@ do
 
       # follow the fast-forward prolog of ARM64EC -import exports (Wine bug 60463)
       "arm64ec/dlls_ntdll_signal_arm64ec_c_ffwd_import.patch"
+
+      # resume x64 code from NtContinue without a syscall
+      "arm64ec/dlls_ntdll_signal_arm64ec_c_fast_continue.patch"
 
       # 1. Thread Suspension Patches
       "test-bylaws/dlls_ntdll_unix_debug_c.patch"
