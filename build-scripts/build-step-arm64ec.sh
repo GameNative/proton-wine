@@ -301,6 +301,9 @@ do
       # follow the fast-forward prolog of ARM64EC -import exports (Wine bug 60463)
       "arm64ec/dlls_ntdll_signal_arm64ec_c_ffwd_import.patch"
 
+      # resume x64 code from NtContinue without a syscall
+      "arm64ec/dlls_ntdll_signal_arm64ec_c_fast_continue.patch"
+
       # 1. Thread Suspension Patches
       "test-bylaws/dlls_ntdll_unix_debug_c.patch"
       "test-bylaws/dlls_ntdll_unix_signal_arm64_c.patch"
