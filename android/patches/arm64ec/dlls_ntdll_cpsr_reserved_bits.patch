@@ -1,0 +1,94 @@
+diff --git a/dlls/ntdll/unix/unix_private.h b/dlls/ntdll/unix/unix_private.h
+--- a/dlls/ntdll/unix/unix_private.h
++++ b/dlls/ntdll/unix/unix_private.h
+@@ -632,6 +632,9 @@
+                                0, NULL, size, ViewShare, 0, protect );
+ }
+ 
++/* CPSR bits a Windows ARM64 context is allowed to carry. */
++static const ULONG cpsr_user_mask = 0xf620fc30;
++
+ /* LDT definitions */
+ 
+ #if defined(__i386__) || defined(__x86_64__)
+diff --git a/dlls/ntdll/unix/signal_arm64.c b/dlls/ntdll/unix/signal_arm64.c
+--- a/dlls/ntdll/unix/signal_arm64.c
++++ b/dlls/ntdll/unix/signal_arm64.c
+@@ -213,6 +213,11 @@
+ 
+ C_ASSERT( sizeof( struct syscall_frame ) == 0x330 );
+ 
++/* Preserve all CPSR bits not covered by user context in signal handlers.
++ * Additionally, preserve the host SSBS bit, which is allowed to be set on
++ * Windows, but is volatile and restored on kernel transition anyway. */
++static const ULONG cpsr_host_mask = ~cpsr_user_mask | 0x1000;
++
+ 
+ /***********************************************************************
+  *           context_init_empty_xstate
+@@ -317,7 +322,7 @@
+     context->Lr   = LR_sig(sigcontext);     /* Link register */
+     context->Sp   = SP_sig(sigcontext);     /* Stack pointer */
+     context->Pc   = PC_sig(sigcontext);     /* Program Counter */
+-    context->Cpsr = PSTATE_sig(sigcontext); /* Current State Register */
++    context->Cpsr = PSTATE_sig(sigcontext) & cpsr_user_mask; /* Current State Register */
+     for (i = 0; i <= 28; i++) context->X[i] = REGn_sig( i, sigcontext );
+     save_fpu( context, sigcontext );
+ }
+@@ -336,7 +341,7 @@
+     LR_sig(sigcontext)     = context->Lr;   /* Link register */
+     SP_sig(sigcontext)     = context->Sp;   /* Stack pointer */
+     PC_sig(sigcontext)     = context->Pc;   /* Program Counter */
+-    PSTATE_sig(sigcontext) = context->Cpsr; /* Current State Register */
++    PSTATE_sig(sigcontext) = (PSTATE_sig(sigcontext) & cpsr_host_mask) | (context->Cpsr & ~cpsr_host_mask); /* Current State Register */
+     for (i = 0; i <= 28; i++) REGn_sig( i, sigcontext ) = context->X[i];
+     restore_fpu( context, sigcontext );
+ }
+@@ -440,7 +445,7 @@
+         frame->lr    = context->Lr;
+         frame->sp    = context->Sp;
+         frame->pc    = context->Pc;
+-        frame->cpsr  = context->Cpsr;
++        frame->cpsr  = context->Cpsr & cpsr_user_mask;
+     }
+     if (flags & CONTEXT_FLOATING_POINT)
+     {
+@@ -617,7 +622,7 @@
+             wow_frame->Sp = context->Sp;
+             wow_frame->Lr = context->Lr;
+             wow_frame->Pc = context->Pc & ~1;
+-            wow_frame->Cpsr = context->Cpsr;
++            wow_frame->Cpsr = context->Cpsr & cpsr_user_mask;
+             if (context->Cpsr & 0x20) wow_frame->Pc |= 1; /* thumb */
+         }
+         if (flags & CONTEXT_FLOATING_POINT)
+@@ -1410,7 +1415,7 @@
+     LR_sig(context)     = frame->lr;
+     SP_sig(context)     = frame->sp;
+     PC_sig(context)     = frame->pc;
+-    PSTATE_sig(context) = frame->cpsr;
++    PSTATE_sig(context) = (PSTATE_sig(context) & cpsr_host_mask) | frame->cpsr;
+     for (i = 0; i <= 28; i++) REGn_sig( i, context ) = frame->x[i];
+ 
+ #ifdef linux
+diff --git a/dlls/ntdll/unix/thread.c b/dlls/ntdll/unix/thread.c
+--- a/dlls/ntdll/unix/thread.c
++++ b/dlls/ntdll/unix/thread.c
+@@ -544,7 +544,7 @@
+             to->ctl.arm_regs.sp   = from->Sp;
+             to->ctl.arm_regs.lr   = from->Lr;
+             to->ctl.arm_regs.pc   = from->Pc;
+-            to->ctl.arm_regs.cpsr = from->Cpsr;
++            to->ctl.arm_regs.cpsr = from->Cpsr & cpsr_user_mask;
+         }
+         if (flags & CONTEXT_ARM_INTEGER)
+         {
+@@ -593,7 +593,7 @@
+             to->integer.arm64_regs.x[30] = from->Lr;
+             to->ctl.arm64_regs.sp     = from->Sp;
+             to->ctl.arm64_regs.pc     = from->Pc;
+-            to->ctl.arm64_regs.pstate = from->Cpsr;
++            to->ctl.arm64_regs.pstate = from->Cpsr & cpsr_user_mask;
+         }
+         if (flags & CONTEXT_ARM64_INTEGER)
+         {
