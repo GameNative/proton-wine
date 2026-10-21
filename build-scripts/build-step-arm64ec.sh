@@ -227,8 +227,6 @@ do
       "common/dlls_winex11_drv_init_c.patch"
       "common/dlls_winex11_drv_mouse_c_clip_regrab.patch"
       "common/dlls_winex11_drv_mouse_c_clip_grab_foreground.patch"
-      "common/dlls_winex11_drv_window_c_letterbox.patch"
-      "common/dlls_win32u_sysparams_c_virtual_physical.patch"
 
       # address space patches
       "common/loader_preloader_c.patch"
