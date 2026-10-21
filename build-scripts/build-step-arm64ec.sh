@@ -306,8 +306,10 @@ do
       "arm64ec/dlls_ntdll_signal_arm64ec_c_fast_continue.patch"
 
       # ignore attempts to set reserved CPSR bits, so a host-only bit (SSBS)
-      # never reaches user context (Wine MR !12262, Wine bug 60405)
-      "arm64ec/dlls_ntdll_cpsr_reserved_bits.patch"
+      # never reaches user context (Wine MR !12262, Wine bug 60405).
+      # Parked: the patch file is kept for when it can be evaluated in a build,
+      # but it is not applied.
+      # "arm64ec/dlls_ntdll_cpsr_reserved_bits.patch"
 
       # 1. Thread Suspension Patches
       "test-bylaws/dlls_ntdll_unix_debug_c.patch"
