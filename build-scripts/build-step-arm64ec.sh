@@ -227,8 +227,6 @@ do
       "common/dlls_winex11_drv_init_c.patch"
       "common/dlls_winex11_drv_mouse_c_clip_regrab.patch"
       "common/dlls_winex11_drv_mouse_c_clip_grab_foreground.patch"
-      "common/dlls_winex11_drv_window_c_letterbox.patch"
-      "common/dlls_win32u_sysparams_c_virtual_physical.patch"
 
       # address space patches
       "common/loader_preloader_c.patch"
@@ -306,6 +304,10 @@ do
 
       # resume x64 code from NtContinue without a syscall
       "arm64ec/dlls_ntdll_signal_arm64ec_c_fast_continue.patch"
+
+      # ignore attempts to set reserved CPSR bits, so a host-only bit (SSBS)
+      # never reaches user context (Wine MR !12262, Wine bug 60405)
+      "arm64ec/dlls_ntdll_cpsr_reserved_bits.patch"
 
       # 1. Thread Suspension Patches
       "test-bylaws/dlls_ntdll_unix_debug_c.patch"
