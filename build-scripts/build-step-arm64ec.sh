@@ -289,6 +289,10 @@ do
       # cache the ProcessorInformation power query for 500 ms (Wine bug 60462)
       "common/dlls_ntdll_unix_system_c_power_cache.patch"
 
+      # GetNativeSystemInfo() reports AMD64 to x64 processes (upstream c5a96a0b6c); MonoMod/MelonLoader/SMAPI
+      # otherwise see ARM64 and write ARM64 detours into x64 CoreCLR code
+      "arm64ec/dlls_kernelbase_memory_c_native_system_info.patch"
+
       # fix build
       "arm64ec/programs_wineboot_wineboot_c.patch"
 
