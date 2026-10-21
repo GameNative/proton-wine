@@ -112,10 +112,15 @@ jobs:
           wget https://github.com/bylaws/llvm-mingw/releases/download/20250920/llvm-mingw-20250920-ucrt-ubuntu-22.04-x86_64.tar.xz
           tar -xf llvm-mingw-20250920-ucrt-ubuntu-22.04-x86_64.tar.xz
 
+      # Pinned to one ntsync-android commit, not a branch: this build carries the
+      # sweep rework (owner liveness probed outside the region lock, chunked
+      # scan, node pool fix), and a moving ref would make the artifact depend on
+      # when it was built. Go back to no `ref` once later commits are wanted.
       - name: Check out ntsync-android (userspace ntsync)
         uses: actions/checkout@v4
         with:
           repository: GameNative/ntsync-android
+          ref: a83899b47cf323002f0ab3c0594ab55427dec9bc
           path: ntsync-android
 
       - name: Set up Rust for ntsync-android
