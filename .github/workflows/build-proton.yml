@@ -112,10 +112,15 @@ jobs:
           wget https://github.com/bylaws/llvm-mingw/releases/download/20250920/llvm-mingw-20250920-ucrt-ubuntu-22.04-x86_64.tar.xz
           tar -xf llvm-mingw-20250920-ucrt-ubuntu-22.04-x86_64.tar.xz
 
+      # Pinned to the `test` branch of the fork, not the GameNative default
+      # branch: this build is for evaluating the sweep rework (owner liveness
+      # probed outside the region lock). Revert to `repository:
+      # GameNative/ntsync-android` with no `ref` once it lands on master.
       - name: Check out ntsync-android (userspace ntsync)
         uses: actions/checkout@v4
         with:
-          repository: GameNative/ntsync-android
+          repository: joshuatam/ntsync-android
+          ref: test
           path: ntsync-android
 
       - name: Set up Rust for ntsync-android
