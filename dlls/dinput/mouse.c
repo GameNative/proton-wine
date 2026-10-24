@@ -53,6 +53,7 @@ struct mouse
     /* These are used in case of relative -> absolute transitions */
     POINT                           org_coords;
     BOOL                            clipped;
+    BOOL                            legacy_mouse;
     /* warping: whether we need to move mouse back to middle once we
      * reach window borders (for e.g. shooters, "surface movement" games) */
     BOOL                            need_warp;
@@ -313,7 +314,7 @@ static void warp_check( struct mouse *impl, BOOL force )
         impl->need_warp = FALSE;
         if (!GetClientRect( impl->base.win, &rect )) return;
         MapWindowPoints( impl->base.win, 0, (POINT *)&rect, 2 );
-        if (impl->base.dwCoopLevel & DISCL_EXCLUSIVE)
+        if ((impl->base.dwCoopLevel & DISCL_EXCLUSIVE) && !impl->legacy_mouse)
         {
             /* make sure we clip even if the window covers the whole screen */
             rect.left = max( rect.left, GetSystemMetrics( SM_XVIRTUALSCREEN ) + 1 );
@@ -514,6 +515,8 @@ HRESULT mouse_create_device( struct dinput *dinput, const GUID *guid, IDirectInp
     struct mouse *impl;
     HKEY hkey, appkey;
     WCHAR buffer[20];
+    WCHAR filename[MAX_PATH], *name;
+    DWORD len;
     HRESULT hr;
 
     TRACE( "dinput %p, guid %s, out %p\n", dinput, debugstr_guid( guid ), out );
@@ -530,6 +533,19 @@ HRESULT mouse_create_device( struct dinput *dinput, const GUID *guid, IDirectInp
     impl->base.caps.dwHardwareRevision = 100;
     impl->base.dwCoopLevel = DISCL_NONEXCLUSIVE | DISCL_BACKGROUND;
     if (dinput->dwVersion >= 0x0800) impl->base.use_raw_input = TRUE;
+
+    /* BF2 needs the core mouse hook on X servers without XInput2 raw motion.
+     * Use warping as well: the X11 driver cannot clip on those servers. */
+    len = GetModuleFileNameW( NULL, filename, ARRAY_SIZE(filename) );
+    if (len && len < ARRAY_SIZE(filename))
+    {
+        name = wcsrchr( filename, '\\' );
+        if (!wcsicmp( name ? name + 1 : filename, L"BF2.exe" ))
+        {
+            impl->legacy_mouse = TRUE;
+            impl->base.use_raw_input = FALSE;
+        }
+    }
 
     if (FAILED(hr = dinput_device_init_device_format( &impl->base.IDirectInputDevice8W_iface ))) goto failed;
     mouse_enum_objects( &impl->base.IDirectInputDevice8W_iface, &filter, DIDFT_AXIS, init_object_properties, NULL );
