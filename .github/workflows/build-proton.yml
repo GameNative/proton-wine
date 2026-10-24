@@ -38,11 +38,15 @@ jobs:
 
       - name: Resolve the package version
         run: |
-          V="11.0-2"
+          # PROTON_VERSION is the product version only: it names the profile and
+          # the release. A pull request sets PR_NUMBER, which the package file
+          # name carries as a suffix: proton-11.0-2-arm64ec-102.wcp.
+          echo "PROTON_VERSION=11.0-2" >> $GITHUB_ENV
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            V="11.0-2.${{ github.event.pull_request.number }}"
+            echo "PR_NUMBER=${{ github.event.pull_request.number }}" >> $GITHUB_ENV
+          else
+            echo "PR_NUMBER=" >> $GITHUB_ENV
           fi
-          echo "PROTON_VERSION=$V" >> $GITHUB_ENV
 
       - name: Set up build environment
         run: |
@@ -261,15 +265,21 @@ jobs:
           # The412Banner/proton-wine. The app's ContentsManager tries XZ then falls back
           # to ZSTD, so a zstd .wcp installs with no app change and decompresses far
           # faster than xz. -T0 = all cores, -19 = high ratio (small download).
+          # PR builds carry the PR number in the file name.
+          PROTON_WCP="proton-$PROTON_VERSION-$ARCH_NAME-$PR_NUMBER.wcp"
+          WINE_WCP="proton-wine-$PROTON_VERSION-$ARCH_NAME-$PR_NUMBER.wcp.xz"
+          echo "PROTON_WCP=$PROTON_WCP" >> $GITHUB_ENV
+          echo "WINE_WCP=$WINE_WCP" >> $GITHUB_ENV
+
           cp $GITHUB_WORKSPACE/prefixPack.txz .
           cp $GITHUB_WORKSPACE/profile.json .
-          tar -I 'zstd -T0 -19' -cf proton-$PROTON_VERSION-$ARCH_NAME.wcp bin lib share prefixPack.txz profile.json
-          mv proton-$PROTON_VERSION-$ARCH_NAME.wcp $GITHUB_WORKSPACE/
+          tar -I 'zstd -T0 -19' -cf "$PROTON_WCP" bin lib share prefixPack.txz profile.json
+          mv "$PROTON_WCP" $GITHUB_WORKSPACE/
 
           # Create Wine WCP for CMOD & Ludashi - wcp.xz format
           cp $GITHUB_WORKSPACE/profile-wine.json profile.json
-          tar cJf proton-wine-$PROTON_VERSION-$ARCH_NAME.wcp.xz bin lib share prefixPack.txz profile.json
-          mv proton-wine-$PROTON_VERSION-$ARCH_NAME.wcp.xz $GITHUB_WORKSPACE/
+          tar cJf "$WINE_WCP" bin lib share prefixPack.txz profile.json
+          mv "$WINE_WCP" $GITHUB_WORKSPACE/
 
       - name: Upload build artifacts
         run: |
@@ -284,14 +294,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: proton-${{ env.ARCH_NAME }}
-          path: proton-${{ env.PROTON_VERSION }}-${{ env.ARCH_NAME }}.wcp
+          path: ${{ env.PROTON_WCP }}
           retention-days: 30
 
       - name: Upload Wine build artifacts for ${{ matrix.arch }}
         uses: actions/upload-artifact@v4
         with:
           name: proton-wine-${{ env.ARCH_NAME }}
-          path: proton-wine-${{ env.PROTON_VERSION }}-${{ env.ARCH_NAME }}.wcp.xz
+          path: ${{ env.WINE_WCP }}
           retention-days: 30
 
   release:
