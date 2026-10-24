@@ -1,5 +1,5 @@
 diff --git a/dlls/ntdll/unix/sync.c b/dlls/ntdll/unix/sync.c
-index 67ab945cef8..8e79186810f 100644
+index 67ab945cef8..b40bfe4802f 100644
 --- a/dlls/ntdll/unix/sync.c
 +++ b/dlls/ntdll/unix/sync.c
 @@ -61,7 +61,14 @@
@@ -276,26 +276,38 @@ index 67ab945cef8..8e79186810f 100644
      }
      else if (timeout->QuadPart <= 0)
      {
-@@ -636,7 +815,12 @@ static void release_inproc_sync( struct inproc_sync *sync )
+@@ -636,7 +815,17 @@ static void release_inproc_sync( struct inproc_sync *sync )
      LONG ref = InterlockedDecrement( &sync->refcount );
  
      assert( ref >= 0 );
 +#ifdef __ANDROID__
-+    /* userspace ntsync objects are owned by the server; nothing to close */
-+    if (!ref && !ntsync_userspace) close( fd );
++    /* userspace ntsync objects are owned by the server: drop this process's
++     * holder entry instead of closing an fd */
++    if (!ref)
++    {
++        if (ntsync_userspace) ntsync_release( fd );
++        else close( fd );
++    }
 +#else
      if (!ref) close( fd );
 +#endif
  }
  
  static struct inproc_sync *get_cached_inproc_sync( HANDLE handle )
-@@ -677,8 +861,18 @@ static NTSTATUS get_server_inproc_sync( HANDLE handle, struct inproc_sync *sync
+@@ -677,8 +866,25 @@ static NTSTATUS get_server_inproc_sync( HANDLE handle, struct inproc_sync *sync
          {
              obj_handle_t fd_handle;
              sync->refcount = 1;
 +#ifdef __ANDROID__
-+            /* userspace ntsync object handle is passed in fsync_shm_idx */
-+            if (ntsync_userspace) sync->fd = reply->fsync_shm_idx;
++            /* userspace ntsync object handle is passed in fsync_shm_idx; it
++             * was created by the server, so take a holder entry: the object
++             * stays valid while this process holds it, the way a duplicated
++             * fd keeps it valid under the kernel driver */
++            if (ntsync_userspace)
++            {
++                sync->fd = reply->fsync_shm_idx;
++                ntsync_retain( sync->fd );
++            }
 +            else
 +            {
 +                sync->fd = wine_server_receive_fd( &fd_handle );
@@ -308,18 +320,23 @@ index 67ab945cef8..8e79186810f 100644
              sync->access = reply->access;
              sync->type = reply->type;
              sync->closed = 0;
-@@ -908,6 +1102,10 @@ int get_inproc_alert_fd(void)
+@@ -908,6 +1114,15 @@ int get_inproc_alert_fd(void)
              if (!server_call_unlocked( req ))
              {
                  if (do_fsync()) data->alert_fd = fd = reply->fsync_shm_idx;
 +#ifdef __ANDROID__
-+                /* userspace ntsync alert event handle; valid in every process */
-+                else if (ntsync_userspace) data->alert_fd = fd = reply->fsync_shm_idx;
++                /* userspace ntsync alert event handle; valid in every process,
++                 * created by the server, so hold it for this process's lifetime */
++                else if (ntsync_userspace)
++                {
++                    data->alert_fd = fd = reply->fsync_shm_idx;
++                    ntsync_retain( fd );
++                }
 +#endif
                  else
                  {
                      data->alert_fd = fd = wine_server_receive_fd( &token );
-@@ -2426,6 +2624,19 @@ NTSTATUS WINAPI NtSignalAndWaitForSingleObject( HANDLE signal, HANDLE wait,
+@@ -2426,6 +2641,19 @@ NTSTATUS WINAPI NtSignalAndWaitForSingleObject( HANDLE signal, HANDLE wait,
   */
  NTSTATUS WINAPI NtYieldExecution(void)
  {

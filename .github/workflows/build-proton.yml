@@ -112,16 +112,15 @@ jobs:
           wget https://github.com/bylaws/llvm-mingw/releases/download/20250920/llvm-mingw-20250920-ucrt-ubuntu-22.04-x86_64.tar.xz
           tar -xf llvm-mingw-20250920-ucrt-ubuntu-22.04-x86_64.tar.xz
 
-      # Pinned to one ntsync-android commit, not a branch, so the artifact does
-      # not depend on when it was built or on what master moves to. This commit
-      # is the sweep rework, pinned for another device pass: it was reverted once
-      # after an earlier one, so a device run is the gate before it goes any
-      # further. master is at 7ce6435; the object is still served by SHA.
+      # Pinned to a tag, not a branch, so the artifact does not depend on when
+      # it was built or on what master moves to. v0.2.0 is layout v10:
+      # objects are held by every process that has the handle, which is what
+      # the ntdll retain/release calls in this tree need.
       - name: Check out ntsync-android (userspace ntsync)
         uses: actions/checkout@v4
         with:
           repository: GameNative/ntsync-android
-          ref: a83899b47cf323002f0ab3c0594ab55427dec9bc
+          ref: v0.2.0
           path: ntsync-android
 
       - name: Set up Rust for ntsync-android
@@ -345,7 +344,7 @@ jobs:
             Single SDK 28 build with 16KB page size support (works on Android 9+ and Android 15+).
 
             ### Features
-            - Runtime ntsync backend selection: kernel `/dev/ntsync` when present and usable (probed by wineserver at startup), otherwise experimental userspace ntsync via [ntsync-android](https://github.com/GameNative/ntsync-android) (commit [`a83899b`](https://github.com/GameNative/ntsync-android/commit/a83899b47cf323002f0ab3c0594ab55427dec9bc)) — plus fsync and wineserver-side `ntsync_event_set` support; `PROTON_NO_NTSYNC=1` disables ntsync entirely, `PROTON_NO_KERNEL_NTSYNC=1` forces the userspace backend
+            - Runtime ntsync backend selection: kernel `/dev/ntsync` when present and usable (probed by wineserver at startup), otherwise experimental userspace ntsync via [ntsync-android](https://github.com/GameNative/ntsync-android) (tag [`v0.2.0`](https://github.com/GameNative/ntsync-android/releases/tag/v0.2.0)) — plus fsync and wineserver-side `ntsync_event_set` support; `PROTON_NO_NTSYNC=1` disables ntsync entirely, `PROTON_NO_KERNEL_NTSYNC=1` forces the userspace backend
             - `WINE_FAST_YIELD` fast-yield hook in `NtYieldExecution`
             - FEX integration (stats shm, `SkipThreadAttach` detach guard) via bylaws' arm64ec patches
             - FEX unixlib loader: `MemoryWineLoadUnixLibByName` / wow64 / unload support with `$PREFIX/lib/wine` fallback
@@ -356,7 +355,7 @@ jobs:
             ### ntsync changes in this build
             - **`PROTON_NO_KERNEL_NTSYNC=1` forces the userspace backend** — new runtime escape hatch for A/B testing: wineserver skips `/dev/ntsync` even when the kernel driver is present and working, and initializes the userspace ntsync-android shm backend instead. The forced backend is identifiable in logs: `ntsync: PROTON_NO_KERNEL_NTSYNC set, using userspace ntsync.`
             - Runtime kernel/userspace backend detection (probed `NTSYNC_IOC_CREATE_EVENT`, userspace fallback, no shm region on kernel-ntsync devices) shipped in the previous build and is unchanged.
-            - ntsync-android library updated to [`a83899b`](https://github.com/GameNative/ntsync-android/commit/a83899b47cf323002f0ab3c0594ab55427dec9bc) (userspace sweep rework): owner liveness is probed outside the shared region lock, so a sweep no longer stops every other process's ntsync wait and signal for the whole table; the scan is chunked with a per-pid liveness cache, the sweep interval is actually rate-limited per region, and a dead waiter's nodes are returned to the node pool instead of leaking. `PROTON_NO_NTSYNC=1` still disables both backends.
+            - ntsync-android library updated to [`v0.2.0`](https://github.com/GameNative/ntsync-android/releases/tag/v0.2.0) (layout v10, holder-tracked object lifetime): an object now stays alive while any process holds a handle to it, not only while the process that created it lives, and ntdll takes that holder entry when the server relays a handle — the job a duplicated fd does under the kernel driver. The userspace sweep still probes owner liveness outside the shared region lock, chunks the scan with a per-pid liveness cache, rate-limits the interval per region, and returns a dead waiter's nodes to the pool. The v9 shared-memory layout is not compatible with v10: a prefix carrying an old ntsync shm file needs it removed. `PROTON_NO_NTSYNC=1` still disables both backends.
 
             ### Android / bionic fixes
             - Anonymous PE-image mapping for bionic (vc4 devices); `LC_ALL=C.UTF-8` default; shell32 drive-root path fix
