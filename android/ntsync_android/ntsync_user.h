@@ -105,6 +105,15 @@ int32_t ntsync_create_event(uint32_t *out_handle, const struct ntsync_event_args
 /* Destroy an object. Returns -EINVAL for a bad handle. */
 int32_t ntsync_close(uint32_t handle);
 
+/* Object lifetime. A handle relayed to another process (wineserver does this)
+ * keeps its object alive after the creator exits only if the receiver
+ * registers with ntsync_retain: userspace has no fd-close hook, so the sweep
+ * otherwise reaps the object as soon as the creator is gone. Idempotent per
+ * process. ntsync_release drops the entry without closing; ntsync_close does
+ * it implicitly. Both return 0 or a negative errno. */
+int32_t ntsync_retain(uint32_t handle);
+int32_t ntsync_release(uint32_t handle);
+
 /* Semaphores. On success, sem_release overwrites *count with the previous
  * count; returns -EOVERFLOW (state unchanged) if count would exceed max. */
 int32_t ntsync_sem_release(uint32_t handle, uint32_t *count);
