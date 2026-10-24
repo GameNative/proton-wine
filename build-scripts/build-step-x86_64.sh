@@ -10,7 +10,7 @@ export install_dir=$deps/../opt/wine
 
 #export TOOLCHAIN="$HOME/Android/android-ndk-r27d/toolchains/llvm/prebuilt/linux-x86_64/bin"
 export TOOLCHAIN="$HOME/Android/Sdk/ndk/27.3.13750724/toolchains/llvm/prebuilt/linux-x86_64/bin"
-export LLVM_MINGW_TOOLCHAIN="$HOME/toolchains/llvm-mingw-20250920-ucrt-ubuntu-22.04-x86_64/bin"
+export LLVM_MINGW_TOOLCHAIN="${LLVM_MINGW_TOOLCHAIN:-$HOME/toolchains/llvm-mingw-20250920-ucrt-ubuntu-22.04-x86_64/bin}"
 export TARGET=x86_64-linux-android28
 export PATH=$LLVM_MINGW_TOOLCHAIN:$PATH
 
@@ -48,7 +48,7 @@ export CPPFLAGS="--sysroot=$TOOLCHAIN/../sysroot -idirafter $deps/include"
 export C_OPTS="-g0 -O2 -DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES -march=x86-64 -mtune=generic -Wno-declaration-after-statement -Wno-implicit-function-declaration -Wno-int-conversion"
 export CFLAGS=$C_OPTS
 export CXXFLAGS=$C_OPTS
-export CROSSCFLAGS="-g0 -O2"
+export CROSSCFLAGS="-g0 -O2 ${CROSSCFLAGS_EXTRA:-}"
 export LDFLAGS="-L$deps/lib -Wl,-rpath=$RUNTIME_PATH/lib -Wl,-z,max-page-size=16384"
 
 export FREETYPE_CFLAGS="-I$deps/include/freetype2"
@@ -298,6 +298,14 @@ do
         git apply ./android/patches/$patch
 #      fi
     done
+
+    # Variant builds apply one more directory of patches on top of the stock set.
+    if [ -n "${PROTON_VARIANT:-}" ]; then
+      for patch in ./android/patches/variants/$PROTON_VARIANT/*.patch; do
+        echo "Applying variant patch $patch"
+        git apply "$patch"
+      done
+    fi
   fi
 
   if [ "$arg" == "--package-wcp" ]
