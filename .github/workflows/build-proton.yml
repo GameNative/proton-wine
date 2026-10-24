@@ -265,9 +265,14 @@ jobs:
           # The412Banner/proton-wine. The app's ContentsManager tries XZ then falls back
           # to ZSTD, so a zstd .wcp installs with no app change and decompresses far
           # faster than xz. -T0 = all cores, -19 = high ratio (small download).
-          # PR builds carry the PR number in the file name.
-          PROTON_WCP="proton-$PROTON_VERSION-$ARCH_NAME-$PR_NUMBER.wcp"
-          WINE_WCP="proton-wine-$PROTON_VERSION-$ARCH_NAME-$PR_NUMBER.wcp.xz"
+          # A pull request build carries the PR number in the file name; a
+          # release build has none, and must not end up with a trailing dash.
+          PR_PART=""
+          if [ -n "$PR_NUMBER" ]; then
+            PR_PART="-$PR_NUMBER"
+          fi
+          PROTON_WCP="proton-$PROTON_VERSION-$ARCH_NAME$PR_PART.wcp"
+          WINE_WCP="proton-wine-$PROTON_VERSION-$ARCH_NAME$PR_PART.wcp.xz"
           echo "PROTON_WCP=$PROTON_WCP" >> $GITHUB_ENV
           echo "WINE_WCP=$WINE_WCP" >> $GITHUB_ENV
 
