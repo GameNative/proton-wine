@@ -1,0 +1,14 @@
+diff --git a/dlls/win32u/opengl.c b/dlls/win32u/opengl.c
+index 03346f5b5f6..7bfb818592f 100644
+--- a/dlls/win32u/opengl.c
++++ b/dlls/win32u/opengl.c
+@@ -3493,7 +3493,9 @@ const struct opengl_funcs *__wine_get_opengl_driver( UINT version )
+ BOOL get_opengl_gpus( struct list *gpus )
+ {
+     struct egl_platform *egl;
++    const char *env;
+ 
++    if (!(env = getenv( "WINE_USE_EGL" )) || !atoi( env )) return FALSE;
+     if (!__wine_get_opengl_driver( WINE_OPENGL_DRIVER_VERSION )) return FALSE;
+ 
+     LIST_FOR_EACH_ENTRY( egl, &devices_egl, struct egl_platform, entry )

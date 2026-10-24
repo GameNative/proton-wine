@@ -190,6 +190,10 @@ do
       "common/dlls_ws2_32_socket_c.patch"
       "common/dlls_crypt32_cert_c.patch"
       "common/dlls_win32u_sysparams_c.patch"
+
+      # win32u: skip the OpenGL GPU enumeration when EGL is off; it ran the GLX/zink init inside the
+      # winex11 attach, which crashes on old Mali drivers and leaves every process without a display driver
+      "common/dlls_win32u_opengl_c_gl_gpus_egl.patch"
       "common/server_token_c.patch"
       "common/server_unicode_c.patch"
 
