@@ -1797,18 +1797,6 @@ int8_t __thiscall winISteamInput_SteamInput006_BNewDataAvailable(struct w_iface 
     return params._ret;
 }
 
-int32_t __thiscall winISteamInput_SteamInput006_GetConnectedControllers(struct w_iface *_this, uint64_t *handlesOut)
-{
-    struct ISteamInput_SteamInput006_GetConnectedControllers_params params =
-    {
-        .u_iface = _this->u_iface,
-        .handlesOut = handlesOut,
-    };
-    TRACE("%p\n", _this);
-    STEAMCLIENT_CALL( ISteamInput_SteamInput006_GetConnectedControllers, &params );
-    return params._ret;
-}
-
 void __thiscall winISteamInput_SteamInput006_EnableDeviceCallbacks(struct w_iface *_this)
 {
     struct ISteamInput_SteamInput006_EnableDeviceCallbacks_params params =
