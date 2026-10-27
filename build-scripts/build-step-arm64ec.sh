@@ -169,7 +169,7 @@ do
       --with-vulkan \
       --without-wayland \
       --without-xcomposite \
-      --without-xfixes \
+      --with-xfixes \
       --without-xinerama \
       --with-xrandr \
       --with-xrender \
@@ -219,7 +219,6 @@ do
       "common/dlls_winex11_drv_bitblt_c.patch"
       "common/dlls_winex11_drv_desktop_c.patch"
       "common/dlls_winex11_drv_keyboard_c.patch"
-      "common/dlls_winex11_drv_mouse_c.patch"
       "common/dlls_winex11_drv_opengl_c.patch"
       "common/dlls_winex11_drv_window_c.patch"
       "common/dlls_winex11_drv_x11drv_h.patch"
