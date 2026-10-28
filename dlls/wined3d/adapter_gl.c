@@ -1024,6 +1024,7 @@ static void fixup_extensions(struct wined3d_gl_info *gl_info, struct wined3d_cap
 {
     enum wined3d_pci_vendor card_vendor = ctx->gpu_description->vendor;
     enum wined3d_pci_device device = ctx->gpu_description->device;
+    char app_name[MAX_PATH];
     unsigned int i;
 
     static const struct driver_quirk
@@ -1123,6 +1124,20 @@ static void fixup_extensions(struct wined3d_gl_info *gl_info, struct wined3d_cap
         if (!quirk_table[i].match(gl_info, ctx, gl_renderer, gl_vendor, card_vendor, device)) continue;
         TRACE("Applying driver quirk \"%s\".\n", quirk_table[i].description);
         quirk_table[i].apply(gl_info);
+    }
+
+    /* The wrapped Zink driver can return a different address for a placed
+     * Vulkan mapping, causing opengl32's WOW64 persistent-buffer path to
+     * abort. Use the ordinary map/unmap path for Sacred until that driver
+     * path supports placed mappings correctly. Disable the extension, not
+     * just persistent_map, so query buffers and chunk allocation agree. */
+    if (sizeof(void *) == 4 && gl_info->supported[ARB_BUFFER_STORAGE]
+            && strstr(gl_renderer, "zink") && strstr(gl_renderer, "Wrapper")
+            && wined3d_get_app_name(app_name, ARRAY_SIZE(app_name))
+            && (!stricmp(app_name, "Sacred.exe") || !stricmp(app_name, "SacredReborn.exe")))
+    {
+        gl_info->supported[ARB_BUFFER_STORAGE] = FALSE;
+        MESSAGE("Sacred: using non-persistent buffers to avoid WOW64 placed-map failure.\n");
     }
 
     /* Find out if PBOs work as they are supposed to. */
