@@ -1391,7 +1391,7 @@ static BOOL fs_hack_is_integer(void)
 }
 
 static const char *fs_hack_gamma_vertex_shader_src =
-"#version 330\n"
+"#version 140\n"
 "\n"
 "const vec4 square[4] = vec4[4](\n"
 "    vec4(-1.0, -1.0, 0.0, 1.0),\n"
@@ -1416,7 +1416,7 @@ static const char *fs_hack_gamma_vertex_shader_src =
 ;
 
 static const char *fs_hack_gamma_frag_shader_src =
-"#version 330\n"
+"#version 140\n"
 "\n"
 "uniform sampler2D tex;\n"
 "in vec2 texCoord;\n"
@@ -1424,7 +1424,7 @@ static const char *fs_hack_gamma_frag_shader_src =
 "    vec3 values[256];\n"
 "};\n"
 "\n"
-"layout(location = 0) out vec4 outColor;\n"
+"out vec4 outColor;\n"
 "\n"
 "vec3 color_from_index(vec3 index)\n"
 "{\n"
@@ -1525,6 +1525,8 @@ static void fs_hack_setup_gamma_shader( struct wgl_context *ctx, const struct op
     funcs->p_glAttachShader( program, vshader );
     funcs->p_glAttachShader( program, fshader );
 
+    /* Keep the gamma pass usable on GLSL 1.40 contexts without explicit locations. */
+    funcs->p_glBindFragDataLocation( program, 0, "outColor" );
     funcs->p_glLinkProgram( program );
 
     funcs->p_glGetProgramiv( program, GL_LINK_STATUS, &success );
