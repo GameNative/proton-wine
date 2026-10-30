@@ -31,6 +31,7 @@
 
 static HRESULT (WINAPI *pUiaProviderFromIAccessible)(IAccessible *, LONG, DWORD, IRawElementProviderSimple **);
 static HRESULT (WINAPI *pUiaDisconnectProvider)(IRawElementProviderSimple *);
+static HRESULT (WINAPI *pUiaDisconnectAllProviders)(void);
 
 struct str_id_pair {
     int id;
@@ -8219,6 +8220,49 @@ static DWORD WINAPI uia_node_from_handle_test_thread(LPVOID param)
     ok(hr == UIA_E_ELEMENTNOTAVAILABLE, "Unexpected hr %#lx\n", hr);
     ok(UiaNodeRelease(node), "UiaNodeRelease returned FALSE\n");
     ok_method_sequence(disconnect_prov4, "disconnect_prov4");
+
+    if (pUiaDisconnectAllProviders)
+    {
+        unsigned int i;
+
+        /* Repeated cleanup must work, and must not prevent new providers. */
+        method_sequences_enabled = FALSE;
+        for (i = 0; i < 2; ++i)
+        {
+            SET_EXPECT_MULTI(winproc_GETOBJECT_UiaRoot, 2);
+            Provider.ignore_hwnd_prop = TRUE;
+            Provider.runtime_id[0] = Provider.runtime_id[1] = 0;
+            hr = UiaNodeFromHandle(hwnd, &node);
+            ok(hr == S_OK, "Unexpected hr %#lx\n", hr);
+            CHECK_CALLED(winproc_GETOBJECT_UiaRoot);
+            Provider.ignore_hwnd_prop = FALSE;
+
+            /* This child has no runtime ID: disconnect-all must still find it. */
+            Provider_child.hwnd = NULL;
+            Provider_child.runtime_id[0] = Provider_child.runtime_id[1] = 0;
+            hr = UiaGetPropertyValue(node, UIA_LabeledByPropertyId, &v);
+            ok(hr == S_OK, "Unexpected hr %#lx\n", hr);
+            hr = UiaHUiaNodeFromVariant(&v, &node2);
+            ok(hr == S_OK, "Unexpected hr %#lx\n", hr);
+
+            hr = UiaGetPropertyValue(node2, UIA_ControlTypePropertyId, &v);
+            ok(hr == S_OK, "Unexpected hr %#lx\n", hr);
+            VariantClear(&v);
+
+            hr = pUiaDisconnectAllProviders();
+            ok(hr == S_OK, "Unexpected hr %#lx\n", hr);
+            hr = UiaGetPropertyValue(node, UIA_ControlTypePropertyId, &v);
+            ok(hr == UIA_E_ELEMENTNOTAVAILABLE, "Unexpected hr %#lx\n", hr);
+            hr = UiaGetPropertyValue(node2, UIA_ControlTypePropertyId, &v);
+            ok(hr == UIA_E_ELEMENTNOTAVAILABLE, "Unexpected hr %#lx\n", hr);
+
+            hr = pUiaDisconnectAllProviders();
+            ok(hr == S_OK, "Unexpected hr %#lx\n", hr);
+            ok(UiaNodeRelease(node2), "UiaNodeRelease returned FALSE\n");
+            ok(UiaNodeRelease(node), "UiaNodeRelease returned FALSE\n");
+        }
+        method_sequences_enabled = TRUE;
+    }
 
 exit:
     CoUninitialize();
@@ -18651,7 +18695,10 @@ START_TEST(uiautomation)
     FreeLibrary(hModuleImm32);
 
     if (uia_dll)
+    {
         pUiaDisconnectProvider = (void *)GetProcAddress(uia_dll, "UiaDisconnectProvider");
+        pUiaDisconnectAllProviders = (void *)GetProcAddress(uia_dll, "UiaDisconnectAllProviders");
+    }
 
     argc = winetest_get_mainargs(&argv);
     if (argc == 3)
@@ -18667,6 +18714,13 @@ START_TEST(uiautomation)
 
         FreeLibrary(uia_dll);
         return;
+    }
+
+    /* Cleanup with no provider thread, including without COM initialized. */
+    if (pUiaDisconnectAllProviders)
+    {
+        HRESULT hr = pUiaDisconnectAllProviders();
+        ok(hr == S_OK, "Unexpected hr %#lx\n", hr);
     }
 
     test_UiaClientsAreListening();
