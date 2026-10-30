@@ -2310,6 +2310,30 @@ LRESULT WINAPI UiaReturnRawElementProvider(HWND hwnd, WPARAM wparam,
 }
 
 /***********************************************************************
+ *          UiaDisconnectAllProviders (uiautomationcore.@)
+ */
+HRESULT WINAPI UiaDisconnectAllProviders(void)
+{
+    struct uia_node *node;
+
+    TRACE("\n");
+
+    EnterCriticalSection(&provider_thread_cs);
+    /* Include nodes without a runtime ID, which are not in node_map. */
+    while (provider_thread.ref && !list_empty(&provider_thread.nodes_list))
+    {
+        node = LIST_ENTRY(list_head(&provider_thread.nodes_list), struct uia_node, prov_thread_list_entry);
+        IWineUiaNode_AddRef(&node->IWineUiaNode_iface);
+        uia_provider_thread_remove_node((HUIANODE)&node->IWineUiaNode_iface);
+        IWineUiaNode_disconnect(&node->IWineUiaNode_iface);
+        IWineUiaNode_Release(&node->IWineUiaNode_iface);
+    }
+    LeaveCriticalSection(&provider_thread_cs);
+
+    return S_OK;
+}
+
+/***********************************************************************
  *          UiaDisconnectProvider (uiautomationcore.@)
  */
 HRESULT WINAPI UiaDisconnectProvider(IRawElementProviderSimple *elprov)
