@@ -332,6 +332,23 @@ NTSTATUS wg_init_gstreamer(void *arg)
         return STATUS_UNSUCCESSFUL;
     }
 
+    if (params->prefer_wmapro)
+    {
+        GstElementFactory *factory;
+
+        /* Deadly Premonition uses WMA Pro in its ASF movies. The marginal+1
+         * Proton converter otherwise wins over libav and requires a Steam
+         * transcoded-media cache which is unavailable on Android. */
+        if ((factory = gst_element_factory_find("avdec_wmapro")))
+        {
+            gst_plugin_feature_set_rank(GST_PLUGIN_FEATURE(factory), GST_RANK_PRIMARY + 1);
+            GST_INFO("Preferring avdec_wmapro for DP.exe media playback.");
+            gst_object_unref(factory);
+        }
+        else
+            GST_WARNING("Cannot prefer WMA Pro decoding: avdec_wmapro is unavailable.");
+    }
+
     return STATUS_SUCCESS;
 }
 
