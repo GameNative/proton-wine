@@ -373,6 +373,8 @@ extern NTSTATUS sock_read( HANDLE handle, int fd, HANDLE event, PIO_APC_ROUTINE 
                            IO_STATUS_BLOCK *io, void *buffer, ULONG length );
 extern NTSTATUS sock_write( HANDLE handle, int fd, HANDLE event, PIO_APC_ROUTINE apc, void *apc_user,
                             IO_STATUS_BLOCK *io, const void *buffer, ULONG length );
+extern void sock_recv_fastpath_forget( HANDLE handle );
+extern void sock_server_ioctl_done( UINT code );
 extern NTSTATUS tape_DeviceIoControl( HANDLE device, HANDLE event, PIO_APC_ROUTINE apc, void *apc_user,
                                       IO_STATUS_BLOCK *io, UINT code, void *in_buffer,
                                       UINT in_size, void *out_buffer, UINT out_size );

@@ -1732,6 +1732,7 @@ enum server_fd_type
     obj_handle_t wait;          /* handle to wait on for blocking recv */
     unsigned int options;       /* device open options */
     int          nonblocking;   /* is socket non-blocking? */
+    int          poll_fastpath; /* may the client fail would-block receives without asking us? */
 @END
 
 

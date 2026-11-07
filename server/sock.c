@@ -3988,6 +3988,7 @@ DECL_HANDLER(recv_socket)
     timeout_t timeout = 0;
     struct async *async;
     struct fd *fd;
+    int poll_fastpath;
 
     if (!sock) return;
     fd = sock->fd;
@@ -4025,6 +4026,16 @@ DECL_HANDLER(recv_socket)
     if (status == STATUS_PENDING && !req->force_async && sock->nonblocking)
         status = STATUS_DEVICE_NOT_READY;
 
+    /* For a plain nonblocking receive (no event select, no queued reads, no
+     * pending AcceptEx) that finds no data, all we do is reset the request's
+     * event and clear AFD_POLL_READ, which only matters with an event select.
+     * Let the client fail such receives with STATUS_DEVICE_NOT_READY on its own
+     * while the socket has nothing to read; a receive that finds data, and any
+     * receive after a mode change, still comes here. */
+    poll_fastpath = status == STATUS_ALERTED && !req->force_async && !req->oob && sock->nonblocking &&
+                    !sock->mask && !sock->event && !sock->window && !sock->accept_recv_req &&
+                    !async_queued( &sock->read_q );
+
     sock->pending_events &= ~(req->oob ? AFD_POLL_OOB : AFD_POLL_READ);
     sock->reported_events &= ~(req->oob ? AFD_POLL_OOB : AFD_POLL_READ);
 
@@ -4044,6 +4055,7 @@ DECL_HANDLER(recv_socket)
         reply->wait = async_handoff( async, NULL, 0 );
         reply->options = get_fd_options( fd );
         reply->nonblocking = sock->nonblocking;
+        reply->poll_fastpath = poll_fastpath;
         release_object( async );
     }
     release_object( sock );

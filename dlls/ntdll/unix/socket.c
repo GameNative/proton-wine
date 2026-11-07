@@ -28,6 +28,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
+#include <poll.h>
 #include <unistd.h>
 #ifdef HAVE_IFADDRS_H
 # include <ifaddrs.h>
@@ -897,6 +898,94 @@ static BOOL async_recv_proc( void *user, ULONG_PTR *info, unsigned int *status )
     return TRUE;
 }
 
+/* Would-block fast path for nonblocking receives.
+ *
+ * A game polling a nonblocking socket with recv() in a loop costs two server
+ * requests per call (recv_socket and set_async_direct_result) even when there
+ * is nothing to read. When the server marks a receive poll_fastpath (see
+ * recv_socket in server/sock.c), later receives on that handle that poll()
+ * finds nothing for fail with STATUS_DEVICE_NOT_READY without a server request;
+ * everything else, including every receive that finds data, an error or a
+ * hangup, takes the normal path. Entries are dropped when the handle is closed
+ * and after every socket ioctl that goes to the server (FIONBIO, event and
+ * message select, shutdown, ...). Each slot has a generation count so that a
+ * receive racing with such a change cannot re-arm a stale entry.
+ *
+ * WINE_SOCKET_POLL_FASTPATH=0 disables it.
+ */
+#define RECV_FASTPATH_SLOTS 64
+
+static struct
+{
+    HANDLE volatile handle;
+    LONG volatile   gen;
+} recv_fastpath[RECV_FASTPATH_SLOTS];
+
+static int recv_fastpath_enabled = -1;
+
+static BOOL use_recv_fastpath(void)
+{
+    if (recv_fastpath_enabled == -1)
+    {
+        const char *env = getenv( "WINE_SOCKET_POLL_FASTPATH" );
+        recv_fastpath_enabled = !env || strcmp( env, "0" );
+    }
+    return recv_fastpath_enabled;
+}
+
+static inline unsigned int recv_fastpath_slot( HANDLE handle )
+{
+    return (HandleToULong( handle ) >> 2) % RECV_FASTPATH_SLOTS;
+}
+
+void sock_recv_fastpath_forget( HANDLE handle )
+{
+    unsigned int slot = recv_fastpath_slot( handle );
+
+    InterlockedIncrement( &recv_fastpath[slot].gen );
+    InterlockedCompareExchangePointer( (void **)&recv_fastpath[slot].handle, NULL, handle );
+}
+
+/* called after a socket ioctl was handled by the server, which may have changed
+ * the blocking mode, the event select or the shutdown state */
+void sock_server_ioctl_done( UINT code )
+{
+    unsigned int slot;
+
+    if (code == IOCTL_AFD_POLL) return;
+
+    for (slot = 0; slot < RECV_FASTPATH_SLOTS; slot++)
+    {
+        InterlockedIncrement( &recv_fastpath[slot].gen );
+        InterlockedExchangePointer( (void **)&recv_fastpath[slot].handle, NULL );
+    }
+}
+
+static void recv_fastpath_update( HANDLE handle, unsigned int slot, LONG gen, BOOL enable )
+{
+    if (enable)
+    {
+        if (InterlockedExchangePointer( (void **)&recv_fastpath[slot].handle, handle ) != handle)
+            TRACE( "handle %p: would-block receives skip the server\n", handle );
+        /* the socket may have changed (or been closed) since we read gen */
+        if (recv_fastpath[slot].gen == gen) return;
+    }
+    InterlockedCompareExchangePointer( (void **)&recv_fastpath[slot].handle, NULL, handle );
+}
+
+/* returns FALSE only if poll() reports nothing at all for the socket */
+static BOOL sock_may_have_input( int fd )
+{
+    struct pollfd pfd;
+    int ret;
+
+    pfd.fd = fd;
+    pfd.events = POLLIN | POLLPRI;
+    pfd.revents = 0;
+    while ((ret = poll( &pfd, 1, 0 )) < 0 && errno == EINTR);
+    return ret != 0;
+}
+
 static BOOL is_icmp_over_dgram( int fd )
 {
 #ifdef linux
@@ -918,9 +1007,10 @@ static NTSTATUS sock_recv( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, voi
                            int fd, struct async_recv_ioctl *async, int force_async )
 {
     HANDLE wait_handle;
-    BOOL nonblocking;
-    unsigned int i, status;
+    BOOL nonblocking, poll_fastpath, try_fastpath;
+    unsigned int i, status, slot = 0;
     ULONG options;
+    LONG gen = 0;
 
     for (i = 0; i < async->count; ++i)
     {
@@ -928,6 +1018,19 @@ static NTSTATUS sock_recv( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, voi
         {
             release_fileio( &async->io );
             return STATUS_ACCESS_VIOLATION;
+        }
+    }
+
+    try_fastpath = !force_async && !apc && !(async->unix_flags & MSG_OOB) && use_recv_fastpath();
+    if (try_fastpath)
+    {
+        slot = recv_fastpath_slot( handle );
+        gen = recv_fastpath[slot].gen;
+        if (recv_fastpath[slot].handle == handle && !sock_may_have_input( fd ))
+        {
+            /* same result as the server path: no IOSB, no completion */
+            release_fileio( &async->io );
+            return STATUS_DEVICE_NOT_READY;
         }
     }
 
@@ -940,8 +1043,11 @@ static NTSTATUS sock_recv( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, voi
         wait_handle = wine_server_ptr_handle( reply->wait );
         options     = reply->options;
         nonblocking = reply->nonblocking;
+        poll_fastpath = reply->poll_fastpath;
     }
     SERVER_END_REQ;
+
+    if (try_fastpath) recv_fastpath_update( handle, slot, gen, status == STATUS_ALERTED && poll_fastpath );
 
     /* the server currently will never succeed immediately */
     assert(status == STATUS_ALERTED || status == STATUS_PENDING || NT_ERROR(status));
