@@ -902,23 +902,41 @@ static BOOL async_recv_proc( void *user, ULONG_PTR *info, unsigned int *status )
  *
  * A game polling a nonblocking socket with recv() in a loop costs two server
  * requests per call (recv_socket and set_async_direct_result) even when there
- * is nothing to read. When the server marks a receive poll_fastpath (see
+ * is nothing to read. When the server grants poll_fastpath for a receive (see
  * recv_socket in server/sock.c), later receives on that handle that poll()
- * finds nothing for fail with STATUS_DEVICE_NOT_READY without a server request;
- * everything else, including every receive that finds data, an error or a
- * hangup, takes the normal path. Entries are dropped when the handle is closed
- * and after every socket ioctl that goes to the server (FIONBIO, event and
- * message select, shutdown, ...). Each slot has a generation count so that a
- * receive racing with such a change cannot re-arm a stale entry.
+ * finds nothing for fail with STATUS_DEVICE_NOT_READY without a server request.
+ *
+ * Invariants:
+ * - The server grants it only for a nonblocking socket with no event or message
+ *   select, no queued reads, no pending AcceptEx, and exactly one handle, owned
+ *   by this process. Every mode change (FIONBIO, event or message select,
+ *   shutdown) is then a request made through this ntdll.
+ * - An entry is dropped when its handle is closed or duplicated and after every
+ *   socket ioctl that goes to the server, before that call returns; the next
+ *   receive asks the server again, which refuses a duplicated socket. Each slot has a
+ *   generation count so that a receive racing with such a change cannot re-arm
+ *   a stale entry.
+ * - Only overlapped-less, APC-less, non-OOB receives use it, and only when
+ *   poll() reports nothing at all; data, errors and hangups take the normal
+ *   path, as does every RECV_FASTPATH_MAX_POLLS-th would-block receive, which
+ *   re-grants or revokes the entry. That bounds what this process cannot see
+ *   (a handle duplicated into it by another process, or inherited by a child)
+ *   to RECV_FASTPATH_MAX_POLLS answers.
+ * - The answer is what the server path gives for an empty socket: no IOSB, no
+ *   completion, no APC. What it skips (resetting the request's event and
+ *   clearing AFD_POLL_READ) is not observable: the event only matters after
+ *   STATUS_PENDING, and an event select re-checks readability when installed.
  *
  * WINE_SOCKET_POLL_FASTPATH=0 disables it.
  */
-#define RECV_FASTPATH_SLOTS 64
+#define RECV_FASTPATH_SLOTS     64
+#define RECV_FASTPATH_MAX_POLLS 256
 
 static struct
 {
     HANDLE volatile handle;
     LONG volatile   gen;
+    LONG volatile   polls;  /* would-block answers since the last server receive */
 } recv_fastpath[RECV_FASTPATH_SLOTS];
 
 static int recv_fastpath_enabled = -1;
@@ -965,6 +983,7 @@ static void recv_fastpath_update( HANDLE handle, unsigned int slot, LONG gen, BO
 {
     if (enable)
     {
+        recv_fastpath[slot].polls = 0;
         if (InterlockedExchangePointer( (void **)&recv_fastpath[slot].handle, handle ) != handle)
             TRACE( "handle %p: would-block receives skip the server\n", handle );
         /* the socket may have changed (or been closed) since we read gen */
@@ -1026,7 +1045,8 @@ static NTSTATUS sock_recv( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, voi
     {
         slot = recv_fastpath_slot( handle );
         gen = recv_fastpath[slot].gen;
-        if (recv_fastpath[slot].handle == handle && !sock_may_have_input( fd ))
+        if (recv_fastpath[slot].handle == handle && !sock_may_have_input( fd ) &&
+            InterlockedIncrement( &recv_fastpath[slot].polls ) <= RECV_FASTPATH_MAX_POLLS)
         {
             /* same result as the server path: no IOSB, no completion */
             release_fileio( &async->io );
