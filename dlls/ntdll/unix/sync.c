@@ -2329,6 +2329,91 @@ NTSTATUS WINAPI NtQueryTimer( HANDLE handle, TIMER_INFORMATION_CLASS class,
 }
 
 
+/* Sleep(0) storm throttle.
+ *
+ * A thread that does nothing but Sleep(0) thousands of times in a row is an idle
+ * spinner (e.g. a worker polling a flag with Sleep(0)); on Windows that is cheap
+ * enough, here every call is a sched_yield() plus two getrusage() and it pins a
+ * core. Past the threshold each further Sleep(0) becomes a short real sleep. A
+ * gap of more than SLEEP0_WINDOW between two calls, or any other sleep or wait
+ * with a non-zero timeout, starts a new run, so short flag waits never get here.
+ *
+ * WINE_SLEEP0_THROTTLE=0 disables it, WINE_SLEEP0_THROTTLE=<iters>[,<usec>] sets
+ * the threshold and the sleep length.
+ */
+#define SLEEP0_DEFAULT_ITERS 4000
+#define SLEEP0_DEFAULT_USEC  250
+#define SLEEP0_WINDOW        (2 * TICKSPERSEC / 1000)  /* 2 ms */
+
+static pthread_once_t sleep0_once = PTHREAD_ONCE_INIT;
+static unsigned int sleep0_iters;
+static unsigned int sleep0_usec;
+
+static void sleep0_init(void)
+{
+    const char *env = getenv( "WINE_SLEEP0_THROTTLE" );
+    unsigned long iters = SLEEP0_DEFAULT_ITERS, usec = SLEEP0_DEFAULT_USEC;
+    char *end;
+
+    if (env && *env)
+    {
+        iters = strtoul( env, &end, 10 );
+        if (*end == ',' && !(usec = strtoul( end + 1, NULL, 10 ))) usec = SLEEP0_DEFAULT_USEC;
+    }
+    if (iters > 0x7fffffff) iters = 0x7fffffff;
+    if (usec > 100000) usec = 100000;
+    sleep0_iters = iters;
+    sleep0_usec = usec;
+    if (env) TRACE( "WINE_SLEEP0_THROTTLE %lu iterations, %lu us\n", iters, usec );
+}
+
+static inline void sleep0_reset( const LARGE_INTEGER *timeout )
+{
+    if (!timeout || timeout->QuadPart) ntdll_get_thread_data()->sleep0_count = 0;
+}
+
+/* returns TRUE if the zero-timeout sleep was replaced by a real sleep */
+static BOOL sleep0_throttle(void)
+{
+    struct ntdll_thread_data *thread_data = ntdll_get_thread_data();
+    struct timespec ts;
+    ULONGLONG now;
+
+    pthread_once( &sleep0_once, sleep0_init );
+    if (!sleep0_iters) return FALSE;
+
+    now = monotonic_counter();
+    if (now - thread_data->sleep0_last > SLEEP0_WINDOW) thread_data->sleep0_count = 0;
+    thread_data->sleep0_last = now;
+
+    if (thread_data->sleep0_count < sleep0_iters)
+    {
+        thread_data->sleep0_count++;
+        return FALSE;
+    }
+    if (thread_data->sleep0_count == sleep0_iters)
+    {
+        static BOOL warned;
+
+        thread_data->sleep0_count++;
+        TRACE( "thread %04x Sleep(0) storm after %u calls, sleeping %u us per call\n",
+               (int)GetCurrentThreadId(), sleep0_iters, sleep0_usec );
+        if (!warned)
+        {
+            warned = TRUE;
+            WARN( "thread %04x Sleep(0) storm, throttling\n", (int)GetCurrentThreadId() );
+        }
+    }
+
+    ts.tv_sec = 0;
+    ts.tv_nsec = sleep0_usec * 1000;
+    while (nanosleep( &ts, &ts ) == -1 && errno == EINTR);
+    /* measure the next gap from the end of our own sleep */
+    thread_data->sleep0_last = monotonic_counter();
+    return TRUE;
+}
+
+
 /******************************************************************
  *		NtWaitForMultipleObjects (NTDLL.@)
  */
@@ -2340,6 +2425,7 @@ NTSTATUS WINAPI NtWaitForMultipleObjects( DWORD count, const HANDLE *handles, WA
     unsigned int ret;
 
     if (!count || count > MAXIMUM_WAIT_OBJECTS) return STATUS_INVALID_PARAMETER_1;
+    sleep0_reset( timeout );
     if (type != WaitAll && type != WaitAny) FIXME( "Unsupported wait type %u\n", type );
 
     if (TRACE_ON(sync))
@@ -2381,6 +2467,8 @@ NTSTATUS WINAPI NtWaitForSingleObject( HANDLE handle, BOOLEAN alertable, const L
 
     TRACE( "handle %p, alertable %u, timeout %s\n", handle, alertable, debugstr_timeout(timeout) );
 
+    sleep0_reset( timeout );
+
     if ((ret = inproc_wait( 1, &handle, WaitAny, alertable, timeout )) != STATUS_NOT_IMPLEMENTED)
     {
         TRACE( "-> %#x\n", ret );
@@ -2409,6 +2497,7 @@ NTSTATUS WINAPI NtSignalAndWaitForSingleObject( HANDLE signal, HANDLE wait,
     TRACE( "signal %p, wait %p, alertable %u, timeout %s\n", signal, wait, alertable, debugstr_timeout(timeout) );
 
     if (!signal) return STATUS_INVALID_HANDLE;
+    sleep0_reset( timeout );
 
     if ((ret = inproc_signal_and_wait( signal, wait, alertable, timeout )) != STATUS_NOT_IMPLEMENTED)
         return ret;
@@ -2455,6 +2544,7 @@ NTSTATUS WINAPI NtDelayExecution( BOOLEAN alertable, const LARGE_INTEGER *timeou
     /* if alertable, we need to query the server */
     if (alertable)
     {
+        sleep0_reset( timeout );
         if (do_fsync())
         {
             NTSTATUS ret = fsync_wait_objects( 0, NULL, TRUE, TRUE, timeout );
@@ -2483,10 +2573,13 @@ NTSTATUS WINAPI NtDelayExecution( BOOLEAN alertable, const LARGE_INTEGER *timeou
             when = now.QuadPart - when;
         }
 
+        if (!when && sleep0_throttle()) return STATUS_SUCCESS;
+
         /* Note that we yield after establishing the desired timeout, but
            we only care about the result of the yield for zero timeouts */
         status = NtYieldExecution();
         if (!when) return status;
+        sleep0_reset( timeout );
 
         for (;;)
         {

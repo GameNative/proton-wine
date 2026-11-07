@@ -117,6 +117,8 @@ struct ntdll_thread_data
     void                     *param;         /* thread entry point parameter */
     void                     *jmp_buf;       /* setjmp buffer for exception handling */
     int                      *fsync_apc_futex;
+    unsigned int              sleep0_count;  /* consecutive zero-timeout NtDelayExecution calls */
+    ULONGLONG                 sleep0_last;   /* time of the last one, in Win32 ticks */
 };
 
 C_ASSERT( sizeof(struct ntdll_thread_data) <= sizeof(((TEB *)0)->GdiTebBatch) );
