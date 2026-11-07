@@ -2336,12 +2336,14 @@ NTSTATUS WINAPI NtQueryTimer( HANDLE handle, TIMER_INFORMATION_CLASS class,
  * enough, here every call is a sched_yield() plus two getrusage() and it pins a
  * core. Past the threshold each further Sleep(0) becomes a short real sleep. A
  * gap of more than SLEEP0_WINDOW between two calls, or any other sleep or wait
- * with a non-zero timeout, starts a new run, so short flag waits never get here.
+ * with a non-zero timeout, starts a new run. The default threshold takes more
+ * than 100 ms of continuous spinning, so frame limiters and flag waits, which
+ * all wait or work at least once per frame, never get here.
  *
  * WINE_SLEEP0_THROTTLE=0 disables it, WINE_SLEEP0_THROTTLE=<iters>[,<usec>] sets
  * the threshold and the sleep length.
  */
-#define SLEEP0_DEFAULT_ITERS 4000
+#define SLEEP0_DEFAULT_ITERS 50000  /* > 100 ms of uninterrupted Sleep(0) */
 #define SLEEP0_DEFAULT_USEC  250
 #define SLEEP0_WINDOW        (2 * TICKSPERSEC / 1000)  /* 2 ms */
 
