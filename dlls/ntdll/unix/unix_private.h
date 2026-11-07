@@ -117,7 +117,7 @@ struct ntdll_thread_data
     void                     *param;         /* thread entry point parameter */
     void                     *jmp_buf;       /* setjmp buffer for exception handling */
     int                      *fsync_apc_futex;
-    unsigned int              sleep0_count;  /* consecutive zero-timeout NtDelayExecution calls */
+    unsigned int              sleep0_count;  /* consecutive yields that did not switch */
     ULONGLONG                 sleep0_last;   /* time of the last one, in Win32 ticks */
 };
 

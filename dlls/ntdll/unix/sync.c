@@ -2329,13 +2329,14 @@ NTSTATUS WINAPI NtQueryTimer( HANDLE handle, TIMER_INFORMATION_CLASS class,
 }
 
 
-/* Sleep(0) storm throttle.
+/* Sleep(0) / SwitchToThread storm throttle.
  *
- * A thread that does nothing but Sleep(0) thousands of times in a row is an idle
- * spinner (e.g. a worker polling a flag with Sleep(0)); on Windows that is cheap
- * enough, here every call is a sched_yield() plus two getrusage() and it pins a
- * core. Past the threshold each further Sleep(0) becomes a short real sleep. A
- * gap of more than SLEEP0_WINDOW between two calls, or any other sleep or wait
+ * A thread that does nothing but yield thousands of times in a row, with Sleep(0)
+ * or SwitchToThread, is an idle spinner (e.g. a worker polling a flag); on Windows
+ * that is cheap enough, here every NtYieldExecution is a sched_yield() plus two
+ * getrusage() and it pins a core. Only yields that did not switch are counted.
+ * Past the threshold each further one still yields, then sleeps briefly. A
+ * gap of more than SLEEP0_WINDOW between two of them, or any other sleep or wait
  * with a non-zero timeout, starts a new run. The default threshold takes more
  * than 100 ms of continuous spinning, so frame limiters and flag waits, which
  * all wait or work at least once per frame, never get here.
@@ -2374,15 +2375,15 @@ static inline void sleep0_reset( const LARGE_INTEGER *timeout )
     if (!timeout || timeout->QuadPart) ntdll_get_thread_data()->sleep0_count = 0;
 }
 
-/* returns TRUE if the zero-timeout sleep was replaced by a real sleep */
-static BOOL sleep0_throttle(void)
+/* called after each yield that did not switch */
+static void sleep0_throttle(void)
 {
     struct ntdll_thread_data *thread_data = ntdll_get_thread_data();
     struct timespec ts;
     ULONGLONG now;
 
     pthread_once( &sleep0_once, sleep0_init );
-    if (!sleep0_iters) return FALSE;
+    if (!sleep0_iters) return;
 
     now = monotonic_counter();
     if (now - thread_data->sleep0_last > SLEEP0_WINDOW) thread_data->sleep0_count = 0;
@@ -2391,7 +2392,7 @@ static BOOL sleep0_throttle(void)
     if (thread_data->sleep0_count < sleep0_iters)
     {
         thread_data->sleep0_count++;
-        return FALSE;
+        return;
     }
     if (thread_data->sleep0_count == sleep0_iters)
     {
@@ -2412,7 +2413,6 @@ static BOOL sleep0_throttle(void)
     while (nanosleep( &ts, &ts ) == -1 && errno == EINTR);
     /* measure the next gap from the end of our own sleep */
     thread_data->sleep0_last = monotonic_counter();
-    return TRUE;
 }
 
 
@@ -2527,7 +2527,11 @@ NTSTATUS WINAPI NtYieldExecution(void)
     sched_yield();
 #ifdef RUSAGE_THREAD
     if (!ret) ret = getrusage( RUSAGE_THREAD, &u2 );
-    if (!ret && u1.ru_nvcsw == u2.ru_nvcsw && u1.ru_nivcsw == u2.ru_nivcsw) return STATUS_NO_YIELD_PERFORMED;
+    if (!ret && u1.ru_nvcsw == u2.ru_nvcsw && u1.ru_nivcsw == u2.ru_nivcsw)
+    {
+        sleep0_throttle();
+        return STATUS_NO_YIELD_PERFORMED;
+    }
 #endif
     return STATUS_SUCCESS;
 #else
@@ -2575,13 +2579,12 @@ NTSTATUS WINAPI NtDelayExecution( BOOLEAN alertable, const LARGE_INTEGER *timeou
             when = now.QuadPart - when;
         }
 
-        if (!when && sleep0_throttle()) return STATUS_SUCCESS;
+        sleep0_reset( timeout );
 
         /* Note that we yield after establishing the desired timeout, but
            we only care about the result of the yield for zero timeouts */
         status = NtYieldExecution();
         if (!when) return status;
-        sleep0_reset( timeout );
 
         for (;;)
         {
