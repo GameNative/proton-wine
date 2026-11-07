@@ -292,6 +292,14 @@ do
       # cache the ProcessorInformation power query for 500 ms (Wine bug 60462)
       "common/dlls_ntdll_unix_system_c_power_cache.patch"
 
+      # throttle Sleep(0) / SwitchToThread storms (DOOM 2016 idle worker, Cult of the Lamb dispatch thread);
+      # WINE_SLEEP0_THROTTLE=0 disables it
+      "common/dlls_ntdll_unix_sync_c_sleep0_yield_throttle.patch"
+
+      # fail would-block receives on nonblocking sockets without a server round trip (DOOM 2016 DTLS poll thread);
+      # WINE_SOCKET_POLL_FASTPATH=0 disables it
+      "common/dlls_ntdll_unix_socket_c_recv_fastpath.patch"
+
       # GetNativeSystemInfo() reports AMD64 to x64 processes (upstream c5a96a0b6c); MonoMod/MelonLoader/SMAPI
       # otherwise see ARM64 and write ARM64 detours into x64 CoreCLR code
       "arm64ec/dlls_kernelbase_memory_c_native_system_info.patch"
