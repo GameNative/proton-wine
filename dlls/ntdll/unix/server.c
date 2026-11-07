@@ -1917,7 +1917,8 @@ NTSTATUS WINAPI NtDuplicateObject( HANDLE source_process, HANDLE source, HANDLE 
     }
     SERVER_END_REQ;
 
-    if (options & DUPLICATE_CLOSE_SOURCE) sock_recv_fastpath_forget( source );
+    /* a duplicated socket loses the receive fast path on its next receive */
+    sock_recv_fastpath_forget( source );
 
     server_leave_uninterrupted_section( &fd_cache_mutex, &sigset );
 

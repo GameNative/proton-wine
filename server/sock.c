@@ -2975,6 +2975,17 @@ static void sock_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
         sock->wparam = 0;
         sock->nonblocking = 1;
 
+        /* FD_READ is level-triggered at selection time: drop a READ event whose
+         * data is already gone. Receives that the client answers by itself
+         * (poll_fastpath in recv_socket) don't clear it, and neither does a
+         * receive that raced with the poll that posted it. Message select
+         * already starts from a clean state. */
+        if ((sock->reported_events & AFD_POLL_READ) && !check_fd_events( sock->fd, POLLIN ))
+        {
+            sock->pending_events &= ~AFD_POLL_READ;
+            sock->reported_events &= ~AFD_POLL_READ;
+        }
+
         sock_reselect( sock );
 
         /* Explicitly wake the socket up if the mask matches pending_events.
@@ -4026,15 +4037,18 @@ DECL_HANDLER(recv_socket)
     if (status == STATUS_PENDING && !req->force_async && sock->nonblocking)
         status = STATUS_DEVICE_NOT_READY;
 
-    /* For a plain nonblocking receive (no event select, no queued reads, no
-     * pending AcceptEx) that finds no data, all we do is reset the request's
-     * event and clear AFD_POLL_READ, which only matters with an event select.
-     * Let the client fail such receives with STATUS_DEVICE_NOT_READY on its own
-     * while the socket has nothing to read; a receive that finds data, and any
-     * receive after a mode change, still comes here. */
+    /* For a plain nonblocking receive (no event or message select, no queued
+     * reads, no pending AcceptEx) that finds no data, all we do is reset the
+     * request's event and clear AFD_POLL_READ, which only matters once an event
+     * select is installed (and that re-checks readability, see
+     * IOCTL_AFD_EVENT_SELECT). Let the client fail such receives with
+     * STATUS_DEVICE_NOT_READY on its own while the socket has nothing to read.
+     * Only for a socket whose single handle is the caller's, so that every
+     * mode change goes through this process's ntdll, which drops the grant;
+     * the client also comes back here every 256 answers. */
     poll_fastpath = status == STATUS_ALERTED && !req->force_async && !req->oob && sock->nonblocking &&
                     !sock->mask && !sock->event && !sock->window && !sock->accept_recv_req &&
-                    !async_queued( &sock->read_q );
+                    !async_queued( &sock->read_q ) && sock->obj.handle_count == 1;
 
     sock->pending_events &= ~(req->oob ? AFD_POLL_OOB : AFD_POLL_READ);
     sock->reported_events &= ~(req->oob ? AFD_POLL_OOB : AFD_POLL_READ);
