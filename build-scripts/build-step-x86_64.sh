@@ -292,6 +292,14 @@ do
       "common/dlls_ntdll_unix_system_c_power_cache.patch"
       "common/dlls_win32u_vulkan_c_other_process_readback.patch"
       "common/dlls_ntdll_unix_env_c_nls_fallback.patch"
+
+      # throttle Sleep(0) / SwitchToThread storms (DOOM 2016 idle worker, Cult of the Lamb dispatch thread);
+      # WINE_SLEEP0_THROTTLE=0 disables it
+      "common/dlls_ntdll_unix_sync_c_sleep0_yield_throttle.patch"
+
+      # fail would-block receives on nonblocking sockets without a server round trip (DOOM 2016 DTLS poll thread);
+      # WINE_SOCKET_POLL_FASTPATH=0 disables it
+      "common/dlls_ntdll_unix_socket_c_recv_fastpath.patch"
     )
 
     for patch in "${PATCHES[@]}"; do

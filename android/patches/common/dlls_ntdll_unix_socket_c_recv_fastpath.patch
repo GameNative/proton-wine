@@ -1,0 +1,313 @@
+ntdll: Skip the server on would-block receives from nonblocking sockets.
+
+DOOM 2016's DTLS thread polls a nonblocking UDP socket with recvfrom() in a
+loop; every empty poll cost two server requests (recv_socket and
+set_async_direct_result), 95 % of all requests and a quarter of a core in
+wineserver. The server now grants a poll_fastpath to a plain nonblocking
+receive on a socket with a single handle, no event or message select, no
+queued reads and no pending AcceptEx; later receives on that handle that
+poll() finds nothing for fail with STATUS_DEVICE_NOT_READY in ntdll. Every
+256th answer goes back to the server, and the grant is dropped on close,
+duplicate and every socket ioctl the server handles. IOCTL_AFD_EVENT_SELECT
+now drops a reported READ event whose data is already gone.
+
+Switch: WINE_SOCKET_POLL_FASTPATH=0 disables it.
+
+PR: https://github.com/GameNative/proton-wine/pull/119
+
+diff --git a/dlls/ntdll/unix/file.c b/dlls/ntdll/unix/file.c
+index 964752c..0a81d2e 100644
+--- a/dlls/ntdll/unix/file.c
++++ b/dlls/ntdll/unix/file.c
+@@ -7150,8 +7150,11 @@ NTSTATUS WINAPI NtDeviceIoControlFile( HANDLE handle, HANDLE event, PIO_APC_ROUT
+     }
+ 
+     if (status == STATUS_NOT_SUPPORTED || status == STATUS_BAD_DEVICE_TYPE)
+-        return server_ioctl_file( handle, event, apc, apc_context, io, code,
+-                                  in_buffer, in_size, out_buffer, out_size );
++    {
++        status = server_ioctl_file( handle, event, apc, apc_context, io, code,
++                                    in_buffer, in_size, out_buffer, out_size );
++        if (device == FILE_DEVICE_BEEP || device == FILE_DEVICE_NETWORK) sock_server_ioctl_done( code );
++    }
+     return status;
+ }
+ 
+diff --git a/dlls/ntdll/unix/server.c b/dlls/ntdll/unix/server.c
+index ff51533..7d06767 100644
+--- a/dlls/ntdll/unix/server.c
++++ b/dlls/ntdll/unix/server.c
+@@ -1939,6 +1939,9 @@ NTSTATUS WINAPI NtDuplicateObject( HANDLE source_process, HANDLE source, HANDLE
+     }
+     SERVER_END_REQ;
+ 
++    /* a duplicated socket loses the receive fast path on its next receive */
++    sock_recv_fastpath_forget( source );
++
+     server_leave_uninterrupted_section( &fd_cache_mutex, &sigset );
+ 
+     if (fd != -1) close( fd );
+@@ -2003,6 +2006,7 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
+         ret = wine_server_call( req );
+     }
+     SERVER_END_REQ;
++    sock_recv_fastpath_forget( handle );
+ 
+     server_leave_uninterrupted_section( &fd_cache_mutex, &sigset );
+ 
+diff --git a/dlls/ntdll/unix/socket.c b/dlls/ntdll/unix/socket.c
+index 96e8152..dba1167 100644
+--- a/dlls/ntdll/unix/socket.c
++++ b/dlls/ntdll/unix/socket.c
+@@ -28,6 +28,7 @@
+ #include <sys/types.h>
+ #include <sys/socket.h>
+ #include <sys/ioctl.h>
++#include <poll.h>
+ #include <unistd.h>
+ #ifdef HAVE_IFADDRS_H
+ # include <ifaddrs.h>
+@@ -897,6 +898,113 @@ static BOOL async_recv_proc( void *user, ULONG_PTR *info, unsigned int *status )
+     return TRUE;
+ }
+ 
++/* Would-block fast path for nonblocking receives.
++ *
++ * A game polling a nonblocking socket with recv() in a loop costs two server
++ * requests per call (recv_socket and set_async_direct_result) even when there
++ * is nothing to read. When the server grants poll_fastpath for a receive (see
++ * recv_socket in server/sock.c), later receives on that handle that poll()
++ * finds nothing for fail with STATUS_DEVICE_NOT_READY without a server request.
++ *
++ * Invariants:
++ * - The server grants it only for a nonblocking socket with no event or message
++ *   select, no queued reads, no pending AcceptEx, and exactly one handle, owned
++ *   by this process. Every mode change (FIONBIO, event or message select,
++ *   shutdown) is then a request made through this ntdll.
++ * - An entry is dropped when its handle is closed or duplicated and after every
++ *   socket ioctl that goes to the server, before that call returns; the next
++ *   receive asks the server again, which refuses a duplicated socket. Each slot has a
++ *   generation count so that a receive racing with such a change cannot re-arm
++ *   a stale entry.
++ * - Only overlapped-less, APC-less, non-OOB receives use it, and only when
++ *   poll() reports nothing at all; data, errors and hangups take the normal
++ *   path, as does every RECV_FASTPATH_MAX_POLLS-th would-block receive, which
++ *   re-grants or revokes the entry. That bounds what this process cannot see
++ *   (a handle duplicated into it by another process, or inherited by a child)
++ *   to RECV_FASTPATH_MAX_POLLS answers.
++ * - The answer is what the server path gives for an empty socket: no IOSB, no
++ *   completion, no APC. What it skips (resetting the request's event and
++ *   clearing AFD_POLL_READ) is not observable: the event only matters after
++ *   STATUS_PENDING, and an event select re-checks readability when installed.
++ *
++ * WINE_SOCKET_POLL_FASTPATH=0 disables it.
++ */
++#define RECV_FASTPATH_SLOTS     64
++#define RECV_FASTPATH_MAX_POLLS 256
++
++static struct
++{
++    HANDLE volatile handle;
++    LONG volatile   gen;
++    LONG volatile   polls;  /* would-block answers since the last server receive */
++} recv_fastpath[RECV_FASTPATH_SLOTS];
++
++static int recv_fastpath_enabled = -1;
++
++static BOOL use_recv_fastpath(void)
++{
++    if (recv_fastpath_enabled == -1)
++    {
++        const char *env = getenv( "WINE_SOCKET_POLL_FASTPATH" );
++        recv_fastpath_enabled = !env || strcmp( env, "0" );
++    }
++    return recv_fastpath_enabled;
++}
++
++static inline unsigned int recv_fastpath_slot( HANDLE handle )
++{
++    return (HandleToULong( handle ) >> 2) % RECV_FASTPATH_SLOTS;
++}
++
++void sock_recv_fastpath_forget( HANDLE handle )
++{
++    unsigned int slot = recv_fastpath_slot( handle );
++
++    InterlockedIncrement( &recv_fastpath[slot].gen );
++    InterlockedCompareExchangePointer( (void **)&recv_fastpath[slot].handle, NULL, handle );
++}
++
++/* called after a socket ioctl was handled by the server, which may have changed
++ * the blocking mode, the event select or the shutdown state */
++void sock_server_ioctl_done( UINT code )
++{
++    unsigned int slot;
++
++    if (code == IOCTL_AFD_POLL) return;
++
++    for (slot = 0; slot < RECV_FASTPATH_SLOTS; slot++)
++    {
++        InterlockedIncrement( &recv_fastpath[slot].gen );
++        InterlockedExchangePointer( (void **)&recv_fastpath[slot].handle, NULL );
++    }
++}
++
++static void recv_fastpath_update( HANDLE handle, unsigned int slot, LONG gen, BOOL enable )
++{
++    if (enable)
++    {
++        recv_fastpath[slot].polls = 0;
++        if (InterlockedExchangePointer( (void **)&recv_fastpath[slot].handle, handle ) != handle)
++            TRACE( "handle %p: would-block receives skip the server\n", handle );
++        /* the socket may have changed (or been closed) since we read gen */
++        if (recv_fastpath[slot].gen == gen) return;
++    }
++    InterlockedCompareExchangePointer( (void **)&recv_fastpath[slot].handle, NULL, handle );
++}
++
++/* returns FALSE only if poll() reports nothing at all for the socket */
++static BOOL sock_may_have_input( int fd )
++{
++    struct pollfd pfd;
++    int ret;
++
++    pfd.fd = fd;
++    pfd.events = POLLIN | POLLPRI;
++    pfd.revents = 0;
++    while ((ret = poll( &pfd, 1, 0 )) < 0 && errno == EINTR);
++    return ret != 0;
++}
++
+ static BOOL is_icmp_over_dgram( int fd )
+ {
+ #ifdef linux
+@@ -918,9 +1026,10 @@ static NTSTATUS sock_recv( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, voi
+                            int fd, struct async_recv_ioctl *async, int force_async )
+ {
+     HANDLE wait_handle;
+-    BOOL nonblocking;
+-    unsigned int i, status;
++    BOOL nonblocking, poll_fastpath, try_fastpath;
++    unsigned int i, status, slot = 0;
+     ULONG options;
++    LONG gen = 0;
+ 
+     for (i = 0; i < async->count; ++i)
+     {
+@@ -931,6 +1040,20 @@ static NTSTATUS sock_recv( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, voi
+         }
+     }
+ 
++    try_fastpath = !force_async && !apc && !(async->unix_flags & MSG_OOB) && use_recv_fastpath();
++    if (try_fastpath)
++    {
++        slot = recv_fastpath_slot( handle );
++        gen = recv_fastpath[slot].gen;
++        if (recv_fastpath[slot].handle == handle && !sock_may_have_input( fd ) &&
++            InterlockedIncrement( &recv_fastpath[slot].polls ) <= RECV_FASTPATH_MAX_POLLS)
++        {
++            /* same result as the server path: no IOSB, no completion */
++            release_fileio( &async->io );
++            return STATUS_DEVICE_NOT_READY;
++        }
++    }
++
+     SERVER_START_REQ( recv_socket )
+     {
+         req->force_async = force_async;
+@@ -940,9 +1063,12 @@ static NTSTATUS sock_recv( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, voi
+         wait_handle = wine_server_ptr_handle( reply->wait );
+         options     = reply->options;
+         nonblocking = reply->nonblocking;
++        poll_fastpath = reply->poll_fastpath;
+     }
+     SERVER_END_REQ;
+ 
++    if (try_fastpath) recv_fastpath_update( handle, slot, gen, status == STATUS_ALERTED && poll_fastpath );
++
+     /* the server currently will never succeed immediately */
+     assert(status == STATUS_ALERTED || status == STATUS_PENDING || NT_ERROR(status));
+ 
+diff --git a/dlls/ntdll/unix/unix_private.h b/dlls/ntdll/unix/unix_private.h
+index 30ede20..d40fc5f 100644
+--- a/dlls/ntdll/unix/unix_private.h
++++ b/dlls/ntdll/unix/unix_private.h
+@@ -378,6 +378,8 @@ extern NTSTATUS sock_read( HANDLE handle, int fd, HANDLE event, PIO_APC_ROUTINE
+                            IO_STATUS_BLOCK *io, void *buffer, ULONG length );
+ extern NTSTATUS sock_write( HANDLE handle, int fd, HANDLE event, PIO_APC_ROUTINE apc, void *apc_user,
+                             IO_STATUS_BLOCK *io, const void *buffer, ULONG length );
++extern void sock_recv_fastpath_forget( HANDLE handle );
++extern void sock_server_ioctl_done( UINT code );
+ extern NTSTATUS tape_DeviceIoControl( HANDLE device, HANDLE event, PIO_APC_ROUTINE apc, void *apc_user,
+                                       IO_STATUS_BLOCK *io, UINT code, void *in_buffer,
+                                       UINT in_size, void *out_buffer, UINT out_size );
+diff --git a/server/protocol.def b/server/protocol.def
+index ac38076..f522dfc 100644
+--- a/server/protocol.def
++++ b/server/protocol.def
+@@ -1732,6 +1732,7 @@ enum server_fd_type
+     obj_handle_t wait;          /* handle to wait on for blocking recv */
+     unsigned int options;       /* device open options */
+     int          nonblocking;   /* is socket non-blocking? */
++    int          poll_fastpath; /* may the client fail would-block receives without asking us? */
+ @END
+ 
+ 
+diff --git a/server/sock.c b/server/sock.c
+index 0337d8d..e54f586 100644
+--- a/server/sock.c
++++ b/server/sock.c
+@@ -2975,6 +2975,17 @@ static void sock_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
+         sock->wparam = 0;
+         sock->nonblocking = 1;
+ 
++        /* FD_READ is level-triggered at selection time: drop a READ event whose
++         * data is already gone. Receives that the client answers by itself
++         * (poll_fastpath in recv_socket) don't clear it, and neither does a
++         * receive that raced with the poll that posted it. Message select
++         * already starts from a clean state. */
++        if ((sock->reported_events & AFD_POLL_READ) && !check_fd_events( sock->fd, POLLIN ))
++        {
++            sock->pending_events &= ~AFD_POLL_READ;
++            sock->reported_events &= ~AFD_POLL_READ;
++        }
++
+         sock_reselect( sock );
+ 
+         /* Explicitly wake the socket up if the mask matches pending_events.
+@@ -3988,6 +3999,7 @@ DECL_HANDLER(recv_socket)
+     timeout_t timeout = 0;
+     struct async *async;
+     struct fd *fd;
++    int poll_fastpath;
+ 
+     if (!sock) return;
+     fd = sock->fd;
+@@ -4025,6 +4037,19 @@ DECL_HANDLER(recv_socket)
+     if (status == STATUS_PENDING && !req->force_async && sock->nonblocking)
+         status = STATUS_DEVICE_NOT_READY;
+ 
++    /* For a plain nonblocking receive (no event or message select, no queued
++     * reads, no pending AcceptEx) that finds no data, all we do is reset the
++     * request's event and clear AFD_POLL_READ, which only matters once an event
++     * select is installed (and that re-checks readability, see
++     * IOCTL_AFD_EVENT_SELECT). Let the client fail such receives with
++     * STATUS_DEVICE_NOT_READY on its own while the socket has nothing to read.
++     * Only for a socket whose single handle is the caller's, so that every
++     * mode change goes through this process's ntdll, which drops the grant;
++     * the client also comes back here every 256 answers. */
++    poll_fastpath = status == STATUS_ALERTED && !req->force_async && !req->oob && sock->nonblocking &&
++                    !sock->mask && !sock->event && !sock->window && !sock->accept_recv_req &&
++                    !async_queued( &sock->read_q ) && sock->obj.handle_count == 1;
++
+     sock->pending_events &= ~(req->oob ? AFD_POLL_OOB : AFD_POLL_READ);
+     sock->reported_events &= ~(req->oob ? AFD_POLL_OOB : AFD_POLL_READ);
+ 
+@@ -4044,6 +4069,7 @@ DECL_HANDLER(recv_socket)
+         reply->wait = async_handoff( async, NULL, 0 );
+         reply->options = get_fd_options( fd );
+         reply->nonblocking = sock->nonblocking;
++        reply->poll_fastpath = poll_fastpath;
+         release_object( async );
+     }
+     release_object( sock );
