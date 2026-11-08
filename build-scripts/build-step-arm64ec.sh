@@ -300,6 +300,12 @@ do
       # WINE_SOCKET_POLL_FASTPATH=0 disables it
       "common/dlls_ntdll_unix_socket_c_recv_fastpath.patch"
 
+      # wineserver places hot threads by core capacity (frame thread on the biggest cores, spinners off them,
+      # server-heavy threads off the little cores); WINE_THREAD_PLACEMENT=0 disables it, =debug logs role changes
+      "common/server_thread_h_thread_placement.patch"
+      "common/server_thread_c_thread_placement.patch"
+      "common/server_request_c_thread_placement.patch"
+
       # GetNativeSystemInfo() reports AMD64 to x64 processes (upstream c5a96a0b6c); MonoMod/MelonLoader/SMAPI
       # otherwise see ARM64 and write ARM64 detours into x64 CoreCLR code
       "arm64ec/dlls_kernelbase_memory_c_native_system_info.patch"

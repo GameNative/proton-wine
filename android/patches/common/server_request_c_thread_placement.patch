@@ -1,0 +1,12 @@
+diff --git a/server/request.c b/server/request.c
+index 7e22a05..3dff32b 100644
+--- a/server/request.c
++++ b/server/request.c
+@@ -296,6 +296,7 @@ static void call_req_handler( struct thread *thread )
+ 
+     current = thread;
+     current->reply_size = 0;
++    current->placement_requests++;
+     clear_error();
+     memset( &reply, 0, sizeof(reply) );
+ 

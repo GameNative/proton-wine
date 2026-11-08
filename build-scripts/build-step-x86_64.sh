@@ -298,6 +298,12 @@ do
       # fail would-block receives on nonblocking sockets without a server round trip (DOOM 2016 DTLS poll thread);
       # WINE_SOCKET_POLL_FASTPATH=0 disables it
       "common/dlls_ntdll_unix_socket_c_recv_fastpath.patch"
+
+      # wineserver places hot threads by core capacity (frame thread on the biggest cores, spinners off them,
+      # server-heavy threads off the little cores); WINE_THREAD_PLACEMENT=0 disables it, =debug logs role changes
+      "common/server_thread_h_thread_placement.patch"
+      "common/server_thread_c_thread_placement.patch"
+      "common/server_request_c_thread_placement.patch"
     )
 
     for patch in "${PATCHES[@]}"; do

@@ -1,0 +1,550 @@
+diff --git a/server/thread.c b/server/thread.c
+index 396e040..5e81d45 100644
+--- a/server/thread.c
++++ b/server/thread.c
+@@ -241,6 +241,11 @@ static const struct fd_ops thread_fd_ops =
+ 
+ static struct list thread_list = LIST_INIT(thread_list);
+ 
++#if defined(__linux__) && defined(RLIMIT_NICE) && defined(HAVE_SCHED_SETAFFINITY)
++#define HAVE_THREAD_PLACEMENT
++static void init_thread_placement(void);
++#endif
++
+ #if defined(__linux__) && defined(RLIMIT_NICE)
+ static int nice_limit;
+ 
+@@ -261,6 +266,9 @@ void init_threading(void)
+         if (nice_limit >= 0 && debug_level) fprintf(stderr, "wine: RLIMIT_NICE is <= 20, unable to use setpriority safely\n");
+     }
+     if (nice_limit < 0 && debug_level) fprintf(stderr, "wine: Using setpriority to control niceness in the [%d,%d] range\n", nice_limit, -nice_limit );
++#ifdef HAVE_THREAD_PLACEMENT
++    init_thread_placement();
++#endif
+ }
+ 
+ static void apply_thread_priority( struct thread *thread )
+@@ -274,6 +282,7 @@ static void apply_thread_priority( struct thread *thread )
+     if (effective_priority >= LOW_REALTIME_PRIORITY) effective_priority = LOW_REALTIME_PRIORITY - 1;
+     /* map an NT application band [1,15] priority to [-nice_limit, nice_limit] */
+     niceness = (min + (effective_priority - 1) * range / 14);
++    if (thread->placement_nice && niceness > thread->placement_nice) niceness = thread->placement_nice;
+     setpriority( PRIO_PROCESS, thread->unix_tid, niceness );
+ }
+ 
+@@ -401,6 +410,464 @@ static void apply_thread_priority( struct thread *thread )
+ 
+ #endif
+ 
++#ifdef HAVE_THREAD_PLACEMENT
++
++/* Place hot threads on big.LITTLE hosts: every placement window the server samples each
++ * thread's cpu time and wakeup rate from /proc and moves the frame thread of a process
++ * to the biggest cores, busy-spinning threads off them and server-heavy threads off the
++ * little cores. WINE_THREAD_PLACEMENT=0 disables it, WINE_THREAD_PLACEMENT=debug logs
++ * every role change. */
++
++enum placement_role
++{
++    PLACEMENT_NONE,
++    PLACEMENT_FRAME,
++    PLACEMENT_SPINNER,
++    PLACEMENT_IPC
++};
++
++#define PLACEMENT_WINDOW           (2 * TICKS_PER_SEC)
++#define PLACEMENT_SAMPLE_CPU       5     /* % of a core before wakeups are read */
++#define PLACEMENT_FRAME_CPU        15
++#define PLACEMENT_FRAME_MIN_WAKE   20    /* per second */
++#define PLACEMENT_FRAME_MAX_WAKE   5000
++#define PLACEMENT_SPIN_CPU         90
++#define PLACEMENT_SPIN_MAX_WAKE    50
++#define PLACEMENT_IPC_REQUESTS     2000  /* per window */
++#define PLACEMENT_IPC_CALM         500
++#define PLACEMENT_FRAME_NICE       -10
++
++static int placement_enabled;  /* 0 off, 1 on, 2 on with role change logging */
++static int placement_armed;
++static long placement_clk_tck;
++static timeout_t placement_last_time;
++static unsigned long long placement_big;     /* cpus with the highest capacity */
++static unsigned long long placement_small;   /* cpus below half of the highest capacity */
++static unsigned long long placement_mid;     /* every cpu that is not small */
++static unsigned long long placement_server_saved;
++
++static int placement_read_file( const char *path, char *buf, int size )
++{
++    int fd, ret, len = 0;
++
++    if ((fd = open( path, O_RDONLY | O_CLOEXEC )) == -1) return -1;
++    while (len < size - 1 && (ret = read( fd, buf + len, size - 1 - len )) > 0) len += ret;
++    close( fd );
++    if (len <= 0) return -1;
++    buf[len] = 0;
++    return len;
++}
++
++static unsigned long long placement_mask_from_set( const cpu_set_t *set )
++{
++    unsigned long long mask = 0;
++    int i;
++
++    for (i = 0; i < 64; i++) if (CPU_ISSET( i, set )) mask |= 1ull << i;
++    return mask;
++}
++
++static unsigned long long placement_get_cpus( int tid )
++{
++    cpu_set_t set;
++
++    CPU_ZERO( &set );
++    if (sched_getaffinity( tid, sizeof(set), &set )) return 0;
++    return placement_mask_from_set( &set );
++}
++
++/* returns -1 only when the kernel refuses affinity changes altogether */
++static int placement_set_cpus( int tid, unsigned long long mask )
++{
++    cpu_set_t set;
++    int i;
++
++    CPU_ZERO( &set );
++    for (i = 0; i < 64; i++) if (mask & (1ull << i)) CPU_SET( i, &set );
++    if (!sched_setaffinity( tid, sizeof(set), &set )) return 0;
++    /* ESRCH: the thread is gone; EINVAL: its cpuset currently allows none of these cpus */
++    return errno == EPERM ? -1 : 0;
++}
++
++static const char *placement_cpu_list( unsigned long long mask )
++{
++    static char buf[256];
++    int i, start, len = 0;
++
++    if (!mask) return "unchanged";
++    buf[0] = 0;
++    for (i = 0; i < 64; i++)
++    {
++        if (!(mask & (1ull << i))) continue;
++        start = i;
++        while (i < 63 && (mask & (1ull << (i + 1)))) i++;
++        if (start == i) len += snprintf( buf + len, sizeof(buf) - len, "%s%d", len ? "," : "", start );
++        else len += snprintf( buf + len, sizeof(buf) - len, "%s%d-%d", len ? "," : "", start, i );
++        if (len >= (int)sizeof(buf) - 8) break;
++    }
++    return buf;
++}
++
++static const char *placement_image_name( const struct process *process )
++{
++    static char name[64];
++    data_size_t i, len, start = 0;
++
++    name[0] = 0;
++    if (!process->image) return name;
++    len = process->imagelen / sizeof(WCHAR);
++    for (i = 0; i < len; i++) if (process->image[i] == '\\' || process->image[i] == '/') start = i + 1;
++    if (len - start >= sizeof(name)) len = start + sizeof(name) - 1;
++    for (i = start; i < len; i++)
++    {
++        WCHAR c = process->image[i];
++        if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
++        name[i - start] = c < 0x80 ? c : '?';
++    }
++    name[len - start] = 0;
++    return name;
++}
++
++static int placement_process_excluded( const struct process *process )
++{
++    static const char * const names[] =
++    {
++        "services.exe", "winedevice.exe", "plugplay.exe", "explorer.exe", "rpcss.exe",
++        "conhost.exe", "start.exe", "svchost.exe"
++    };
++    const char *name;
++    unsigned int i;
++
++    if (process->is_system || !process->image || process->unix_pid == -1) return 1;
++    name = placement_image_name( process );
++    if (!strncmp( name, "steamhost", 9 )) return 1;
++    for (i = 0; i < ARRAY_SIZE(names); i++) if (!strcmp( name, names[i] )) return 1;
++    return 0;
++}
++
++static unsigned long long placement_role_cpus( const struct thread *thread )
++{
++    switch (thread->placement_role)
++    {
++    case PLACEMENT_FRAME:   return thread->placement_saved & placement_big;
++    case PLACEMENT_SPINNER: return thread->placement_saved & ~placement_big;
++    case PLACEMENT_IPC:     return thread->placement_saved & placement_mid;
++    }
++    return 0;
++}
++
++static void placement_log( const struct thread *thread )
++{
++    fprintf( stderr, "wine: placement: pid %u tid %u (%s) ", thread->unix_pid, thread->unix_tid,
++             placement_image_name( thread->process ) );
++    switch (thread->placement_role)
++    {
++    case PLACEMENT_FRAME:
++        fprintf( stderr, "frame -> cpus %s nice %d\n", placement_cpu_list( placement_role_cpus( thread ) ),
++                 thread->placement_nice );
++        break;
++    case PLACEMENT_SPINNER:
++        fprintf( stderr, "spinner -> cpus %s\n", placement_cpu_list( placement_role_cpus( thread ) ) );
++        break;
++    case PLACEMENT_IPC:
++        fprintf( stderr, "ipc -> cpus %s\n", placement_cpu_list( placement_role_cpus( thread ) ) );
++        break;
++    default:
++        fprintf( stderr, "release\n" );
++        break;
++    }
++}
++
++/* drop the role of a thread that is gone without touching its tid, which may be reused */
++static void placement_forget( struct thread *thread )
++{
++    thread->placement_role = PLACEMENT_NONE;
++    thread->placement_saved = 0;
++    thread->placement_nice = 0;
++    thread->placement_challenge = 0;
++    thread->placement_calm = 0;
++}
++
++static int placement_release( struct thread *thread )
++{
++    int ret = 0;
++
++    if (thread->placement_role == PLACEMENT_NONE) return 0;
++    if (thread->placement_nice)
++    {
++        thread->placement_nice = 0;
++        if (thread->unix_tid != -1) apply_thread_priority( thread );
++    }
++    if (thread->placement_saved && thread->unix_tid != -1)
++        ret = placement_set_cpus( thread->unix_tid, thread->placement_saved );
++    thread->placement_role = PLACEMENT_NONE;
++    thread->placement_saved = 0;
++    thread->placement_challenge = 0;
++    thread->placement_calm = 0;
++    if (placement_enabled > 1) placement_log( thread );
++    return ret;
++}
++
++static int placement_set_role( struct thread *thread, enum placement_role role )
++{
++    unsigned long long cpus;
++    int changed = role != thread->placement_role;
++
++    if (role == PLACEMENT_NONE) return placement_release( thread );
++    if (!thread->placement_saved && !(thread->placement_saved = placement_get_cpus( thread->unix_tid )))
++        return 0;  /* gone */
++
++    if (changed && thread->placement_nice)
++    {
++        thread->placement_nice = 0;
++        apply_thread_priority( thread );
++    }
++    thread->placement_role = role;
++    if (changed && role == PLACEMENT_FRAME && nice_limit < 0)
++    {
++        thread->placement_nice = max( PLACEMENT_FRAME_NICE, nice_limit );
++        apply_thread_priority( thread );
++    }
++    if ((cpus = placement_role_cpus( thread )) && placement_set_cpus( thread->unix_tid, cpus )) return -1;
++    if (changed && placement_enabled > 1) placement_log( thread );
++    return 0;
++}
++
++static void placement_disable(void)
++{
++    struct thread *thread;
++
++    placement_enabled = 0;
++    LIST_FOR_EACH_ENTRY( thread, &thread_list, struct thread, entry )
++    {
++        if (thread->state == RUNNING && thread->unix_tid != -1) placement_release( thread );
++        else placement_forget( thread );
++    }
++    if (placement_server_saved) placement_set_cpus( 0, placement_server_saved );
++    placement_server_saved = 0;
++    fprintf( stderr, "wine: placement: affinity changes refused (%s), thread placement disabled\n",
++             strerror( EPERM ) );
++}
++
++static int placement_read_ticks( const struct thread *thread, unsigned long long *ticks )
++{
++    char path[64], buf[512], *p;
++    unsigned long long utime = 0, stime = 0;
++    int field;
++
++    snprintf( path, sizeof(path), "/proc/%d/task/%d/stat", thread->unix_pid, thread->unix_tid );
++    if (placement_read_file( path, buf, sizeof(buf) ) < 0) return -1;
++    if (!(p = strrchr( buf, ')' ))) return -1;
++    p++;
++    for (field = 3; field <= 15; field++)
++    {
++        while (*p == ' ') p++;
++        if (!*p) return -1;
++        if (field == 14) utime = strtoull( p, NULL, 10 );
++        else if (field == 15) stime = strtoull( p, NULL, 10 );
++        while (*p && *p != ' ') p++;
++    }
++    *ticks = utime + stime;
++    return 0;
++}
++
++static int placement_read_vcsw( const struct thread *thread, unsigned long long *vcsw )
++{
++    static const char key[] = "\nvoluntary_ctxt_switches:";
++    char path[64], buf[4096], *p;
++
++    snprintf( path, sizeof(path), "/proc/%d/task/%d/status", thread->unix_pid, thread->unix_tid );
++    if (placement_read_file( path, buf, sizeof(buf) ) < 0) return -1;
++    if (!(p = strstr( buf, key ))) return -1;
++    *vcsw = strtoull( p + sizeof(key) - 1, NULL, 10 );
++    return 0;
++}
++
++static void placement_sample( struct thread *thread, timeout_t elapsed )
++{
++    unsigned long long ticks, vcsw;
++
++    thread->placement_valid = 0;
++    thread->placement_window_requests = thread->placement_requests;
++    thread->placement_requests = 0;
++    if (thread->state != RUNNING || thread->unix_tid == -1) return;
++    if (placement_read_ticks( thread, &ticks ))
++    {
++        thread->placement_sampled = 0;
++        return;
++    }
++    if (!thread->placement_sampled || ticks < thread->placement_ticks || elapsed <= 0)
++    {
++        thread->placement_ticks = ticks;
++        thread->placement_sampled = 1;
++        thread->placement_vcsw_valid = 0;
++        return;
++    }
++    thread->placement_cpu = (ticks - thread->placement_ticks) * 100 * TICKS_PER_SEC /
++                            ((unsigned long long)placement_clk_tck * elapsed);
++    thread->placement_ticks = ticks;
++    thread->placement_wakeups = ~0u;
++    if (thread->placement_cpu >= PLACEMENT_SAMPLE_CPU && !placement_read_vcsw( thread, &vcsw ))
++    {
++        if (thread->placement_vcsw_valid && vcsw >= thread->placement_vcsw)
++            thread->placement_wakeups = (vcsw - thread->placement_vcsw) * TICKS_PER_SEC / elapsed;
++        thread->placement_vcsw = vcsw;
++        thread->placement_vcsw_valid = 1;
++    }
++    else thread->placement_vcsw_valid = 0;
++    thread->placement_valid = 1;
++}
++
++static int placement_is_spinner( const struct thread *thread )
++{
++    return thread->placement_cpu >= PLACEMENT_SPIN_CPU && thread->placement_wakeups < PLACEMENT_SPIN_MAX_WAKE;
++}
++
++static int placement_can_frame( const struct thread *thread )
++{
++    return thread->placement_cpu >= PLACEMENT_FRAME_CPU &&
++           thread->placement_wakeups >= PLACEMENT_FRAME_MIN_WAKE &&
++           thread->placement_wakeups <= PLACEMENT_FRAME_MAX_WAKE;
++}
++
++static int placement_process_window( struct process *process, timeout_t elapsed )
++{
++    struct thread *thread, *frame = NULL, *best = NULL;
++    enum placement_role role;
++
++    LIST_FOR_EACH_ENTRY( thread, &process->thread_list, struct thread, proc_entry )
++    {
++        placement_sample( thread, elapsed );
++        if (!thread->placement_valid)
++        {
++            placement_forget( thread );
++            continue;
++        }
++        if (thread->placement_role == PLACEMENT_FRAME)
++        {
++            if (!placement_is_spinner( thread )) frame = thread;
++        }
++        else if (placement_can_frame( thread ) && (!best || thread->placement_cpu > best->placement_cpu))
++            best = thread;
++    }
++
++    if (best && frame)
++    {
++        if (best->placement_cpu * 10 <= frame->placement_cpu * 12) best->placement_challenge = 0;
++        else if (++best->placement_challenge >= 2) frame = best;
++    }
++    else if (best) frame = best;
++
++    LIST_FOR_EACH_ENTRY( thread, &process->thread_list, struct thread, proc_entry )
++    {
++        if (!thread->placement_valid) continue;
++        if (thread != best || thread == frame) thread->placement_challenge = 0;
++        if (thread == frame) role = PLACEMENT_FRAME;
++        else if (placement_is_spinner( thread )) role = PLACEMENT_SPINNER;
++        else if (placement_small && thread->placement_window_requests > PLACEMENT_IPC_REQUESTS)
++        {
++            role = PLACEMENT_IPC;
++            thread->placement_calm = 0;
++        }
++        else if (placement_small && thread->placement_role == PLACEMENT_IPC)
++        {
++            role = PLACEMENT_IPC;
++            if (thread->placement_window_requests >= PLACEMENT_IPC_CALM) thread->placement_calm = 0;
++            else if (++thread->placement_calm >= 2) role = PLACEMENT_NONE;
++        }
++        else role = PLACEMENT_NONE;
++        if (placement_set_role( thread, role )) return -1;
++    }
++    return 0;
++}
++
++static void placement_window( void *private )
++{
++    struct thread *thread;
++    timeout_t elapsed = monotonic_time - placement_last_time;
++
++    placement_armed = 0;
++    if (!placement_enabled) return;
++    placement_last_time = monotonic_time;
++
++    LIST_FOR_EACH_ENTRY( thread, &thread_list, struct thread, entry )
++    {
++        if (get_process_first_thread( thread->process ) != thread) continue;
++        if (placement_process_excluded( thread->process )) continue;
++        if (placement_process_window( thread->process, elapsed ))
++        {
++            placement_disable();
++            return;
++        }
++    }
++
++    if (list_empty( &thread_list )) return;
++    if (add_timeout_user( -PLACEMENT_WINDOW, placement_window, NULL )) placement_armed = 1;
++}
++
++static void placement_arm(void)
++{
++    if (!placement_enabled || placement_armed) return;
++    placement_last_time = monotonic_time;
++    if (add_timeout_user( -PLACEMENT_WINDOW, placement_window, NULL )) placement_armed = 1;
++}
++
++/* a win32 affinity change replaces the set the placement works within */
++static void placement_affinity_changed( struct thread *thread, const cpu_set_t *set )
++{
++    unsigned long long cpus;
++
++    if (!placement_enabled || thread->placement_role == PLACEMENT_NONE) return;
++    thread->placement_saved = placement_mask_from_set( set );
++    if ((cpus = placement_role_cpus( thread ))) placement_set_cpus( thread->unix_tid, cpus );
++}
++
++static void init_thread_placement(void)
++{
++    const char *env = getenv( "WINE_THREAD_PLACEMENT" );
++    unsigned int capacity[64], max_capacity = 0, min_capacity = ~0u;
++    unsigned long long all, cpus;
++    long count = sysconf( _SC_NPROCESSORS_CONF );
++    char path[64], buf[32];
++    int i;
++
++    if (env && !strcmp( env, "0" )) return;
++    if (count <= 1 || count > 64) return;
++    for (i = 0; i < count; i++)
++    {
++        snprintf( path, sizeof(path), "/sys/devices/system/cpu/cpu%d/cpu_capacity", i );
++        if (placement_read_file( path, buf, sizeof(buf) ) < 0) return;
++        if (!(capacity[i] = strtoul( buf, NULL, 10 ))) return;
++        if (capacity[i] > max_capacity) max_capacity = capacity[i];
++        if (capacity[i] < min_capacity) min_capacity = capacity[i];
++    }
++    if (max_capacity == min_capacity) return;  /* homogeneous */
++    if ((placement_clk_tck = sysconf( _SC_CLK_TCK )) <= 0) return;
++
++    for (i = 0; i < count; i++)
++    {
++        if (capacity[i] == max_capacity) placement_big |= 1ull << i;
++        if (capacity[i] * 2 < max_capacity) placement_small |= 1ull << i;
++    }
++    all = count == 64 ? ~0ull : (1ull << count) - 1;
++    placement_mid = all & ~placement_small;
++    placement_enabled = env && !strcmp( env, "debug" ) ? 2 : 1;
++
++    if (placement_small && (cpus = placement_get_cpus( 0 )) && (cpus & placement_mid) &&
++        (cpus & placement_mid) != cpus && !placement_set_cpus( 0, cpus & placement_mid ))
++        placement_server_saved = cpus;
++
++    if (placement_enabled > 1 || debug_level)
++    {
++        fprintf( stderr, "wine: placement: big cpus %s", placement_cpu_list( placement_big ) );
++        fprintf( stderr, ", small cpus %s", placement_small ? placement_cpu_list( placement_small ) : "none" );
++        fprintf( stderr, ", wineserver -> cpus %s\n",
++                 placement_cpu_list( placement_server_saved ? placement_server_saved & placement_mid : 0 ) );
++    }
++}
++
++#endif  /* HAVE_THREAD_PLACEMENT */
++
+ /* initialize the structure for a newly allocated thread */
+ static inline void init_thread_structure( struct thread *thread )
+ {
+@@ -440,6 +907,20 @@ static inline void init_thread_structure( struct thread *thread )
+     thread->creation_time = current_time;
+     thread->exit_time     = 0;
+     thread->completion_wait = NULL;
++    thread->placement_requests = 0;
++    thread->placement_window_requests = 0;
++    thread->placement_cpu = 0;
++    thread->placement_wakeups = ~0u;
++    thread->placement_ticks = 0;
++    thread->placement_vcsw = 0;
++    thread->placement_saved = 0;
++    thread->placement_nice = 0;
++    thread->placement_role = 0;
++    thread->placement_sampled = 0;
++    thread->placement_vcsw_valid = 0;
++    thread->placement_valid = 0;
++    thread->placement_challenge = 0;
++    thread->placement_calm = 0;
+ 
+     list_init( &thread->mutex_list );
+     list_init( &thread->d3dkmt_mutexes );
+@@ -823,6 +1304,9 @@ int set_thread_affinity( struct thread *thread, affinity_t affinity )
+                 }
+             }
+         ret = sched_setaffinity( thread->unix_tid, sizeof(set), &set );
++#ifdef HAVE_THREAD_PLACEMENT
++        if (!ret) placement_affinity_changed( thread, &set );
++#endif
+     }
+ #endif
+     if (!ret) thread->affinity = affinity;
+@@ -1828,6 +2312,9 @@ DECL_HANDLER(init_first_thread)
+     set_thread_base_priority( current, current->base_priority );
+ 
+     debug_level = max( debug_level, req->debug_level );
++#ifdef HAVE_THREAD_PLACEMENT
++    placement_arm();
++#endif
+ 
+     reply->pid          = get_process_id( process );
+     reply->tid          = get_thread_id( current );
+@@ -1877,6 +2364,9 @@ DECL_HANDLER(init_thread)
+     generate_debug_event( current, DbgCreateThreadStateChange, &req->entry );
+     set_thread_base_priority( current, current->base_priority );
+     set_thread_affinity( current, current->affinity );
++#ifdef HAVE_THREAD_PLACEMENT
++    placement_arm();
++#endif
+ 
+     reply->suspend = (is_thread_suspended( current ) || current->context != NULL);
+ }
