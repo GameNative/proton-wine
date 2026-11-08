@@ -382,7 +382,7 @@ EOF
     rm -rf $OUTPUT_DIR/lib
     rm -rf $OUTPUT_DIR/share
     rm -rf $install_dir
-    make -j$(nproc)
+    make -j$(nproc) || exit 1
   fi
 
   if [ "$arg" == "--install" ]
@@ -392,7 +392,7 @@ EOF
     mkdir -p $OUTPUT_DIR/lib
     mkdir -p $OUTPUT_DIR/share
     mkdir -p $install_dir
-    make install -j$(nproc)
+    make install -j$(nproc) || exit 1
     cp -r $install_dir/bin/wine* $OUTPUT_DIR/bin
     cp -r $install_dir/bin/reg* $OUTPUT_DIR/bin
     cp -r $install_dir/bin/msi* $OUTPUT_DIR/bin
@@ -421,5 +421,6 @@ EOF
     ln -sf ../lib/wine/x86_64-unix/wine-preloader "$install_dir/bin/wine-preloader"
     echo "Wine loader symlinks:"
     ls -la "$OUTPUT_DIR/bin/wine" "$OUTPUT_DIR/bin/wine-preloader"
+    [ -f "$OUTPUT_DIR/bin/wineserver" ] && [ -f "$OUTPUT_DIR/lib/wine/x86_64-unix/ntdll.so" ] || { echo "ERROR: no wineserver or ntdll.so in $OUTPUT_DIR"; exit 1; }
   fi
 done
