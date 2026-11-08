@@ -13,6 +13,11 @@ now drops a reported READ event whose data is already gone.
 
 Switch: WINE_SOCKET_POLL_FASTPATH=0 disables it.
 
+The poll_fastpath reply field takes the old padding slot of recv_socket_reply,
+so the layout and SERVER_PROTOCOL_VERSION stay the same; the generated
+server_protocol.h, request_handlers.h and request_trace.h hunks are what
+tools/make_requests produces for it.
+
 PR: https://github.com/GameNative/proton-wine/pull/119
 
 diff --git a/dlls/ntdll/unix/file.c b/dlls/ntdll/unix/file.c
@@ -241,6 +246,19 @@ index 30ede20..d40fc5f 100644
  extern NTSTATUS tape_DeviceIoControl( HANDLE device, HANDLE event, PIO_APC_ROUTINE apc, void *apc_user,
                                        IO_STATUS_BLOCK *io, UINT code, void *in_buffer,
                                        UINT in_size, void *out_buffer, UINT out_size );
+diff --git a/include/wine/server_protocol.h b/include/wine/server_protocol.h
+index d908717..0bce873 100644
+--- a/include/wine/server_protocol.h
++++ b/include/wine/server_protocol.h
+@@ -2040,7 +2040,7 @@ struct recv_socket_reply
+     obj_handle_t wait;
+     unsigned int options;
+     int          nonblocking;
+-    char __pad_20[4];
++    int          poll_fastpath;
+ };
+ 
+ 
 diff --git a/server/protocol.def b/server/protocol.def
 index ac38076..f522dfc 100644
 --- a/server/protocol.def
@@ -253,6 +271,30 @@ index ac38076..f522dfc 100644
  @END
  
  
+diff --git a/server/request_handlers.h b/server/request_handlers.h
+index 42eb7da..f3778f8 100644
+--- a/server/request_handlers.h
++++ b/server/request_handlers.h
+@@ -1032,6 +1032,7 @@ C_ASSERT( sizeof(struct recv_socket_request) == 64 );
+ C_ASSERT( offsetof(struct recv_socket_reply, wait) == 8 );
+ C_ASSERT( offsetof(struct recv_socket_reply, options) == 12 );
+ C_ASSERT( offsetof(struct recv_socket_reply, nonblocking) == 16 );
++C_ASSERT( offsetof(struct recv_socket_reply, poll_fastpath) == 20 );
+ C_ASSERT( sizeof(struct recv_socket_reply) == 24 );
+ C_ASSERT( offsetof(struct send_socket_request, flags) == 12 );
+ C_ASSERT( offsetof(struct send_socket_request, async) == 16 );
+diff --git a/server/request_trace.h b/server/request_trace.h
+index 5e94ddf..41c4648 100644
+--- a/server/request_trace.h
++++ b/server/request_trace.h
+@@ -764,6 +764,7 @@ static void dump_recv_socket_reply( const struct recv_socket_reply *req )
+     fprintf( stderr, " wait=%04x", req->wait );
+     fprintf( stderr, ", options=%08x", req->options );
+     fprintf( stderr, ", nonblocking=%d", req->nonblocking );
++    fprintf( stderr, ", poll_fastpath=%d", req->poll_fastpath );
+ }
+ 
+ static void dump_send_socket_request( const struct send_socket_request *req )
 diff --git a/server/sock.c b/server/sock.c
 index 0337d8d..e54f586 100644
 --- a/server/sock.c
