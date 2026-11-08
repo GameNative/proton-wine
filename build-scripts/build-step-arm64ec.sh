@@ -329,6 +329,7 @@ do
       "common/dlls_win32u_vulkan_c_other_process_readback.patch"
       "arm64ec/dlls_ntdll_arm64_copyable_syscall_thunks.patch"
       "arm64ec/dlls_ntdll_unix_signal_arm64_c_zero_debug_registers.patch"
+      "common/dlls_ntdll_unix_env_c_nls_fallback.patch"
     )
 
     for patch in "${PATCHES[@]}"; do

@@ -291,6 +291,7 @@ do
       # cache the ProcessorInformation power query for 500 ms (Wine bug 60462)
       "common/dlls_ntdll_unix_system_c_power_cache.patch"
       "common/dlls_win32u_vulkan_c_other_process_readback.patch"
+      "common/dlls_ntdll_unix_env_c_nls_fallback.patch"
     )
 
     for patch in "${PATCHES[@]}"; do
