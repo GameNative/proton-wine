@@ -1,0 +1,25 @@
+diff --git a/server/thread.h b/server/thread.h
+index 77ea355..2a67432 100644
+--- a/server/thread.h
++++ b/server/thread.h
+@@ -99,6 +99,20 @@ struct thread
+     data_size_t            desc_len;      /* thread description length in bytes */
+     WCHAR                 *desc;          /* thread description string */
+     struct completion_wait *completion_wait; /* completion port wait object the thread is associated with */
++    unsigned int           placement_requests;  /* server requests since the last placement window */
++    unsigned int           placement_window_requests; /* server requests in the last window */
++    unsigned int           placement_cpu;       /* percent of a core used in the last window */
++    unsigned int           placement_wakeups;   /* voluntary switches per second in the last window, ~0u if unknown */
++    unsigned long long     placement_ticks;     /* utime + stime at the last sample */
++    unsigned long long     placement_vcsw;      /* voluntary context switches at the last sample */
++    unsigned long long     placement_saved;     /* host cpus allowed before placement, 0 if not placed */
++    int                    placement_nice;      /* niceness ceiling while the thread is the frame thread, 0 if none */
++    unsigned char          placement_role;      /* current placement role */
++    unsigned char          placement_sampled;   /* placement_ticks holds a sample */
++    unsigned char          placement_vcsw_valid; /* placement_vcsw holds a sample */
++    unsigned char          placement_valid;     /* the last window measured this thread */
++    unsigned char          placement_challenge; /* consecutive windows this thread out-ran the frame thread */
++    unsigned char          placement_calm;      /* consecutive quiet windows of an ipc thread */
+ };
+ 
+ extern struct thread *current;
