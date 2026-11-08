@@ -327,6 +327,7 @@ do
       # 2. Process and Virtual Memory Management
       "test-bylaws/dlls_ntdll_unix_process_c.patch"
       "common/dlls_win32u_vulkan_c_other_process_readback.patch"
+      "arm64ec/dlls_ntdll_arm64_copyable_syscall_thunks.patch"
     )
 
     for patch in "${PATCHES[@]}"; do
