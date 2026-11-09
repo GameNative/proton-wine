@@ -1,0 +1,22 @@
+Credit: gap found and described by arusiasotto in Droid-Deck/DroidDeck-Proton issue #2
+(WoW Forever ARM64: four ntdll gaps).
+
+diff --git a/dlls/ntdll/unix/signal_arm64.c b/dlls/ntdll/unix/signal_arm64.c
+index 7d1fc19..5ca5ee3 100644
+--- a/dlls/ntdll/unix/signal_arm64.c
++++ b/dlls/ntdll/unix/signal_arm64.c
+@@ -328,6 +328,14 @@ static void save_context( CONTEXT *context, const ucontext_t *sigcontext )
+     context->Cpsr = PSTATE_sig(sigcontext) & cpsr_user_mask; /* Current State Register */
+     for (i = 0; i <= 28; i++) context->X[i] = REGn_sig( i, sigcontext );
+     save_fpu( context, sigcontext );
++    /* the debug registers are not saved, but must not hold stack garbage: World of Warcraft's
++     * vectored handler reads them and takes stale bits for hardware breakpoints ("Game
++     * Initialization Failed: I"). Found and described by arusiasotto
++     * (Droid-Deck/DroidDeck-Proton issue #2, "WoW Forever ARM64: four ntdll gaps"). */
++    memset( context->Bcr, 0, sizeof(context->Bcr) );
++    memset( context->Bvr, 0, sizeof(context->Bvr) );
++    memset( context->Wcr, 0, sizeof(context->Wcr) );
++    memset( context->Wvr, 0, sizeof(context->Wvr) );
+ }
+ 
+ 

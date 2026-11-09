@@ -1,0 +1,414 @@
+diff --git a/dlls/win32u/vulkan.c b/dlls/win32u/vulkan.c
+index 911db79..f00cb50 100644
+--- a/dlls/win32u/vulkan.c
++++ b/dlls/win32u/vulkan.c
+@@ -201,6 +201,28 @@ struct swapchain
+     VkDescriptorSetLayout descriptor_set_layout;
+     VkPipelineLayout pipeline_layout;
+     VkPipeline pipeline;
++
++#ifdef __ANDROID__
++    /* other process window readback, see readback_init */
++    BOOL readback;
++    BOOL readback_swap_rb;
++    VkExtent2D readback_extent;
++    uint32_t readback_count;
++    VkImage *readback_images;           /* host swapchain images */
++    VkCommandBuffer *readback_cmds;     /* per image, recorded for readback_family */
++    VkCommandPool readback_pool;
++    uint32_t readback_family;
++    VkBuffer readback_buffer;
++    VkDeviceMemory readback_memory;
++    VkDeviceSize readback_size;
++    BOOL readback_coherent;
++    void *readback_ptr;
++    VkFence readback_fence;
++    VkSemaphore readback_sema;
++    HDC readback_hdc;
++    HBITMAP readback_bitmap;
++    void *readback_bits;
++#endif
+ };
+ 
+ static struct swapchain *swapchain_from_handle( VkSwapchainKHR handle )
+@@ -2521,6 +2543,259 @@ fail:
+     return res;
+ }
+ 
++#ifdef __ANDROID__
++/* Android X servers (GameNative) have no XComposite, so the contents of a window that
++ * another process renders into cannot be read back reliably through X (GPU images are
++ * tiled/compressed and presentation is asynchronous). Instead, copy each presented image
++ * into a host visible buffer with Vulkan, wait for it, and hand it to the display driver
++ * as a DIB to draw into the target window (client_surface.readback_hdc). */
++
++static BOOL readback_wanted( struct surface *surface )
++{
++    return surface->hwnd && surface->hwnd != NtUserGetDesktopWindow() &&
++           !is_current_process_window( surface->hwnd );
++}
++
++static void readback_destroy( struct vulkan_device *device, struct swapchain *swapchain )
++{
++    if (swapchain->readback_pool) device->p_vkDestroyCommandPool( device->host.device, swapchain->readback_pool, NULL );
++    if (swapchain->readback_buffer) device->p_vkDestroyBuffer( device->host.device, swapchain->readback_buffer, NULL );
++    if (swapchain->readback_ptr) device->p_vkUnmapMemory( device->host.device, swapchain->readback_memory );
++    if (swapchain->readback_memory) device->p_vkFreeMemory( device->host.device, swapchain->readback_memory, NULL );
++    if (swapchain->readback_fence) device->p_vkDestroyFence( device->host.device, swapchain->readback_fence, NULL );
++    if (swapchain->readback_sema) device->p_vkDestroySemaphore( device->host.device, swapchain->readback_sema, NULL );
++    if (swapchain->readback_hdc) NtGdiDeleteObjectApp( swapchain->readback_hdc );
++    if (swapchain->readback_bitmap) NtGdiDeleteObjectApp( swapchain->readback_bitmap );
++    free( swapchain->readback_images );
++    free( swapchain->readback_cmds );
++    swapchain->readback_pool = 0;
++    swapchain->readback_buffer = 0;
++    swapchain->readback_ptr = NULL;
++    swapchain->readback_memory = 0;
++    swapchain->readback_fence = 0;
++    swapchain->readback_sema = 0;
++    swapchain->readback_hdc = 0;
++    swapchain->readback_bitmap = 0;
++    swapchain->readback_images = NULL;
++    swapchain->readback_cmds = NULL;
++    swapchain->readback = FALSE;
++}
++
++static VkResult readback_init( struct vulkan_device *device, struct swapchain *swapchain, VkExtent2D extent )
++{
++    struct vulkan_physical_device *physical_device = device->physical_device;
++    struct vulkan_instance *instance = physical_device->instance;
++    VkBufferCreateInfo buffer_info = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
++    VkMemoryAllocateInfo alloc_info = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
++    VkFenceCreateInfo fence_info = {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
++    VkSemaphoreCreateInfo sema_info = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
++    VkPhysicalDeviceMemoryProperties mem_props;
++    VkMemoryRequirements mem_req;
++    BITMAPINFO bmi = {{0}};
++    int type = -1, i;
++    VkResult res;
++
++    swapchain->readback_extent = extent;
++    swapchain->readback_size = (VkDeviceSize)extent.width * extent.height * 4;
++
++    if ((res = device->p_vkGetSwapchainImagesKHR( device->host.device, swapchain->obj.host.swapchain,
++                                                  &swapchain->readback_count, NULL ))) goto fail;
++    if (!(swapchain->readback_images = calloc( swapchain->readback_count, sizeof(VkImage) )) ||
++        !(swapchain->readback_cmds = calloc( swapchain->readback_count, sizeof(VkCommandBuffer) )))
++    {
++        res = VK_ERROR_OUT_OF_HOST_MEMORY;
++        goto fail;
++    }
++    if ((res = device->p_vkGetSwapchainImagesKHR( device->host.device, swapchain->obj.host.swapchain,
++                                                  &swapchain->readback_count, swapchain->readback_images ))) goto fail;
++
++    buffer_info.size = swapchain->readback_size;
++    buffer_info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
++    buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
++    if ((res = device->p_vkCreateBuffer( device->host.device, &buffer_info, NULL, &swapchain->readback_buffer ))) goto fail;
++    device->p_vkGetBufferMemoryRequirements( device->host.device, swapchain->readback_buffer, &mem_req );
++
++    /* prefer cached memory for fast CPU reads, then any host visible + coherent memory */
++    instance->p_vkGetPhysicalDeviceMemoryProperties( physical_device->host.physical_device, &mem_props );
++    for (i = 0; i < mem_props.memoryTypeCount && type == -1; i++)
++    {
++        VkMemoryPropertyFlags flags = mem_props.memoryTypes[i].propertyFlags;
++        if ((mem_req.memoryTypeBits & (1u << i)) && (flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) &&
++            (flags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT)) type = i;
++    }
++    for (i = 0; i < mem_props.memoryTypeCount && type == -1; i++)
++    {
++        VkMemoryPropertyFlags flags = mem_props.memoryTypes[i].propertyFlags;
++        if ((mem_req.memoryTypeBits & (1u << i)) && (flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) &&
++            (flags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) type = i;
++    }
++    if (type == -1)
++    {
++        res = VK_ERROR_OUT_OF_DEVICE_MEMORY;
++        goto fail;
++    }
++    swapchain->readback_coherent = !!(mem_props.memoryTypes[type].propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
++
++    alloc_info.allocationSize = mem_req.size;
++    alloc_info.memoryTypeIndex = type;
++    if ((res = device->p_vkAllocateMemory( device->host.device, &alloc_info, NULL, &swapchain->readback_memory ))) goto fail;
++    if ((res = device->p_vkBindBufferMemory( device->host.device, swapchain->readback_buffer, swapchain->readback_memory, 0 ))) goto fail;
++    if ((res = device->p_vkMapMemory( device->host.device, swapchain->readback_memory, 0, VK_WHOLE_SIZE, 0,
++                                      &swapchain->readback_ptr ))) goto fail;
++    if ((res = device->p_vkCreateFence( device->host.device, &fence_info, NULL, &swapchain->readback_fence ))) goto fail;
++    if ((res = device->p_vkCreateSemaphore( device->host.device, &sema_info, NULL, &swapchain->readback_sema ))) goto fail;
++
++    bmi.bmiHeader.biSize = sizeof(bmi.bmiHeader);
++    bmi.bmiHeader.biWidth = extent.width;
++    bmi.bmiHeader.biHeight = -(LONG)extent.height;
++    bmi.bmiHeader.biPlanes = 1;
++    bmi.bmiHeader.biBitCount = 32;
++    bmi.bmiHeader.biCompression = BI_RGB;
++    if (!(swapchain->readback_hdc = NtGdiCreateCompatibleDC( 0 )) ||
++        !(swapchain->readback_bitmap = NtGdiCreateDIBSection( 0, NULL, 0, &bmi, DIB_RGB_COLORS, 0, 0, 0,
++                                                              &swapchain->readback_bits )) ||
++        !NtGdiSelectBitmap( swapchain->readback_hdc, swapchain->readback_bitmap ))
++    {
++        res = VK_ERROR_OUT_OF_HOST_MEMORY;
++        goto fail;
++    }
++
++    swapchain->readback_family = ~0u;
++    swapchain->readback = TRUE;
++    TRACE( "swapchain %p readback %ux%u, %u images, memory type %d%s\n", swapchain, extent.width, extent.height,
++           swapchain->readback_count, type, swapchain->readback_coherent ? "" : " (non coherent)" );
++    return VK_SUCCESS;
++
++fail:
++    ERR( "swapchain %p readback setup failed, res %d\n", swapchain, res );
++    readback_destroy( device, swapchain );
++    return res;
++}
++
++static VkCommandBuffer readback_get_cmd( struct vulkan_queue *queue, struct swapchain *swapchain, uint32_t index )
++{
++    struct vulkan_device *device = queue->device;
++    uint32_t family = queue->info.queueFamilyIndex;
++    VkCommandBufferBeginInfo begin_info = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
++    VkImageMemoryBarrier image_barrier = {.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
++    VkBufferMemoryBarrier buffer_barrier = {.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
++    VkBufferImageCopy region = {0};
++    VkCommandBuffer cmd;
++
++    if (index >= swapchain->readback_count) return NULL;
++
++    if (swapchain->readback_family != family)
++    {
++        VkCommandPoolCreateInfo pool_info = {.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
++        VkCommandBufferAllocateInfo alloc_info = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
++
++        if (!(device->queue_props[family].queueFlags & (VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT)))
++            return NULL;
++
++        if (swapchain->readback_pool) device->p_vkDestroyCommandPool( device->host.device, swapchain->readback_pool, NULL );
++        swapchain->readback_pool = 0;
++        memset( swapchain->readback_cmds, 0, swapchain->readback_count * sizeof(VkCommandBuffer) );
++        swapchain->readback_family = ~0u;
++
++        pool_info.queueFamilyIndex = family;
++        if (device->p_vkCreateCommandPool( device->host.device, &pool_info, NULL, &swapchain->readback_pool )) return NULL;
++
++        alloc_info.commandPool = swapchain->readback_pool;
++        alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
++        alloc_info.commandBufferCount = swapchain->readback_count;
++        if (device->p_vkAllocateCommandBuffers( device->host.device, &alloc_info, swapchain->readback_cmds ))
++        {
++            device->p_vkDestroyCommandPool( device->host.device, swapchain->readback_pool, NULL );
++            swapchain->readback_pool = 0;
++            memset( swapchain->readback_cmds, 0, swapchain->readback_count * sizeof(VkCommandBuffer) );
++            return NULL;
++        }
++        swapchain->readback_family = family;
++
++        for (uint32_t i = 0; i < swapchain->readback_count; i++)
++        {
++            cmd = swapchain->readback_cmds[i];
++            device->p_vkBeginCommandBuffer( cmd, &begin_info );
++
++            image_barrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
++            image_barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
++            image_barrier.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
++            image_barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
++            image_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
++            image_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
++            image_barrier.image = swapchain->readback_images[i];
++            image_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
++            image_barrier.subresourceRange.levelCount = 1;
++            image_barrier.subresourceRange.layerCount = 1;
++            device->p_vkCmdPipelineBarrier( cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
++                                            0, 0, NULL, 0, NULL, 1, &image_barrier );
++
++            region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
++            region.imageSubresource.layerCount = 1;
++            region.imageExtent.width = swapchain->readback_extent.width;
++            region.imageExtent.height = swapchain->readback_extent.height;
++            region.imageExtent.depth = 1;
++            device->p_vkCmdCopyImageToBuffer( cmd, swapchain->readback_images[i], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
++                                              swapchain->readback_buffer, 1, &region );
++
++            image_barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
++            image_barrier.dstAccessMask = 0;
++            image_barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
++            image_barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
++            buffer_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
++            buffer_barrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
++            buffer_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
++            buffer_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
++            buffer_barrier.buffer = swapchain->readback_buffer;
++            buffer_barrier.size = VK_WHOLE_SIZE;
++            device->p_vkCmdPipelineBarrier( cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
++                                            VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT | VK_PIPELINE_STAGE_HOST_BIT,
++                                            0, 0, NULL, 1, &buffer_barrier, 1, &image_barrier );
++
++            device->p_vkEndCommandBuffer( cmd );
++        }
++    }
++
++    return swapchain->readback_cmds[index];
++}
++
++/* wait for the readback submitted with the present and copy it into the DIB */
++static BOOL readback_finish( struct vulkan_device *device, struct swapchain *swapchain )
++{
++    VkResult res;
++
++    res = device->p_vkWaitForFences( device->host.device, 1, &swapchain->readback_fence, VK_TRUE, 2000000000ull );
++    if (res)
++    {
++        ERR( "swapchain %p readback wait failed, res %d, disabling readback\n", swapchain, res );
++        swapchain->readback = FALSE;
++        return FALSE;
++    }
++    device->p_vkResetFences( device->host.device, 1, &swapchain->readback_fence );
++
++    if (!swapchain->readback_coherent)
++    {
++        VkMappedMemoryRange range = {.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE};
++        range.memory = swapchain->readback_memory;
++        range.size = VK_WHOLE_SIZE;
++        device->p_vkInvalidateMappedMemoryRanges( device->host.device, 1, &range );
++    }
++
++    if (!swapchain->readback_swap_rb) memcpy( swapchain->readback_bits, swapchain->readback_ptr, swapchain->readback_size );
++    else
++    {
++        const UINT *src = swapchain->readback_ptr;
++        UINT *dst = swapchain->readback_bits;
++        for (VkDeviceSize i = 0; i < swapchain->readback_size / 4; i++)
++        {
++            UINT p = src[i];
++            dst[i] = (p & 0xff00ff00) | ((p & 0xff) << 16) | ((p >> 16) & 0xff);
++        }
++    }
++    return TRUE;
++}
++#endif
++
+ static BOOL surface_get_fshack_dpi( struct surface *surface )
+ {
+     UINT dpi = NtUserGetDpiForWindow( surface->hwnd ), raw = NtUserGetWinMonitorDpi( surface->hwnd, MDT_RAW_DPI );
+@@ -2598,6 +2873,26 @@ static VkResult win32u_vkCreateSwapchainKHR( VkDevice client_device, const VkSwa
+                    create_info_host.imageFormat );
+     }
+ 
++#ifdef __ANDROID__
++    if (!swapchain->fshack_dpi && readback_wanted( surface ))
++    {
++        VkFormat format = create_info_host.imageFormat;
++        BOOL bgra = format == VK_FORMAT_B8G8R8A8_UNORM || format == VK_FORMAT_B8G8R8A8_SRGB;
++        BOOL rgba = format == VK_FORMAT_R8G8B8A8_UNORM || format == VK_FORMAT_R8G8B8A8_SRGB;
++
++        if (!(capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT))
++            WARN( "swapchain for other process window %p: no TRANSFER_SRC usage, no readback\n", surface->hwnd );
++        else if (!bgra && !rgba)
++            FIXME( "swapchain for other process window %p: format %d not supported for readback\n", surface->hwnd, format );
++        else
++        {
++            create_info_host.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
++            swapchain->readback = TRUE;
++            swapchain->readback_swap_rb = rgba;
++        }
++    }
++#endif
++
+     if ((res = device->p_vkCreateSwapchainKHR( device->host.device, &create_info_host, NULL, &host_swapchain )))
+     {
+         free( swapchain );
+@@ -2609,6 +2904,11 @@ static VkResult win32u_vkCreateSwapchainKHR( VkDevice client_device, const VkSwa
+     swapchain->extents = create_info->imageExtent;
+     instance->p_insert_object( instance, &swapchain->obj.obj );
+ 
++#ifdef __ANDROID__
++    if (swapchain->readback) readback_init( device, swapchain, create_info_host.imageExtent );
++    if (swapchain->readback) WARN( "window %p swapchain %p: other process readback enabled\n", surface->hwnd, swapchain );
++#endif
++
+     if (swapchain->fshack_dpi)
+     {
+         if ((res = init_fs_hack_images( device, swapchain, create_info )))
+@@ -2667,6 +2967,10 @@ void win32u_vkDestroySwapchainKHR( VkDevice client_device, VkSwapchainKHR client
+         free( swapchain->fs_hack_images );
+     }
+ 
++#ifdef __ANDROID__
++    readback_destroy( device, swapchain );
++#endif
++
+     device->p_vkDestroySwapchainKHR( device->host.device, swapchain->obj.host.swapchain, NULL );
+     instance->p_remove_object( instance, &swapchain->obj.obj );
+ 
+@@ -2920,6 +3224,10 @@ static VkResult win32u_vkQueuePresentKHR( VkQueue client_queue, const VkPresentI
+     struct mempool pool = {0};
+     uint32_t blit_count = 0;
+     VkSemaphore blit_sema;
++    VkFence blit_fence = VK_NULL_HANDLE;
++#ifdef __ANDROID__
++    struct swapchain *readback_swapchain = NULL;
++#endif
+ 
+     TRACE( "queue %p, present_info %p\n", queue, present_info );
+ 
+@@ -2931,6 +3239,20 @@ static VkResult win32u_vkQueuePresentKHR( VkQueue client_queue, const VkPresentI
+         struct swapchain *swapchain = swapchain_from_handle( present_info->pSwapchains[i] );
+         struct fs_hack_image *hack = &swapchain->fs_hack_images[present_info->pImageIndices[i]];
+ 
++#ifdef __ANDROID__
++        if (swapchain->readback && !readback_swapchain)
++        {
++            VkCommandBuffer cmd = readback_get_cmd( queue, swapchain, present_info->pImageIndices[i] );
++            if (cmd)
++            {
++                blit_cmds[blit_count++] = cmd;
++                blit_sema = swapchain->readback_sema;
++                blit_fence = swapchain->readback_fence;
++                readback_swapchain = swapchain;
++            }
++            continue;
++        }
++#endif
+         if (!swapchain->fshack_dpi) continue;
+         blit_sema = hack->blit_finished;
+ 
+@@ -2991,7 +3313,7 @@ static VkResult win32u_vkQueuePresentKHR( VkQueue client_queue, const VkPresentI
+         submit_info.pCommandBuffers = blit_cmds;
+         submit_info.signalSemaphoreCount = 1;
+         submit_info.pSignalSemaphores = &blit_sema;
+-        device->p_vkQueueSubmit( queue->host.queue, 1, &submit_info, VK_NULL_HANDLE );
++        device->p_vkQueueSubmit( queue->host.queue, 1, &submit_info, blit_fence );
+ 
+         present_info->waitSemaphoreCount = 1;
+         present_info->pWaitSemaphores = &blit_sema;
+@@ -3008,6 +3330,15 @@ static VkResult win32u_vkQueuePresentKHR( VkQueue client_queue, const VkPresentI
+         struct surface *surface = swapchain->surface;
+         RECT client_rect;
+ 
++#ifdef __ANDROID__
++        if (swapchain == readback_swapchain && readback_finish( device, swapchain ))
++        {
++            surface->client->readback_hdc = swapchain->readback_hdc;
++            client_surface_present( surface->client );
++            surface->client->readback_hdc = 0;
++        }
++        else
++#endif
+         client_surface_present( surface->client );
+ 
+         if (swapchain_res < VK_SUCCESS) continue;
+diff --git a/include/wine/gdi_driver.h b/include/wine/gdi_driver.h
+index 34075ed..56455a1 100644
+--- a/include/wine/gdi_driver.h
++++ b/include/wine/gdi_driver.h
+@@ -266,6 +266,9 @@ struct client_surface
+     HWND                               hwnd;           /* window the surface was created for */
+     LONG                               updated;        /* has been moved / resized / reparented */
+     LONG                               offscreen;      /* client window is offscreen */
++#ifdef __ANDROID__
++    HDC                                readback_hdc;   /* DC holding the frame being presented, read back by win32u */
++#endif
+ };
+ 
+ W32KAPI void *client_surface_create( UINT size, const struct client_surface_funcs *funcs, HWND hwnd );
