@@ -292,6 +292,14 @@ do
       "common/dlls_ntdll_unix_system_c_power_cache.patch"
       "common/dlls_win32u_vulkan_c_other_process_readback.patch"
       "common/dlls_ntdll_unix_env_c_nls_fallback.patch"
+
+      # throttle Sleep(0) / SwitchToThread storms (DOOM 2016 idle worker, Cult of the Lamb dispatch thread);
+      # WINE_SLEEP0_THROTTLE=0 disables it
+      "common/dlls_ntdll_unix_sync_c_sleep0_yield_throttle.patch"
+
+      # fail would-block receives on nonblocking sockets without a server round trip (DOOM 2016 DTLS poll thread);
+      # WINE_SOCKET_POLL_FASTPATH=0 disables it
+      "common/dlls_ntdll_unix_socket_c_recv_fastpath.patch"
     )
 
     for patch in "${PATCHES[@]}"; do
@@ -376,7 +384,7 @@ EOF
     rm -rf $OUTPUT_DIR/lib
     rm -rf $OUTPUT_DIR/share
     rm -rf $install_dir
-    make -j$(nproc)
+    make -j$(nproc) || exit 1
   fi
 
   if [ "$arg" == "--install" ]
@@ -386,7 +394,7 @@ EOF
     mkdir -p $OUTPUT_DIR/lib
     mkdir -p $OUTPUT_DIR/share
     mkdir -p $install_dir
-    make install -j$(nproc)
+    make install -j$(nproc) || exit 1
     cp -r $install_dir/bin/wine* $OUTPUT_DIR/bin
     cp -r $install_dir/bin/reg* $OUTPUT_DIR/bin
     cp -r $install_dir/bin/msi* $OUTPUT_DIR/bin
@@ -415,5 +423,6 @@ EOF
     ln -sf ../lib/wine/x86_64-unix/wine-preloader "$install_dir/bin/wine-preloader"
     echo "Wine loader symlinks:"
     ls -la "$OUTPUT_DIR/bin/wine" "$OUTPUT_DIR/bin/wine-preloader"
+    [ -f "$OUTPUT_DIR/bin/wineserver" ] && [ -f "$OUTPUT_DIR/lib/wine/x86_64-unix/ntdll.so" ] || { echo "ERROR: no wineserver or ntdll.so in $OUTPUT_DIR"; exit 1; }
   fi
 done
