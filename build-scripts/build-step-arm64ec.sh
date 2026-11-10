@@ -300,7 +300,7 @@ do
       # WINE_SOCKET_POLL_FASTPATH=0 disables it
       "common/dlls_ntdll_unix_socket_c_recv_fastpath.patch"
 
-      # serve the shared texture description ioctls of DXVK before 3.0 on D3DKMT shared resource handles
+      # serve the sharedgpures.sys ioctls of DXVK before 3.0 (texture description on NT handles and \\.\SharedGpuResource) from D3DKMT resources
       # (Proton 11 has no sharedgpures.sys; CEF shared textures in the Epic overlay)
       "common/dlls_ntdll_unix_file_c_shared_resource_metadata.patch"
 
