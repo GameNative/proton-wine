@@ -1,0 +1,148 @@
+diff --git a/dlls/winex11.drv/init.c b/dlls/winex11.drv/init.c
+--- a/dlls/winex11.drv/init.c	2026-11-10 13:49:26
++++ b/dlls/winex11.drv/init.c	2026-11-10 13:50:43
+@@ -242,7 +242,8 @@
+     return FALSE;
+ }
+ 
+-BOOL needs_offscreen_rendering( HWND hwnd )
++/* reasons for offscreen rendering that come from the window itself, not from compositing it into its parent */
++static BOOL needs_offscreen_rendering_self( HWND hwnd )
+ {
+     UINT style = NtUserGetWindowLongW( hwnd, GWL_STYLE );
+     struct window_surface *surface;
+@@ -271,6 +272,12 @@
+     if (needs_offscreen) return needs_offscreen;
+ 
+     if (NtUserGetDpiForWindow( hwnd ) != NtUserGetWinMonitorDpi( hwnd, MDT_RAW_DPI ) && !enable_fullscreen_hack( hwnd )) return TRUE; /* needs DPI scaling */
++    return FALSE;
++}
++
++BOOL needs_offscreen_rendering( HWND hwnd )
++{
++    if (needs_offscreen_rendering_self( hwnd )) return TRUE;
+     if (NtUserGetAncestor( hwnd, GA_PARENT ) != NtUserGetDesktopWindow()) return TRUE; /* child window, needs compositing */
+     if (NtUserGetWindowRelative( hwnd, GW_CHILD )) return needs_client_window_clipping( hwnd ); /* window has children, needs compositing */
+     return FALSE;
+@@ -320,6 +327,7 @@
+     HDC hdc_src;
+     HDC hdc_dst;
+     BOOL other_process;
++    Window child_parent; /* toplevel X window a child window's client window is placed in, see get_child_client_parent */
+ };
+ 
+ static struct x11drv_client_surface *impl_from_client_surface( struct client_surface *client )
+@@ -423,12 +431,55 @@
+     XFlush( gdi_display );
+ }
+ 
++/* Child windows (and windows with children) are composited offscreen: their client window is kept
++ * under the dummy parent and its contents are copied into the toplevel on present. That only works
++ * with XComposite redirecting the client window; without it (no libXcomposite at build time, or an
++ * X server without the extension) the X server keeps no contents for a window clipped by the 1x1
++ * dummy parent and the copy is black. In that case place the client window directly in the toplevel
++ * X window at the child's position instead (without clipping by siblings, as before the client
++ * surface rework), as long as nothing else requires offscreen rendering. */
++static Window get_child_client_parent( HWND hwnd )
++{
++    HWND toplevel = NtUserGetAncestor( hwnd, GA_ROOT );
++    struct x11drv_win_data *data;
++    Window parent = 0;
++
++    if (!toplevel || toplevel == hwnd || !NtUserIsWindowVisible( hwnd )) return 0;
++    if (needs_offscreen_rendering_self( toplevel )) return 0;
++    if ((data = get_win_data( toplevel )))
++    {
++        parent = data->whole_window;
++        release_win_data( data );
++    }
++    return parent;
++}
++
++static void place_child_client_window( struct x11drv_client_surface *surface, Window parent )
++{
++    if (surface->child_parent == parent) return;
++
++    TRACE( "%s placing client window %lx in %lx at %d,%d\n", debugstr_client_surface( &surface->client ),
++           surface->window, parent, surface->changes.x, surface->changes.y );
++
++    if (parent) XReparentWindow( gdi_display, surface->window, parent, surface->changes.x, surface->changes.y );
++    else XReparentWindow( gdi_display, surface->window, get_dummy_parent(), 0, 0 );
++    surface->child_parent = parent;
++    XFlush( gdi_display );
++}
++
+ static void client_surface_update_offscreen( HWND hwnd, struct x11drv_client_surface *surface )
+ {
+     BOOL offscreen = needs_offscreen_rendering( hwnd );
+     struct x11drv_win_data *data;
++    Window child_parent = 0;
+ 
+     if (surface->other_process) offscreen = TRUE;
++    else if (offscreen && !usexcomposite && !needs_offscreen_rendering_self( hwnd ))
++    {
++        /* offscreen only for compositing, which needs XComposite, see get_child_client_parent */
++        if (NtUserGetAncestor( hwnd, GA_ROOT ) == hwnd) offscreen = FALSE;
++        else if ((child_parent = get_child_client_parent( hwnd ))) offscreen = FALSE;
++    }
+ 
+     TRACE( "%s offscreen %u\n", debugstr_client_surface( &surface->client ), offscreen );
+ 
+@@ -439,6 +490,7 @@
+             attach_client_window( data, surface->window );
+             release_win_data( data );
+         }
++        place_child_client_window( surface, child_parent );
+         return;
+     }
+ 
+@@ -476,6 +528,7 @@
+         else attach_client_window( data, surface->window );
+         release_win_data( data );
+     }
++    place_child_client_window( surface, child_parent );
+ 
+     XFlush( gdi_display );
+ }
+diff --git a/dlls/winex11.drv/window.c b/dlls/winex11.drv/window.c
+--- a/dlls/winex11.drv/window.c
++++ b/dlls/winex11.drv/window.c
+@@ -2892,6 +2892,25 @@
+  *
+  * Destroy the whole X window for a given window.
+  */
++/* without XComposite, client windows of child windows are placed directly in their toplevel's
++ * whole_window (see get_child_client_parent in init.c); move them back to the dummy parent before
++ * whole_window is destroyed, or they would be destroyed with it */
++static void detach_child_client_windows( struct x11drv_win_data *data )
++{
++    Window root, parent, *children = NULL;
++    unsigned int i, count = 0;
++
++    if (usexcomposite) return;
++    XSync( data->display, False ); /* make sure whole_window is known from gdi_display */
++    if (!XQueryTree( gdi_display, data->whole_window, &root, &parent, &children, &count )) return;
++    for (i = 0; i < count; i++)
++    {
++        TRACE( "%p/%lx detaching child client window %lx\n", data->hwnd, data->whole_window, children[i] );
++        XReparentWindow( gdi_display, children[i], get_dummy_parent(), 0, 0 );
++    }
++    if (children) XFree( children );
++}
++
+ static void destroy_whole_window( struct x11drv_win_data *data, BOOL already_destroyed )
+ {
+     TRACE( "win %p xwin %lx/%lx\n", data->hwnd, data->whole_window, data->client_window );
+@@ -2902,7 +2921,11 @@
+     }
+     else
+     {
+-        if (!already_destroyed) detach_client_window( data, data->client_window );
++        if (!already_destroyed)
++        {
++            detach_client_window( data, data->client_window );
++            detach_child_client_windows( data );
++        }
+         else if (data->client_window) client_window_events_disable( data, data->client_window );
+         XDeleteContext( data->display, data->whole_window, winContext );
+         if (!already_destroyed)
