@@ -1,6 +1,6 @@
 diff --git a/dlls/winex11.drv/init.c b/dlls/winex11.drv/init.c
---- a/dlls/winex11.drv/init.c	2026-11-10 13:49:26
-+++ b/dlls/winex11.drv/init.c	2026-11-10 13:50:43
+--- a/dlls/winex11.drv/init.c	2026-11-10 14:17:19
++++ b/dlls/winex11.drv/init.c	2026-11-10 14:17:45
 @@ -242,7 +242,8 @@
      return FALSE;
  }
@@ -79,7 +79,7 @@ diff --git a/dlls/winex11.drv/init.c b/dlls/winex11.drv/init.c
 +    Window child_parent = 0;
  
      if (surface->other_process) offscreen = TRUE;
-+    else if (offscreen && !usexcomposite && !needs_offscreen_rendering_self( hwnd ))
++    else if (offscreen && !x11drv_has_xcomposite() && !needs_offscreen_rendering_self( hwnd ))
 +    {
 +        /* offscreen only for compositing, which needs XComposite, see get_child_client_parent */
 +        if (NtUserGetAncestor( hwnd, GA_ROOT ) == hwnd) offscreen = FALSE;
@@ -119,7 +119,7 @@ diff --git a/dlls/winex11.drv/window.c b/dlls/winex11.drv/window.c
 +    Window root, parent, *children = NULL;
 +    unsigned int i, count = 0;
 +
-+    if (usexcomposite) return;
++    if (x11drv_has_xcomposite()) return;
 +    XSync( data->display, False ); /* make sure whole_window is known from gdi_display */
 +    if (!XQueryTree( gdi_display, data->whole_window, &root, &parent, &children, &count )) return;
 +    for (i = 0; i < count; i++)
@@ -146,3 +146,23 @@ diff --git a/dlls/winex11.drv/window.c b/dlls/winex11.drv/window.c
          else if (data->client_window) client_window_events_disable( data, data->client_window );
          XDeleteContext( data->display, data->whole_window, winContext );
          if (!already_destroyed)
+diff --git a/dlls/winex11.drv/x11drv.h b/dlls/winex11.drv/x11drv.h
+--- a/dlls/winex11.drv/x11drv.h
++++ b/dlls/winex11.drv/x11drv.h
+@@ -475,6 +475,16 @@
+ extern BOOL use_system_cursors;
+ extern BOOL grab_fullscreen;
+ extern BOOL usexcomposite;
++
++/* usexcomposite stays TRUE when wine is built without libXcomposite, check that XComposite is really usable */
++static inline BOOL x11drv_has_xcomposite(void)
++{
++#ifdef SONAME_LIBXCOMPOSITE
++    return usexcomposite;
++#else
++    return FALSE;
++#endif
++}
+ extern BOOL use_xfixes;
+ extern BOOL managed_mode;
+ extern BOOL private_color_map;
