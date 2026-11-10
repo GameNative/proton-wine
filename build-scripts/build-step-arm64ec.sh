@@ -168,7 +168,7 @@ do
       --without-vosk \
       --with-vulkan \
       --without-wayland \
-      --without-xcomposite \
+      --with-xcomposite \
       --with-xfixes \
       --without-xinerama \
       --with-xrandr \
