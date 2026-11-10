@@ -300,6 +300,10 @@ do
       # fail would-block receives on nonblocking sockets without a server round trip (DOOM 2016 DTLS poll thread);
       # WINE_SOCKET_POLL_FASTPATH=0 disables it
       "common/dlls_ntdll_unix_socket_c_recv_fastpath.patch"
+
+      # serve the shared texture description ioctls of DXVK before 3.0 on D3DKMT shared resource handles
+      # (Proton 11 has no sharedgpures.sys; CEF shared textures in the Epic overlay)
+      "common/dlls_ntdll_unix_file_c_shared_resource_metadata.patch"
     )
 
     for patch in "${PATCHES[@]}"; do

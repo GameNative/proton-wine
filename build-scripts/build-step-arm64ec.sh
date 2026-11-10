@@ -300,6 +300,10 @@ do
       # WINE_SOCKET_POLL_FASTPATH=0 disables it
       "common/dlls_ntdll_unix_socket_c_recv_fastpath.patch"
 
+      # serve the shared texture description ioctls of DXVK before 3.0 on D3DKMT shared resource handles
+      # (Proton 11 has no sharedgpures.sys; CEF shared textures in the Epic overlay)
+      "common/dlls_ntdll_unix_file_c_shared_resource_metadata.patch"
+
       # GetNativeSystemInfo() reports AMD64 to x64 processes (upstream c5a96a0b6c); MonoMod/MelonLoader/SMAPI
       # otherwise see ARM64 and write ARM64 detours into x64 CoreCLR code
       "arm64ec/dlls_kernelbase_memory_c_native_system_info.patch"
