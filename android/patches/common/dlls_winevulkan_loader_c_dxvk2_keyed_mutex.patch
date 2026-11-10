@@ -1,0 +1,168 @@
+diff --git a/dlls/winevulkan/loader.c b/dlls/winevulkan/loader.c
+index 11a7b60e47c..966e27bad2f 100644
+--- a/dlls/winevulkan/loader.c
++++ b/dlls/winevulkan/loader.c
+@@ -132,6 +132,147 @@ PFN_vkVoidFunction WINAPI vkGetInstanceProcAddr(VkInstance instance, const char
+     return NULL;
+ }
+ 
++/* DXVK before 3.0 implements IDXGIKeyedMutex with these two functions of earlier Proton
++ * versions, and without them it neither waits for nor flushes the GPU work on ReleaseSync, so
++ * another process can read a shared texture that was never drawn (the Epic overlay). Proton 11
++ * implements VK_KHR_win32_keyed_mutex instead. The ReleaseSync of these DXVK versions waits for
++ * the GPU work on the texture before it calls release, so a CPU side keyed mutex is enough:
++ * keep the key and the owner in a section named after the texture's global D3DKMT handle.
++ * Textures shared with NT handles have no such name and only get the wait. */
++
++struct keyed_mutex_state
++{
++    LONG   lock;
++    LONG   owned;
++    UINT64 key;
++};
++
++static struct keyed_mutex_entry
++{
++    VkDeviceMemory memory;
++    UINT global;
++    HANDLE section;
++    struct keyed_mutex_state *state;
++} keyed_mutexes[128];
++static unsigned int keyed_mutex_next;
++static SRWLOCK keyed_mutex_lock = SRWLOCK_INIT;
++
++static BOOL keyed_mutex_enabled(void)
++{
++    static int enabled = -1;
++    if (enabled == -1)
++    {
++        const char *env = getenv("WINE_DXVK_KEYED_MUTEX");
++        enabled = !env || *env != '0';
++    }
++    return enabled;
++}
++
++static struct keyed_mutex_state *get_keyed_mutex(VkDevice device, VkDeviceMemory memory)
++{
++    VkMemoryGetWin32HandleInfoKHR info = {.sType = VK_STRUCTURE_TYPE_MEMORY_GET_WIN32_HANDLE_INFO_KHR};
++    struct keyed_mutex_state *state = NULL;
++    struct keyed_mutex_entry *entry;
++    HANDLE handle = NULL, section;
++    unsigned int i;
++    WCHAR name[64];
++    UINT global;
++
++    info.memory = memory;
++    info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_KMT_BIT;
++    if (vkGetMemoryWin32HandleKHR(device, &info, &handle) || !(global = HandleToULong(handle))) return NULL;
++
++    AcquireSRWLockExclusive(&keyed_mutex_lock);
++    for (i = 0; i < ARRAY_SIZE(keyed_mutexes); i++)
++    {
++        entry = &keyed_mutexes[i];
++        if (entry->memory == memory && entry->global == global)
++        {
++            state = entry->state;
++            goto done;
++        }
++    }
++
++    wcscpy(name, L"Local\\__wine_vk_keyed_mutex_00000000");
++    for (i = 0; i < 8; i++) name[wcslen(name) - 1 - i] = L"0123456789abcdef"[(global >> (4 * i)) & 0xf];
++    if (!(section = CreateFileMappingW(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, sizeof(*state), name)))
++        goto done;
++    if (!(state = MapViewOfFile(section, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(*state))))
++    {
++        CloseHandle(section);
++        goto done;
++    }
++
++    /* the oldest entry gives way; its texture keeps working while another process holds the section */
++    entry = &keyed_mutexes[keyed_mutex_next++ % ARRAY_SIZE(keyed_mutexes)];
++    if (entry->state) UnmapViewOfFile(entry->state);
++    if (entry->section) CloseHandle(entry->section);
++    entry->memory = memory;
++    entry->global = global;
++    entry->section = section;
++    entry->state = state;
++    TRACE("memory 0x%s, global %#x, state %p\n", wine_dbgstr_longlong((UINT64)(ULONG_PTR)memory), global, state);
++
++done:
++    ReleaseSRWLockExclusive(&keyed_mutex_lock);
++    return state;
++}
++
++static void keyed_mutex_state_lock(struct keyed_mutex_state *state)
++{
++    while (InterlockedCompareExchange(&state->lock, 1, 0)) YieldProcessor();
++}
++
++static void keyed_mutex_state_unlock(struct keyed_mutex_state *state)
++{
++    InterlockedExchange(&state->lock, 0);
++}
++
++static VkResult WINAPI wine_vkAcquireKeyedMutex(VkDevice device, VkDeviceMemory memory, uint64_t key, uint32_t timeout_ms)
++{
++    struct keyed_mutex_state *state;
++    DWORD start = GetTickCount();
++
++    TRACE("%p, 0x%s, 0x%s, %u\n", device, wine_dbgstr_longlong((UINT64)(ULONG_PTR)memory), wine_dbgstr_longlong(key), timeout_ms);
++
++    if (!(state = get_keyed_mutex(device, memory))) return VK_SUCCESS;
++
++    for (;;)
++    {
++        keyed_mutex_state_lock(state);
++        if (!state->owned && state->key == key)
++        {
++            state->owned = 1;
++            keyed_mutex_state_unlock(state);
++            return VK_SUCCESS;
++        }
++        keyed_mutex_state_unlock(state);
++
++        if (timeout_ms != INFINITE && GetTickCount() - start >= timeout_ms) return VK_TIMEOUT;
++        Sleep(1);
++    }
++}
++
++static VkResult WINAPI wine_vkReleaseKeyedMutex(VkDevice device, VkDeviceMemory memory, uint64_t key)
++{
++    struct keyed_mutex_state *state;
++
++    TRACE("%p, 0x%s, 0x%s\n", device, wine_dbgstr_longlong((UINT64)(ULONG_PTR)memory), wine_dbgstr_longlong(key));
++
++    if (!(state = get_keyed_mutex(device, memory))) return VK_SUCCESS;
++
++    keyed_mutex_state_lock(state);
++    if (!state->owned)
++    {
++        keyed_mutex_state_unlock(state);
++        return VK_ERROR_UNKNOWN;
++    }
++    state->key = key;
++    state->owned = 0;
++    keyed_mutex_state_unlock(state);
++    return VK_SUCCESS;
++}
++
+ PFN_vkVoidFunction WINAPI vkGetDeviceProcAddr(VkDevice device, const char *name)
+ {
+     void *func;
+@@ -149,6 +290,15 @@ PFN_vkVoidFunction WINAPI vkGetDeviceProcAddr(VkDevice device, const char *name)
+             return (PFN_vkVoidFunction)vkGetMemoryWin32HandlePropertiesKHR;
+     }
+ 
++    if (device->extensions.has_VK_KHR_external_memory_win32 && device->extensions.has_VK_KHR_win32_keyed_mutex &&
++        keyed_mutex_enabled())
++    {
++        if (!strcmp(name, "wine_vkAcquireKeyedMutex"))
++            return (PFN_vkVoidFunction)wine_vkAcquireKeyedMutex;
++        if (!strcmp(name, "wine_vkReleaseKeyedMutex"))
++            return (PFN_vkVoidFunction)wine_vkReleaseKeyedMutex;
++    }
++
+     if (device->extensions.has_VK_KHR_external_semaphore_win32)
+     {
+         if (!strcmp(name, "vkGetSemaphoreWin32HandleKHR"))

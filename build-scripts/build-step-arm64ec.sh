@@ -303,6 +303,8 @@ do
       # serve the sharedgpures.sys ioctls of DXVK before 3.0 (texture description on NT handles and \\.\SharedGpuResource) from D3DKMT resources
       # (Proton 11 has no sharedgpures.sys; CEF shared textures in the Epic overlay)
       "common/dlls_ntdll_unix_file_c_shared_resource_metadata.patch"
+      # wine_vkAcquireKeyedMutex / wine_vkReleaseKeyedMutex for the IDXGIKeyedMutex of DXVK before 3.0
+      "common/dlls_winevulkan_loader_c_dxvk2_keyed_mutex.patch"
 
       # GetNativeSystemInfo() reports AMD64 to x64 processes (upstream c5a96a0b6c); MonoMod/MelonLoader/SMAPI
       # otherwise see ARM64 and write ARM64 detours into x64 CoreCLR code
