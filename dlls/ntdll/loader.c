@@ -2811,6 +2811,39 @@ static NTSTATUS get_dll_load_path_search_flags( LPCWSTR module, DWORD flags, WCH
 }
 
 
+static NTSTATUS find_builtin_without_file( const WCHAR *name, UNICODE_STRING *new_name,
+                                           WINE_MODREF **pwm, HANDLE *mapping,
+                                           SECTION_IMAGE_INFORMATION *image_info, struct file_id *id,
+                                           BOOL driver_fallback );
+
+/* An old prefix can contain x64 Wine drivers even though winedevice is native ARM64.
+ * Only replace Wine's own drivers in system32, never arbitrary native images. */
+static BOOL is_stale_builtin_driver( HANDLE file, const UNICODE_STRING *name,
+                                    const SECTION_IMAGE_INFORMATION *info )
+{
+    static const WCHAR dir[] = L"\\??\\C:\\windows\\system32\\drivers\\";
+    static const char builtin[] = "Wine builtin DLL";
+    static const char placeholder[] = "Wine placeholder DLL";
+    char signature[sizeof(placeholder)];
+    LARGE_INTEGER offset;
+    IO_STATUS_BLOCK io;
+    const WCHAR *base;
+    SIZE_T len = name->Length / sizeof(WCHAR);
+
+    if (current_machine != IMAGE_FILE_MACHINE_ARM64 || info->Machine != IMAGE_FILE_MACHINE_AMD64 ||
+        info->SubSystemType != IMAGE_SUBSYSTEM_NATIVE) return FALSE;
+    if (len <= ARRAY_SIZE(dir) - 1 + 4 ||
+        wcsnicmp( name->Buffer, dir, ARRAY_SIZE(dir) - 1 )) return FALSE;
+    base = name->Buffer + ARRAY_SIZE(dir) - 1;
+    if (wcschr( base, '\\' ) || wcschr( base, '/' ) ||
+        wcsnicmp( name->Buffer + len - 4, L".sys", 4 )) return FALSE;
+
+    offset.QuadPart = sizeof(IMAGE_DOS_HEADER);
+    if (NtReadFile( file, 0, NULL, NULL, &io, signature, sizeof(signature), &offset, NULL )) return FALSE;
+    return (io.Information >= sizeof(builtin) && !memcmp( signature, builtin, sizeof(builtin) )) ||
+           (io.Information >= sizeof(placeholder) && !memcmp( signature, placeholder, sizeof(placeholder) ));
+}
+
 /***********************************************************************
  *	open_dll_file
  *
@@ -2866,10 +2899,22 @@ static NTSTATUS open_dll_file( UNICODE_STRING *nt_name, WINE_MODREF **pwm, HANDL
         NtQuerySection( *mapping, SectionImageInformation, image_info, sizeof(*image_info), NULL );
         if (!is_valid_binary( handle, image_info ))
         {
+            BOOL retry_builtin = is_stale_builtin_driver( handle, nt_name, image_info );
+
             TRACE( "%s is for arch %x, continuing search\n", debugstr_us(nt_name), image_info->Machine );
             status = STATUS_NOT_SUPPORTED;
             NtClose( *mapping );
             *mapping = NULL;
+            if (retry_builtin)
+            {
+                UNICODE_STRING builtin_name = { 0 };
+
+                status = find_builtin_without_file( wcsrchr( nt_name->Buffer, '\\' ) + 1,
+                                                    &builtin_name, pwm, mapping, image_info, id, TRUE );
+                WARN( "GN-DRIVER-ARCH: %s native builtin lookup status %lx\n", debugstr_us(nt_name), status );
+                RtlFreeUnicodeString( &builtin_name );
+                if (status) status = STATUS_NOT_SUPPORTED;
+            }
         }
     }
     NtClose( handle );
@@ -3268,11 +3313,12 @@ static NTSTATUS get_env_var( const WCHAR *name, SIZE_T extra, UNICODE_STRING *re
  *	find_builtin_without_file
  *
  * Find a builtin dll when the corresponding file cannot be found in the prefix.
- * This is used during prefix bootstrap.
+ * This is used during prefix bootstrap and to replace stale builtin drivers.
  */
 static NTSTATUS find_builtin_without_file( const WCHAR *name, UNICODE_STRING *new_name,
                                            WINE_MODREF **pwm, HANDLE *mapping,
-                                           SECTION_IMAGE_INFORMATION *image_info, struct file_id *id )
+                                           SECTION_IMAGE_INFORMATION *image_info, struct file_id *id,
+                                           BOOL driver_fallback )
 {
     const WCHAR *ext;
     WCHAR dllpath[32];
@@ -3282,7 +3328,7 @@ static NTSTATUS find_builtin_without_file( const WCHAR *name, UNICODE_STRING *ne
 
     if (contains_path( name )) return status;
 
-    if (!is_prefix_bootstrap)
+    if (!is_prefix_bootstrap && !driver_fallback)
     {
         /* 16-bit files can't be loaded from the prefix */
         if (!name[1] || wcscmp( name + wcslen(name) - 2, L"16" )) return status;
@@ -3464,7 +3510,7 @@ static NTSTATUS find_dll_file( const WCHAR *load_path, const WCHAR *libname, UNI
     {
         status = search_dll_file( load_path, libname, nt_name, pwm, mapping, image_info, id );
         if (status == STATUS_DLL_NOT_FOUND)
-            status = find_builtin_without_file( libname, nt_name, pwm, mapping, image_info, id );
+            status = find_builtin_without_file( libname, nt_name, pwm, mapping, image_info, id, FALSE );
     }
     else if (!(status = RtlDosPathNameToNtPathName_U_WithStatus( libname, nt_name, NULL, NULL )))
         status = open_dll_file( nt_name, pwm, mapping, image_info, id );
