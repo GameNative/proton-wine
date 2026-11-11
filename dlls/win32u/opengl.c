@@ -26,7 +26,11 @@
 #include <assert.h>
 #include <pthread.h>
 #include <dlfcn.h>
+#include <signal.h>
 #include <unistd.h>
+#ifdef __linux__
+#include <link.h>
+#endif
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -2965,10 +2969,54 @@ static BOOL flush_memory_pbuffer( void (*flush)(void) )
     return flush_memory_dc( context, draw_hdc, FALSE, flush );
 }
 
+static const char *flush_diagnostic_basename( const char *name )
+{
+    const char *base;
+
+    if (!name || !*name) return "unknown";
+    return (base = strrchr( name, '/' )) ? base + 1 : name;
+}
+
+static void flush_diagnostic_address( const char *kind, void *address )
+{
+    Dl_info info = {0};
+
+    if (dladdr( address, &info ))
+        ERR( "[WGL_FLUSH_OWNER] %s=%p module=%s base=%p offset=%#lx symbol=%s\n", kind, address,
+             flush_diagnostic_basename( info.dli_fname ), info.dli_fbase,
+             (unsigned long)((UINT_PTR)address - (UINT_PTR)info.dli_fbase),
+             info.dli_sname ? info.dli_sname : "unknown" );
+    else
+        ERR( "[WGL_FLUSH_OWNER] %s=%p module=unresolved\n", kind, address );
+}
+
+#ifdef __linux__
+static int flush_diagnostic_module( struct dl_phdr_info *info, size_t size, void *data )
+{
+    unsigned int *count = data, i;
+
+    for (i = 0; i < info->dlpi_phnum; i++)
+    {
+        const ElfW(Phdr) *header = info->dlpi_phdr + i;
+
+        if (header->p_type != PT_LOAD || !(header->p_flags & PF_X)) continue;
+        if ((*count)++ >= 128) return 1;
+        ERR( "[WGL_NATIVE_MODULE] module=%s base=%p exec=%p-%p\n",
+             flush_diagnostic_basename( info->dlpi_name ), (void *)(UINT_PTR)info->dlpi_addr,
+             (void *)(UINT_PTR)(info->dlpi_addr + header->p_vaddr),
+             (void *)(UINT_PTR)(info->dlpi_addr + header->p_vaddr + header->p_memsz) );
+    }
+    return 0;
+}
+#endif
+
 static BOOL win32u_wgl_context_flush( struct wgl_context *context, void (*flush)(void), UINT flags )
 {
+    static LONG diagnostic_flush_count;
     const struct opengl_funcs *funcs = &display_funcs;
     struct opengl_drawable *draw = context->draw;
+    LONG diagnostic_id = 0;
+    BOOL synced;
     int interval;
 
     if (!draw->client) return flush_memory_pbuffer( flush );
@@ -2977,10 +3025,36 @@ static BOOL win32u_wgl_context_flush( struct wgl_context *context, void (*flush)
 
     TRACE( "context %p, hwnd %p, interval %d, flush %p, flags %#x\n", context, draw->client->hwnd, interval, flush, flags );
 
-    context_sync_drawables( context, 0, 0 );
+    synced = context_sync_drawables( context, 0, 0 );
     if (!(draw = context->draw)) return FALSE; /* should never happen */
 
-    if (flush) flush();
+    if (flush)
+    {
+        diagnostic_id = InterlockedIncrement( &diagnostic_flush_count );
+        if (diagnostic_id == 1)
+        {
+            struct sigaction action;
+#ifdef __linux__
+            unsigned int count = 0;
+            dl_iterate_phdr( flush_diagnostic_module, &count );
+#endif
+
+            flush_diagnostic_address( "callback", (void *)flush );
+            if (!sigaction( SIGSEGV, NULL, &action ))
+            {
+                ERR( "[WGL_FLUSH_OWNER] sigsegv_flags=%#x\n", (unsigned int)action.sa_flags );
+                flush_diagnostic_address( "sigsegv_handler", (void *)action.sa_sigaction );
+            }
+        }
+        if (diagnostic_id > 0 && diagnostic_id <= 16)
+            ERR( "[WGL_FLUSH_DIAG] id=%d callback=%p flags=%#x op=%s synced=%d context=%p current=%p driver=%p begin\n",
+                 (int)diagnostic_id, flush, flags,
+                 flush == funcs->p_glFinish ? "glFinish" : flush == funcs->p_glFlush ? "glFlush" : "other",
+                 synced, context, NtCurrentTeb()->glContext, context->driver_private );
+        flush();
+        if (diagnostic_id > 0 && diagnostic_id <= 16)
+            ERR( "[WGL_FLUSH_DIAG] id=%d callback=%p flags=%#x end\n", (int)diagnostic_id, flush, flags );
+    }
     if (flush == funcs->p_glFinish) flags |= GL_FLUSH_FINISHED;
     opengl_drawable_flush( draw, interval, flags );
     if (flags & GL_FLUSH_FORCE_SWAP) opengl_drawable_swap( draw );

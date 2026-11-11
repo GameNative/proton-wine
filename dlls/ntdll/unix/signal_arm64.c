@@ -27,6 +27,7 @@
 #include "config.h"
 
 #include <assert.h>
+#include <errno.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdlib.h>
@@ -1107,6 +1108,33 @@ static BOOL handle_syscall_fault( ucontext_t *context, EXCEPTION_RECORD *rec )
 }
 
 
+/* No allocator, loader lookup or stdio from a signal handler. The module map is
+ * emitted by win32u before the first flush, outside signal context. */
+static void native_fault_diagnostic( siginfo_t *siginfo, ucontext_t *context )
+{
+    static unsigned int count;
+    static const char prefix[] = "[WGL_NATIVE_FAULT] code addr pc lr sp: ";
+    static const char hex[] = "0123456789abcdef";
+    ULONG_PTR values[] = { (ULONG_PTR)siginfo->si_code, (ULONG_PTR)siginfo->si_addr,
+                          PC_sig(context), LR_sig(context), SP_sig(context) };
+    char buffer[sizeof(prefix) + ARRAY_SIZE(values) * (2 * sizeof(ULONG_PTR) + 1)];
+    unsigned int i, j, len = 0;
+    int saved_errno = errno;
+
+    if (__atomic_fetch_add( &count, 1, __ATOMIC_RELAXED ) < 16)
+    {
+        for (i = 0; i < sizeof(prefix) - 1; i++) buffer[len++] = prefix[i];
+        for (i = 0; i < ARRAY_SIZE(values); i++)
+        {
+            for (j = 2 * sizeof(ULONG_PTR); j; j--)
+                buffer[len++] = hex[(values[i] >> ((j - 1) * 4)) & 15];
+            buffer[len++] = i + 1 == ARRAY_SIZE(values) ? '\n' : ' ';
+        }
+        write( STDERR_FILENO, buffer, len );
+    }
+    errno = saved_errno;
+}
+
 /**********************************************************************
  *		segv_handler
  *
@@ -1118,6 +1146,7 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
     ucontext_t *context = sigcontext;
     DWORD64 esr = get_fault_esr( context );
 
+    native_fault_diagnostic( siginfo, context );
     rec.NumberParameters = 2;
     if ((esr & 0xf0000000) == 0x80000000) rec.ExceptionInformation[0] = EXCEPTION_EXECUTE_FAULT;
     else if (esr & 0x40) rec.ExceptionInformation[0] = EXCEPTION_WRITE_FAULT;
