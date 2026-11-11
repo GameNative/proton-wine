@@ -244,6 +244,7 @@ struct wined3d_d3d_info
     uint32_t subpixel_viewport : 1;
     uint32_t fences : 1;
     uint32_t persistent_map : 1;
+    uint32_t staged_streaming_uploads : 1;
     uint32_t gpu_push_constants : 1;
     uint32_t ffp_hlsl : 1;
     enum wined3d_feature_level feature_level;
@@ -3920,6 +3921,7 @@ struct wined3d_buffer
 
     unsigned int structure_byte_stride;
     uint32_t flags;
+    bool staged_streaming_uploads;
     DWORD locations;
     void *map_ptr;
     struct wined3d_bo *buffer_object;
