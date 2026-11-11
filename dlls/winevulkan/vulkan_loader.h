@@ -150,7 +150,8 @@ struct is_available_device_function_params
         NTSTATUS status = UNIX_CALL(code, params);                \
         if (status)                                               \
         {                                                         \
-            ERR("Exception %#lx in Unix call.\n", status);        \
+            ERR("Exception %#lx in Unix call %s (index %u).\n", \
+                status, #code, (unsigned int)unix_ ## code);       \
             ExitProcess(3);                                       \
         }                                                         \
     } while (0)

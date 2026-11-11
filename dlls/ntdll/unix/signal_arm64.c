@@ -1097,6 +1097,12 @@ static BOOL handle_syscall_fault( ucontext_t *context, EXCEPTION_RECORD *rec )
     }
     else
     {
+        /* Keep the native fault visible when the caller only reports a failed Unix call. */
+        ERR( "Unix call fault %#x at %s, lr=%p, returning to %p.\n", rec->ExceptionCode,
+             wine_debuginfostr_pc( (void *)PC_sig(context) ), (void *)LR_sig(context), (void *)frame->pc );
+        for (i = 0; i < rec->NumberParameters; i++)
+            ERR( " info[%u]=%016lx\n", i, rec->ExceptionInformation[i] );
+
         TRACE( "returning to user mode ip=%p ret=%08x\n", (void *)frame->pc, rec->ExceptionCode );
         REGn_sig(0, context)  = rec->ExceptionCode;
         REGn_sig(18, context) = (ULONG_PTR)NtCurrentTeb();
