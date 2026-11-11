@@ -51,6 +51,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(wgl);
 WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
 #include "wine/opengl_driver.h"
+#include "wine/swap_profile.h"
 
 typedef struct __GLXcontextRec *GLXContext;
 typedef struct __GLXFBConfigRec *GLXFBConfig;
@@ -1471,21 +1472,44 @@ static BOOL x11drv_surface_swap( struct opengl_drawable *base )
     struct gl_drawable *gl = impl_from_opengl_drawable( base );
     INT64 ust, msc, sbc, target_sbc = 0;
     BOOL offscreen;
+    struct swap_profile_time stamp;
 
     TRACE( "drawable %s\n", debugstr_opengl_drawable( base ) );
 
+    swap_profile_begin( funcs );
+    stamp = swap_profile_mark();
     if (!(offscreen = InterlockedCompareExchange( &base->client->offscreen, 0, 0 )) ||
-        !ctx || !pglXSwapBuffersMscOML) pglXSwapBuffers( gdi_display, gl->drawable );
+        !ctx || !pglXSwapBuffersMscOML)
+    {
+        pglXSwapBuffers( gdi_display, gl->drawable );
+        swap_profile_add( 0, "GLX_SWAP", stamp );
+    }
     else
     {
         funcs->p_glFlush();
+        swap_profile_add( 1, "GL_FLUSH", stamp );
+        stamp = swap_profile_mark();
         target_sbc = pglXSwapBuffersMscOML( gdi_display, gl->drawable, 0, 0, 0 );
-        if (pglXWaitForSbcOML) pglXWaitForSbcOML( gdi_display, gl->drawable, target_sbc, &ust, &msc, &sbc );
+        swap_profile_add( 2, "OML_SWAP", stamp );
+        if (pglXWaitForSbcOML)
+        {
+            stamp = swap_profile_mark();
+            pglXWaitForSbcOML( gdi_display, gl->drawable, target_sbc, &ust, &msc, &sbc );
+            swap_profile_add( 3, "OML_WAIT", stamp );
+        }
     }
 
-    if (offscreen && !pglXWaitForSbcOML) XFlush( gdi_display );
+    if (offscreen && !pglXWaitForSbcOML)
+    {
+        stamp = swap_profile_mark();
+        XFlush( gdi_display );
+        swap_profile_add( 4, "XFLUSH", stamp );
+    }
 
+    stamp = swap_profile_mark();
     client_surface_present( base->client );
+    swap_profile_add( 5, "CLIENT_PRESENT", stamp );
+    swap_profile_end( "X11_SWAP_PROFILE", TRUE, base->interval, offscreen );
     return TRUE;
 }
 
@@ -1513,24 +1537,39 @@ static void x11drv_egl_surface_flush( struct opengl_drawable *base, UINT flags )
 static BOOL x11drv_egl_surface_swap( struct opengl_drawable *base )
 {
     struct gl_drawable *gl = impl_from_opengl_drawable( base );
+    struct swap_profile_time stamp;
+    BOOL swapped, offscreen;
 
     TRACE( "%s\n", debugstr_opengl_drawable( base ) );
 
-    if (!funcs->p_eglSwapBuffers( egl->display, gl->base.surface ) && funcs->p_eglGetError() == EGL_BAD_SURFACE
+    swap_profile_begin( funcs );
+    stamp = swap_profile_mark();
+    swapped = funcs->p_eglSwapBuffers( egl->display, gl->base.surface );
+    swap_profile_add( 6, "EGL_SWAP", stamp );
+    if (!swapped && funcs->p_eglGetError() == EGL_BAD_SURFACE
         && !funcs->p_eglGetCurrentContext())
     {
+        stamp = swap_profile_mark();
         if (!egl_fallback_context)
             egl_fallback_context = funcs->p_eglCreateContext( egl->display, EGL_NO_CONFIG_KHR, EGL_NO_CONTEXT, NULL );
 
         funcs->p_eglMakeCurrent( egl->display, gl->base.surface, gl->base.surface, egl_fallback_context );
-        funcs->p_eglSwapBuffers( egl->display, gl->base.surface );
+        swapped = funcs->p_eglSwapBuffers( egl->display, gl->base.surface );
         funcs->p_eglMakeCurrent( egl->display, EGL_NO_CONTEXT, EGL_NO_SURFACE, EGL_NO_CONTEXT );
+        swap_profile_add( 7, "EGL_RECOVER", stamp );
     }
 
-    if (InterlockedCompareExchange( &base->client->offscreen, 0, 0 ))
+    if ((offscreen = InterlockedCompareExchange( &base->client->offscreen, 0, 0 )))
+    {
+        stamp = swap_profile_mark();
         XFlush( gdi_display );
+        swap_profile_add( 4, "XFLUSH", stamp );
+    }
 
+    stamp = swap_profile_mark();
     client_surface_present( base->client );
+    swap_profile_add( 5, "CLIENT_PRESENT", stamp );
+    swap_profile_end( "X11_SWAP_PROFILE", swapped, base->interval, offscreen );
     return TRUE;
 }
 
