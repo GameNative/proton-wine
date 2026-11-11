@@ -229,6 +229,8 @@ MAKE_FUNCPTR(gnutls_cipher_decrypt2);
 MAKE_FUNCPTR(gnutls_cipher_deinit);
 MAKE_FUNCPTR(gnutls_cipher_encrypt2);
 MAKE_FUNCPTR(gnutls_cipher_init);
+MAKE_FUNCPTR(gnutls_cipher_get_block_size);
+MAKE_FUNCPTR(gnutls_check_version);
 MAKE_FUNCPTR(gnutls_dh_params_deinit);
 MAKE_FUNCPTR(gnutls_dh_params_export_raw);
 MAKE_FUNCPTR(gnutls_dh_params_import_raw);
@@ -496,6 +498,8 @@ static NTSTATUS gnutls_process_attach( void *args )
     LOAD_FUNCPTR(gnutls_cipher_deinit)
     LOAD_FUNCPTR(gnutls_cipher_encrypt2)
     LOAD_FUNCPTR(gnutls_cipher_init)
+    LOAD_FUNCPTR(gnutls_cipher_get_block_size)
+    LOAD_FUNCPTR(gnutls_check_version)
     LOAD_FUNCPTR(gnutls_dh_params_deinit)
     LOAD_FUNCPTR(gnutls_dh_params_export_raw)
     LOAD_FUNCPTR(gnutls_dh_params_import_raw)
@@ -886,6 +890,10 @@ static NTSTATUS init_cipher_handle( struct key *key )
     vector.data = key->u.s.vector;
     vector.size = key->u.s.vector_len;
 
+    FIXME( "cbc diagnostic: init alg %u mode %u key_block %u cipher %u runtime_block %u key_len %u iv_len %u gnutls %s\n",
+           key->alg_id, key->u.s.mode, key->u.s.block_size, cipher,
+           pgnutls_cipher_get_block_size( cipher ), secret.size, vector.size, pgnutls_check_version( NULL ) );
+
     if ((ret = pgnutls_cipher_init( &key_data(key)->cipher, cipher, &secret, key->u.s.vector ? &vector : NULL )))
     {
         pgnutls_perror( ret );
@@ -932,10 +940,15 @@ static NTSTATUS key_symmetric_encrypt( void *args )
 static NTSTATUS key_symmetric_decrypt( void *args )
 {
     const struct key_symmetric_decrypt_params *params = args;
+    BOOL first_block = !key_data(params->key)->cipher;
     NTSTATUS status;
     int ret;
 
     if ((status = init_cipher_handle( params->key ))) return status;
+
+    if (first_block)
+        FIXME( "cbc diagnostic: backend first decrypt input %u output %u in_place %u\n",
+               params->input_len, params->output_len, params->input == params->output );
 
     if ((ret = pgnutls_cipher_decrypt2( key_data(params->key)->cipher, params->input, params->input_len,
                                         params->output, params->output_len )))
