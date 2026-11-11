@@ -36,6 +36,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
+#include <sys/resource.h>
 #include <sys/ioctl.h>
 #ifdef HAVE_SYS_SYSINFO_H
 # include <sys/sysinfo.h>
@@ -1712,6 +1713,90 @@ struct alloc_area
     size_t native_mapped_size;
 };
 
+/* Capture host mapping pressure once, without allocating memory on the failing
+ * path. virtstat describes Wine views, not the kernel's VMA count. The caller
+ * holds virtual_mutex. Paths from /proc/self/maps are deliberately not logged. */
+static void dump_host_mapping_pressure(void)
+{
+#ifdef __linux__
+    static BOOL reported;
+    char buffer[4096], line[256], perms[5];
+    unsigned long start, end, inode, limit = 0, maps = 0, parsed = 0;
+    unsigned long file = 0, executable = 0, noaccess = 0, small = 0, views = 0;
+    unsigned long long mapped_bytes = 0;
+    struct file_view *view;
+    struct rlimit rlimit;
+    ssize_t len, i;
+    size_t pos = 0;
+    int fd, saved_errno = errno, maps_error = 0, limit_error = 0;
+
+    if (reported) return;
+    reported = TRUE;
+
+    fd = open( "/proc/sys/vm/max_map_count", O_RDONLY | O_CLOEXEC );
+    if (fd == -1) limit_error = errno;
+    else
+    {
+        do len = read( fd, buffer, sizeof(buffer) - 1 ); while (len == -1 && errno == EINTR);
+        if (len > 0)
+        {
+            buffer[len] = 0;
+            limit = strtoul( buffer, NULL, 10 );
+        }
+        else limit_error = len == -1 ? errno : EIO;
+        close( fd );
+    }
+
+    fd = open( "/proc/self/maps", O_RDONLY | O_CLOEXEC );
+    if (fd == -1) maps_error = errno;
+    else
+    {
+        for (;;)
+        {
+            len = read( fd, buffer, sizeof(buffer) );
+            if (len == -1 && errno == EINTR) continue;
+            if (len <= 0)
+            {
+                if (len == -1) maps_error = errno;
+                break;
+            }
+            for (i = 0; i < len; ++i)
+            {
+                if (buffer[i] != '\n')
+                {
+                    if (pos < sizeof(line) - 1) line[pos++] = buffer[i];
+                    continue;
+                }
+                line[pos] = 0;
+                pos = 0;
+                ++maps;
+                if (sscanf( line, "%lx-%lx %4s %*x %*x:%*x %lu", &start, &end, perms, &inode ) != 4)
+                    continue;
+                ++parsed;
+                mapped_bytes += end - start;
+                if (inode) ++file;
+                if (perms[2] == 'x') ++executable;
+                if (!strncmp( perms, "---", 3 )) ++noaccess;
+                if (end - start <= 65536) ++small;
+            }
+        }
+        close( fd );
+    }
+    WINE_RB_FOR_EACH_ENTRY( view, &views_tree, struct file_view, entry ) ++views;
+    ERR( "host mapping pressure: maps %lu, max_map_count %lu, maps_errno %d, limit_errno %d, "
+         "parsed %lu, inode_backed %lu, executable %lu, noaccess %lu, at_most_64K %lu, "
+         "mapped_bytes %s, Wine_views %lu.\n", maps, limit, maps_error, limit_error,
+         parsed, file, executable, noaccess, small, wine_dbgstr_longlong(mapped_bytes), views );
+    if (!getrlimit( RLIMIT_AS, &rlimit ))
+        ERR( "host mapping pressure: RLIMIT_AS soft %s hard %s.\n",
+             wine_dbgstr_longlong(rlimit.rlim_cur), wine_dbgstr_longlong(rlimit.rlim_max) );
+    if (!getrlimit( RLIMIT_DATA, &rlimit ))
+        ERR( "host mapping pressure: RLIMIT_DATA soft %s hard %s.\n",
+             wine_dbgstr_longlong(rlimit.rlim_cur), wine_dbgstr_longlong(rlimit.rlim_max) );
+    errno = saved_errno;
+#endif
+}
+
 /***********************************************************************
  *           try_map_free_area
  *
@@ -1724,15 +1809,19 @@ static void* try_map_free_area( struct alloc_area *area, void *base, void *end, 
     size_t abs_step = step > 0 ? step : -step;
     size_t size = area->size;
     int unix_prot = area->unix_prot;
+    int error;
 
     while (start && base <= start && (char*)start + size <= (char*)end)
     {
         if (anon_mmap_tryfixed( start, size, unix_prot, 0 ) != MAP_FAILED) return start;
+        error = errno;
+        if (error == ENOMEM) dump_host_mapping_pressure();
         TRACE( "Found free area is already mapped, start %p.\n", start );
-        if (errno != EEXIST)
+        if (error != EEXIST)
         {
             ERR( "mmap() error %s, range %p-%p, unix_prot %#x.\n",
-                 strerror(errno), start, (char *)start + size, unix_prot );
+                 strerror(error), start, (char *)start + size, unix_prot );
+            errno = error;
             return NULL;
         }
         if (!area->native_mapped && step && abs_step < (granularity_mask + 1) * 2)
