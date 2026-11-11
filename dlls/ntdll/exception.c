@@ -191,6 +191,62 @@ static LONG call_vectored_handlers( EXCEPTION_RECORD *rec, CONTEXT *context )
 }
 
 
+#ifdef __arm64ec__
+/* Bounded fault capture for the loading failure; do not walk the faulting stack. */
+static void log_fm_fault( const EXCEPTION_RECORD *rec, const CONTEXT *context )
+{
+    static void *volatile sites[32];
+    const UNICODE_STRING *image = &NtCurrentTeb()->Peb->ProcessParameters->ImagePathName;
+    const WCHAR *name = image->Buffer;
+    const ARM64EC_NT_CONTEXT *ec = (const ARM64EC_NT_CONTEXT *)context;
+    void *site = rec->ExceptionAddress ? rec->ExceptionAddress : (void *)1, *previous;
+    BYTE bytes[16] = {0};
+    SIZE_T count = 0;
+    NTSTATUS status;
+    unsigned int i, start = 0, len = image->Length / sizeof(WCHAR);
+
+    if (rec->ExceptionCode != EXCEPTION_ACCESS_VIOLATION &&
+        rec->ExceptionCode != EXCEPTION_ILLEGAL_INSTRUCTION &&
+        rec->ExceptionCode != EXCEPTION_STACK_OVERFLOW) return;
+    for (i = 0; i < len; i++) if (name[i] == '\\' || name[i] == '/') start = i + 1;
+    if (len - start != 6 || wcsnicmp( name + start, L"fm.exe", 6 )) return;
+
+    /* Publish the site before logging, so nested faults never wait on a lock. */
+    for (i = 0; i < ARRAY_SIZE(sites); i++)
+    {
+        previous = InterlockedCompareExchangePointer( &sites[i], site, NULL );
+        if (previous == site) return;
+        if (!previous) break;
+    }
+    if (i == ARRAY_SIZE(sites)) return;
+
+    WARN( "GN-SEH-FAULT-v1 site=%u code=%08lx flags=%lx pc=%p params=%lu access=%I64x target=%I64x "
+          "context=%lx rip=%I64x rsp=%I64x rbp=%I64x eflags=%lx\n",
+          i, rec->ExceptionCode, rec->ExceptionFlags, rec->ExceptionAddress, rec->NumberParameters,
+          rec->NumberParameters > 0 ? rec->ExceptionInformation[0] : 0,
+          rec->NumberParameters > 1 ? rec->ExceptionInformation[1] : 0,
+          context->ContextFlags, context->Rip, context->Rsp, context->Rbp, context->EFlags );
+    WARN( "GN-SEH-FAULT-v1 pc=%p rax=%I64x rbx=%I64x rcx=%I64x rdx=%I64x rsi=%I64x rdi=%I64x "
+          "r8=%I64x r9=%I64x r10=%I64x r11=%I64x r12=%I64x r13=%I64x r14=%I64x r15=%I64x\n",
+          rec->ExceptionAddress, context->Rax, context->Rbx, context->Rcx, context->Rdx,
+          context->Rsi, context->Rdi, context->R8, context->R9, context->R10, context->R11,
+          context->R12, context->R13, context->R14, context->R15 );
+    WARN( "GN-SEH-FAULT-v1 pc=%p lr=%I64x bitmap=%p check_call=%p "
+          "x16_words=%04x:%04x:%04x:%04x x17_words=%04x:%04x:%04x:%04x\n",
+          rec->ExceptionAddress, ec->Lr, NtCurrentTeb()->Peb->EcCodeBitMap, __os_arm64x_check_call,
+          ec->X16_3, ec->X16_2, ec->X16_1, ec->X16_0,
+          ec->X17_3, ec->X17_2, ec->X17_1, ec->X17_0 );
+    WARN( "GN-SEH-FAULT-v1 pc=%p x6=%I64x x7=%I64x x9=%I64x x10=%I64x x11=%I64x x12=%I64x x15=%I64x\n",
+          rec->ExceptionAddress, ec->X6, ec->X7, ec->X9, ec->X10, ec->X11, ec->X12, ec->X15 );
+    status = NtReadVirtualMemory( GetCurrentProcess(), rec->ExceptionAddress, bytes, sizeof(bytes), &count );
+    WARN( "GN-SEH-FAULT-v1 pc=%p read=%08lx count=%Iu bytes="
+          "%02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n",
+          rec->ExceptionAddress, status, count, bytes[0], bytes[1], bytes[2], bytes[3],
+          bytes[4], bytes[5], bytes[6], bytes[7], bytes[8], bytes[9], bytes[10], bytes[11],
+          bytes[12], bytes[13], bytes[14], bytes[15] );
+}
+#endif
+
 /*******************************************************************
  *		dispatch_exception
  */
@@ -198,6 +254,10 @@ NTSTATUS WINAPI dispatch_exception( EXCEPTION_RECORD *rec, CONTEXT *context )
 {
     NTSTATUS status;
     DWORD i;
+
+#ifdef __arm64ec__
+    log_fm_fault( rec, context );
+#endif
 
     if (need_backtrace(rec->ExceptionCode))
     {
