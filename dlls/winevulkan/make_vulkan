@@ -285,6 +285,7 @@ MANUAL_LOADER_THUNKS = {
     "vkAllocateCommandBuffers",
     "vkCreateCommandPool",
     "vkCreateDevice",
+    "vkCreateGraphicsPipelines",
     "vkCreateInstance",
     "vkDestroyCommandPool",
     "vkDestroyDevice",
