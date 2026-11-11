@@ -141,6 +141,15 @@ GstElement *find_element(GstElementFactoryListType type, GstCaps *element_sink_c
     {
         name = gst_plugin_feature_get_name(GST_PLUGIN_FEATURE(tmp->data));
 
+        if (!strcmp(name, "protonaudioconverterbin") && !g_getenv("MEDIACONV_AUDIO_DUMP_FILE"))
+        {
+            /* The transcoding fallback cannot enter READY without its dump database.
+             * Standalone launches may not configure it; keep looking for a real decoder.
+             */
+            GST_INFO("Ignoring protonaudioconverterbin without an audio dump database.");
+            continue;
+        }
+
         if (!strcmp(name, "vaapidecodebin"))
         {
             /* vaapidecodebin adds asynchronicity which breaks wg_transform synchronous drain / flush
