@@ -2967,8 +2967,10 @@ static BOOL flush_memory_pbuffer( void (*flush)(void) )
 
 static BOOL win32u_wgl_context_flush( struct wgl_context *context, void (*flush)(void), UINT flags )
 {
+    static LONG diagnostic_flush_count;
     const struct opengl_funcs *funcs = &display_funcs;
     struct opengl_drawable *draw = context->draw;
+    LONG diagnostic_id = 0;
     int interval;
 
     if (!draw->client) return flush_memory_pbuffer( flush );
@@ -2980,7 +2982,15 @@ static BOOL win32u_wgl_context_flush( struct wgl_context *context, void (*flush)
     context_sync_drawables( context, 0, 0 );
     if (!(draw = context->draw)) return FALSE; /* should never happen */
 
-    if (flush) flush();
+    if (flush)
+    {
+        diagnostic_id = InterlockedIncrement( &diagnostic_flush_count );
+        if (diagnostic_id > 0 && diagnostic_id <= 16)
+            ERR( "[WGL_FLUSH_DIAG] id=%ld callback=%p flags=%#x begin\n", diagnostic_id, flush, flags );
+        flush();
+        if (diagnostic_id > 0 && diagnostic_id <= 16)
+            ERR( "[WGL_FLUSH_DIAG] id=%ld callback=%p flags=%#x end\n", diagnostic_id, flush, flags );
+    }
     if (flush == funcs->p_glFinish) flags |= GL_FLUSH_FINISHED;
     opengl_drawable_flush( draw, interval, flags );
     if (flags & GL_FLUSH_FORCE_SWAP) opengl_drawable_swap( draw );
