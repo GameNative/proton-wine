@@ -6301,7 +6301,32 @@ static HRESULT resolver_get_bytestream_url_hint(IMFByteStream *stream, WCHAR con
 
 static HRESULT resolver_create_default_handler(IMFByteStreamHandler **handler)
 {
-    return CoCreateInstance(&CLSID_MPEG4ByteStreamHandlerPlugin, NULL, CLSCTX_INPROC_SERVER, &IID_IMFByteStreamHandler, (void **)handler);
+    static const GUID CLSID_GStreamerByteStreamHandler = {0x317df618,0x5e5a,0x468a,{0x9f,0x15,0xd8,0x27,0xa9,0xa0,0x81,0x62}};
+    WCHAR path[MAX_PATH], *name;
+    DWORD length;
+    HRESULT hr;
+
+    hr = CoCreateInstance(&CLSID_MPEG4ByteStreamHandlerPlugin, NULL, CLSCTX_INPROC_SERVER,
+            &IID_IMFByteStreamHandler, (void **)handler);
+    if (hr != REGDB_E_CLASSNOTREG)
+        return hr;
+
+    length = GetModuleFileNameW(NULL, path, ARRAY_SIZE(path));
+    if (!length || length >= ARRAY_SIZE(path))
+        return hr;
+    name = wcsrchr(path, '\\');
+    name = name ? name + 1 : path;
+    if (wcsicmp(name, L"Vampire Therapist.exe"))
+        return hr;
+
+    /* Some Android prefixes lack the MPEG-4 plugin registration. Its registry
+     * switch cannot enable the GStreamer fallback until the plugin is created. */
+    WARN("MPEG-4 handler is not registered, trying the GStreamer handler.\n");
+    hr = CoCreateInstance(&CLSID_GStreamerByteStreamHandler, NULL, CLSCTX_INPROC_SERVER,
+            &IID_IMFByteStreamHandler, (void **)handler);
+    if (FAILED(hr))
+        ERR("GStreamer byte stream handler fallback failed, hr %#lx.\n", hr);
+    return hr;
 }
 
 static HRESULT resolver_get_bytestream_handler(IMFByteStream *stream, const WCHAR *url, DWORD flags,
