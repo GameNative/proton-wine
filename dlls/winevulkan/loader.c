@@ -32,6 +32,115 @@ static HINSTANCE hinstance;
 static BOOL get_device_proc_addr_instance_procs = FALSE;
 static struct vulkan_instance_extensions instance_extensions; /* supported client instance extensions */
 
+/* Temporary, application-scoped diagnostics for an invalid allocation followed
+ * by a bind exception before native driver dispatch. Do not repair the index or
+ * change error handling: the guest call site is needed to choose a safe fix. */
+static BOOL nms_memory_diag;
+static LONG nms_allocation_count, nms_bind_count, nms_stack_count;
+
+static void nms_log_caller(const char *operation, void *address, unsigned int frame)
+{
+    WCHAR path[MAX_PATH], *name;
+    HMODULE module;
+
+    if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                          GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (WCHAR *)address, &module) &&
+        GetModuleFileNameW(module, path, ARRAY_SIZE(path)))
+    {
+        path[ARRAY_SIZE(path) - 1] = 0;
+        name = wcsrchr(path, '\\');
+        ERR("[NMS_MEMORY_DIAG] %s frame=%u pc=%p module=%s offset=%s\n", operation, frame,
+            address, debugstr_w(name ? name + 1 : path),
+            wine_dbgstr_longlong((UINT_PTR)address - (UINT_PTR)module));
+    }
+    else
+        ERR("[NMS_MEMORY_DIAG] %s frame=%u pc=%p module=unknown\n", operation, frame, address);
+}
+
+static void nms_log_stack(const char *operation, void *caller)
+{
+    void *frames[16];
+    DWORD last_error = GetLastError();
+    unsigned int count, i;
+
+    if (InterlockedIncrement(&nms_stack_count) > 8) return;
+    nms_log_caller(operation, caller, 0);
+    count = RtlCaptureStackBackTrace(1, ARRAY_SIZE(frames), frames, NULL);
+    for (i = 0; i < count; ++i) nms_log_caller(operation, frames[i], i + 1);
+    SetLastError(last_error);
+}
+
+VkResult WINAPI vkAllocateMemory(VkDevice device, const VkMemoryAllocateInfo *allocate_info,
+                                const VkAllocationCallbacks *allocator, VkDeviceMemory *memory)
+{
+    struct vkAllocateMemory_params params = {0};
+    BOOL log = FALSE, invalid = FALSE;
+    NTSTATUS status;
+
+    if (nms_memory_diag)
+    {
+        invalid = allocate_info && allocate_info->memoryTypeIndex >= VK_MAX_MEMORY_TYPES;
+        log = InterlockedIncrement(&nms_allocation_count) <= 64 || invalid;
+        if (log && allocate_info)
+            ERR("[NMS_MEMORY_DIAG] build=nms-proton-memory-diag-4 allocate.enter device=%p size=%s type=%u next=%p output=%p caller=%p\n",
+                device, wine_dbgstr_longlong(allocate_info->allocationSize), allocate_info->memoryTypeIndex,
+                allocate_info->pNext, memory, __builtin_return_address(0));
+        if (invalid) nms_log_stack("allocate.invalid_type", __builtin_return_address(0));
+    }
+    params.device = device;
+    params.pAllocateInfo = allocate_info;
+    params.pAllocator = allocator;
+    params.pMemory = memory;
+    status = UNIX_CALL(vkAllocateMemory, &params);
+    if (nms_memory_diag && (log || status || params.result))
+    {
+        /* The output is undefined on failure. Never dereference it then. */
+        ERR("[NMS_MEMORY_DIAG] allocate.leave status=%#lx result_valid=%u result=%d memory=%s\n", status,
+            !status, params.result, !status && !params.result && memory ? wine_dbgstr_longlong(*memory) : "unavailable");
+        if (status || params.result) nms_log_stack("allocate.failure", __builtin_return_address(0));
+    }
+    if (status)
+    {
+        ERR("Exception %#lx in Unix call.\n", status);
+        ExitProcess(3);
+    }
+    return params.result;
+}
+
+VkResult WINAPI vkBindBufferMemory(VkDevice device, VkBuffer buffer, VkDeviceMemory memory, VkDeviceSize offset)
+{
+    struct vkBindBufferMemory_params params = {0};
+    BOOL log = FALSE;
+    NTSTATUS status;
+
+    if (nms_memory_diag)
+    {
+        log = InterlockedIncrement(&nms_bind_count) <= 128 || !memory;
+        if (log)
+            ERR("[NMS_MEMORY_DIAG] bind.enter device=%p buffer=%s memory=%s offset=%s caller=%p\n",
+                device, wine_dbgstr_longlong(buffer), wine_dbgstr_longlong(memory),
+                wine_dbgstr_longlong(offset), __builtin_return_address(0));
+        if (!memory) nms_log_stack("bind.null_memory", __builtin_return_address(0));
+    }
+    params.device = device;
+    params.buffer = buffer;
+    params.memory = memory;
+    params.memoryOffset = offset;
+    status = UNIX_CALL(vkBindBufferMemory, &params);
+    if (nms_memory_diag && (log || status || params.result))
+    {
+        ERR("[NMS_MEMORY_DIAG] bind.leave buffer=%s memory=%s offset=%s status=%#lx result_valid=%u result=%d\n",
+            wine_dbgstr_longlong(buffer), wine_dbgstr_longlong(memory), wine_dbgstr_longlong(offset), status, !status, params.result);
+        if (status || params.result) nms_log_stack("bind.failure", __builtin_return_address(0));
+    }
+    if (status)
+    {
+        ERR("Exception %#lx in Unix call.\n", status);
+        ExitProcess(3);
+    }
+    return params.result;
+}
+
 VkResult WINAPI vkEnumerateInstanceLayerProperties(uint32_t *count, VkLayerProperties *properties)
 {
     TRACE("%p, %p\n", count, properties);
@@ -785,9 +894,19 @@ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, void *reserved)
     switch (reason)
     {
         case DLL_PROCESS_ATTACH:
+        {
+            WCHAR path[MAX_PATH], *name;
+
             hinstance = hinst;
             DisableThreadLibraryCalls(hinst);
+            if (GetModuleFileNameW(NULL, path, ARRAY_SIZE(path)))
+            {
+                path[ARRAY_SIZE(path) - 1] = 0;
+                name = wcsrchr(path, '\\');
+                nms_memory_diag = !wcsicmp(name ? name + 1 : path, L"NMS.exe");
+            }
             break;
+        }
     }
     return TRUE;
 }
