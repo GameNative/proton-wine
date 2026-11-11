@@ -1,3 +1,5 @@
+#include <string.h>
+
 #include "steamclient_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(steamclient);
@@ -218,6 +220,44 @@ const char *__thiscall winISteamInput_SteamInput005_GetGlyphForXboxOrigin( struc
 }
 
 /* ISteamInput_SteamInput006 */
+
+int32_t __thiscall winISteamInput_SteamInput006_GetConnectedControllers( struct w_iface *_this,
+                                                                       uint64_t *handlesOut )
+{
+    struct ISteamInput_SteamInput006_GetConnectedControllers_params params =
+    {
+        .u_iface = _this->u_iface,
+        .handlesOut = handlesOut,
+    };
+    static LONG warned;
+    char path[MAX_PATH], *name;
+    DWORD len, saved_error = GetLastError();
+    BOOL fallout4 = FALSE;
+
+    TRACE( "%p\n", _this );
+
+    len = GetModuleFileNameA( NULL, path, sizeof(path) );
+    if (len && len < sizeof(path))
+    {
+        name = strrchr( path, '\\' );
+        fallout4 = !lstrcmpiA( name ? name + 1 : path, "Fallout4.exe" );
+    }
+    SetLastError( saved_error );
+
+    /* Fallout 4 stalls while enumerating Steam Input devices after the headless
+     * client fails to create its SteamController shared-memory mappings. Report
+     * no Steam Input devices so the game can use its separate XInput path.
+     * A zero count writes no handles, as specified by the Steam Input API. */
+    if (fallout4)
+    {
+        if (!InterlockedCompareExchange( &warned, 1, 0 ))
+            WARN( "Fallout4.exe: bypassing Steam Input controller enumeration; returning zero devices.\n" );
+        return 0;
+    }
+
+    STEAMCLIENT_CALL( ISteamInput_SteamInput006_GetConnectedControllers, &params );
+    return params._ret;
+}
 
 const char *__thiscall winISteamInput_SteamInput006_GetGlyphPNGForActionOrigin( struct w_iface *_this, uint32_t eOrigin,
                                                                                 uint32_t eSize, uint32_t unFlags )

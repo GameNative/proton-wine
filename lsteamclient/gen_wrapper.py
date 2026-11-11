@@ -301,6 +301,7 @@ MANUAL_METHODS = {
     "ISteamNetworkingMessages_ReceiveMessagesOnChannel": True,
 
     "ISteamInput_EnableActionEventCallbacks": lambda ver, abi: abi == 'u',
+    "ISteamInput_GetConnectedControllers": lambda ver, abi: abi == 'w' and ver == 6,
     "ISteamInput_GetGlyphForActionOrigin": True,
     "ISteamInput_GetGlyphPNGForActionOrigin": True,
     "ISteamInput_GetGlyphSVGForActionOrigin": True,
