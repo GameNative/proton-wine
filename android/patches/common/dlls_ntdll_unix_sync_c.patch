@@ -1,5 +1,5 @@
 diff --git a/dlls/ntdll/unix/sync.c b/dlls/ntdll/unix/sync.c
-index 67ab945cef8..b40bfe4802f 100644
+index 67ab945cef8..713d3657bb7 100644
 --- a/dlls/ntdll/unix/sync.c
 +++ b/dlls/ntdll/unix/sync.c
 @@ -61,7 +61,14 @@
@@ -29,7 +29,7 @@ index 67ab945cef8..b40bfe4802f 100644
  
  static const char *debugstr_timeout( const LARGE_INTEGER *timeout )
  {
-@@ -312,8 +324,151 @@ static unsigned int validate_open_object_attributes( const OBJECT_ATTRIBUTES *at
+@@ -312,8 +324,179 @@ static unsigned int validate_open_object_attributes( const OBJECT_ATTRIBUTES *at
  
  #ifdef NTSYNC_IOC_EVENT_READ
  
@@ -127,6 +127,9 @@ index 67ab945cef8..b40bfe4802f 100644
 +                                     int alert_fd, const LARGE_INTEGER *timeout )
 +{
 +    struct ntsync_wait_args args = {0};
++    int distinct_objs[NTSYNC_MAX_WAIT_COUNT];
++    DWORD first_index[NTSYNC_MAX_WAIT_COUNT];
++    DWORD i, j, distinct = 0;
 +    struct timespec now;
 +    int ret;
 +
@@ -151,8 +154,33 @@ index 67ab945cef8..b40bfe4802f 100644
 +    args.index = ~0u;
 +    args.alert = alert_fd;
 +
++    if ((type != WaitAll || count == 1) && count <= NTSYNC_MAX_WAIT_COUNT)
++    {
++        /* The kernel driver accepts the same object more than once in a wait-any
++         * and reports the lowest index; the userspace library rejects that with
++         * EINVAL. Wait on each object once and map the index back. */
++        for (i = 0; i < count; i++)
++        {
++            for (j = 0; j < distinct; j++) if (distinct_objs[j] == objs[i]) break;
++            if (j < distinct) continue;
++            distinct_objs[distinct] = objs[i];
++            first_index[distinct++] = i;
++        }
++        if (distinct < count)
++        {
++            args.objs = (uintptr_t)distinct_objs;
++            args.count = distinct;
++        }
++    }
++
 +    if (type != WaitAll || count == 1) ret = ntsync_wait_any( &args );
 +    else ret = ntsync_wait_all( &args );
++
++    if (args.count < count && (!ret || ret == -EOWNERDEAD))
++    {
++        if (args.index < args.count) args.index = first_index[args.index];
++        else if (args.index == args.count) args.index = count;
++    }
 +
 +    if (!ret)
 +    {
@@ -181,7 +209,7 @@ index 67ab945cef8..b40bfe4802f 100644
      if (ioctl( obj, NTSYNC_IOC_SEM_RELEASE, &count ) < 0)
      {
          if (errno == EOVERFLOW) return STATUS_SEMAPHORE_LIMIT_EXCEEDED;
-@@ -325,6 +480,9 @@ static NTSTATUS linux_release_semaphore_obj( int obj, ULONG count, ULONG *prev_c
+@@ -325,6 +508,9 @@ static NTSTATUS linux_release_semaphore_obj( int obj, ULONG count, ULONG *prev_c
  
  static NTSTATUS linux_query_semaphore_obj( int obj, SEMAPHORE_BASIC_INFORMATION *info )
  {
@@ -191,7 +219,7 @@ index 67ab945cef8..b40bfe4802f 100644
      struct ntsync_sem_args args = {0};
      if (ioctl( obj, NTSYNC_IOC_SEM_READ, &args ) < 0) return errno_to_status( errno );
      info->CurrentCount = args.count;
-@@ -334,7 +492,10 @@ static NTSTATUS linux_query_semaphore_obj( int obj, SEMAPHORE_BASIC_INFORMATION
+@@ -334,7 +520,10 @@ static NTSTATUS linux_query_semaphore_obj( int obj, SEMAPHORE_BASIC_INFORMATION
  
  static NTSTATUS linux_set_event_obj( int obj, LONG *prev_state )
  {
@@ -203,7 +231,7 @@ index 67ab945cef8..b40bfe4802f 100644
      if (ioctl( obj, NTSYNC_IOC_EVENT_SET, &prev ) < 0) return errno_to_status( errno );
      if (prev_state) *prev_state = prev;
      return STATUS_SUCCESS;
-@@ -342,7 +503,10 @@ static NTSTATUS linux_set_event_obj( int obj, LONG *prev_state )
+@@ -342,7 +531,10 @@ static NTSTATUS linux_set_event_obj( int obj, LONG *prev_state )
  
  static NTSTATUS linux_reset_event_obj( int obj, LONG *prev_state )
  {
@@ -215,7 +243,7 @@ index 67ab945cef8..b40bfe4802f 100644
      if (ioctl( obj, NTSYNC_IOC_EVENT_RESET, &prev ) < 0) return errno_to_status( errno );
      if (prev_state) *prev_state = prev;
      return STATUS_SUCCESS;
-@@ -350,7 +514,10 @@ static NTSTATUS linux_reset_event_obj( int obj, LONG *prev_state )
+@@ -350,7 +542,10 @@ static NTSTATUS linux_reset_event_obj( int obj, LONG *prev_state )
  
  static NTSTATUS linux_pulse_event_obj( int obj, LONG *prev_state )
  {
@@ -227,7 +255,7 @@ index 67ab945cef8..b40bfe4802f 100644
      if (ioctl( obj, NTSYNC_IOC_EVENT_PULSE, &prev ) < 0) return errno_to_status( errno );
      if (prev_state) *prev_state = prev;
      return STATUS_SUCCESS;
-@@ -358,6 +525,9 @@ static NTSTATUS linux_pulse_event_obj( int obj, LONG *prev_state )
+@@ -358,6 +553,9 @@ static NTSTATUS linux_pulse_event_obj( int obj, LONG *prev_state )
  
  static NTSTATUS linux_query_event_obj( int obj, EVENT_BASIC_INFORMATION *info )
  {
@@ -237,7 +265,7 @@ index 67ab945cef8..b40bfe4802f 100644
      struct ntsync_event_args args = {0};
      if (ioctl( obj, NTSYNC_IOC_EVENT_READ, &args ) < 0) return errno_to_status( errno );
      info->EventType = args.manual ? NotificationEvent : SynchronizationEvent;
-@@ -367,6 +537,9 @@ static NTSTATUS linux_query_event_obj( int obj, EVENT_BASIC_INFORMATION *info )
+@@ -367,6 +565,9 @@ static NTSTATUS linux_query_event_obj( int obj, EVENT_BASIC_INFORMATION *info )
  
  static NTSTATUS linux_release_mutex_obj( int obj, LONG *prev_count )
  {
@@ -247,7 +275,7 @@ index 67ab945cef8..b40bfe4802f 100644
      struct ntsync_mutex_args args = {.owner = GetCurrentThreadId()};
      if (ioctl( obj, NTSYNC_IOC_MUTEX_UNLOCK, &args ) < 0)
      {
-@@ -380,6 +553,9 @@ static NTSTATUS linux_release_mutex_obj( int obj, LONG *prev_count )
+@@ -380,6 +581,9 @@ static NTSTATUS linux_release_mutex_obj( int obj, LONG *prev_count )
  
  static NTSTATUS linux_query_mutex_obj( int obj, MUTANT_BASIC_INFORMATION *info )
  {
@@ -257,7 +285,7 @@ index 67ab945cef8..b40bfe4802f 100644
      struct ntsync_mutex_args args = {0};
      if (ioctl( obj, NTSYNC_IOC_MUTEX_READ, &args ) < 0)
      {
-@@ -401,6 +577,9 @@ static NTSTATUS linux_query_mutex_obj( int obj, MUTANT_BASIC_INFORMATION *info )
+@@ -401,6 +605,9 @@ static NTSTATUS linux_query_mutex_obj( int obj, MUTANT_BASIC_INFORMATION *info )
  static NTSTATUS linux_wait_objs( int device, DWORD count, const int *objs, WAIT_TYPE type,
                                   int alert_fd, const LARGE_INTEGER *timeout )
  {
@@ -267,7 +295,7 @@ index 67ab945cef8..b40bfe4802f 100644
      struct ntsync_wait_args args = {0};
      unsigned long request;
      struct timespec now;
-@@ -408,7 +587,7 @@ static NTSTATUS linux_wait_objs( int device, DWORD count, const int *objs, WAIT_
+@@ -408,7 +615,7 @@ static NTSTATUS linux_wait_objs( int device, DWORD count, const int *objs, WAIT_
  
      if (!timeout || timeout->QuadPart == TIMEOUT_INFINITE)
      {
@@ -276,7 +304,7 @@ index 67ab945cef8..b40bfe4802f 100644
      }
      else if (timeout->QuadPart <= 0)
      {
-@@ -636,7 +815,17 @@ static void release_inproc_sync( struct inproc_sync *sync )
+@@ -636,7 +843,17 @@ static void release_inproc_sync( struct inproc_sync *sync )
      LONG ref = InterlockedDecrement( &sync->refcount );
  
      assert( ref >= 0 );
@@ -294,7 +322,7 @@ index 67ab945cef8..b40bfe4802f 100644
  }
  
  static struct inproc_sync *get_cached_inproc_sync( HANDLE handle )
-@@ -677,8 +866,25 @@ static NTSTATUS get_server_inproc_sync( HANDLE handle, struct inproc_sync *sync
+@@ -677,8 +894,25 @@ static NTSTATUS get_server_inproc_sync( HANDLE handle, struct inproc_sync *sync
          {
              obj_handle_t fd_handle;
              sync->refcount = 1;
@@ -320,7 +348,7 @@ index 67ab945cef8..b40bfe4802f 100644
              sync->access = reply->access;
              sync->type = reply->type;
              sync->closed = 0;
-@@ -908,6 +1114,15 @@ int get_inproc_alert_fd(void)
+@@ -908,6 +1142,15 @@ int get_inproc_alert_fd(void)
              if (!server_call_unlocked( req ))
              {
                  if (do_fsync()) data->alert_fd = fd = reply->fsync_shm_idx;
@@ -336,7 +364,7 @@ index 67ab945cef8..b40bfe4802f 100644
                  else
                  {
                      data->alert_fd = fd = wine_server_receive_fd( &token );
-@@ -2426,6 +2641,19 @@ NTSTATUS WINAPI NtSignalAndWaitForSingleObject( HANDLE signal, HANDLE wait,
+@@ -2426,6 +2669,19 @@ NTSTATUS WINAPI NtSignalAndWaitForSingleObject( HANDLE signal, HANDLE wait,
   */
  NTSTATUS WINAPI NtYieldExecution(void)
  {
