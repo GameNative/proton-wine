@@ -1,0 +1,262 @@
+diff --git a/dlls/ntdll/unix/file.c b/dlls/ntdll/unix/file.c
+--- a/dlls/ntdll/unix/file.c
++++ b/dlls/ntdll/unix/file.c
+@@ -4876,6 +4876,11 @@ NTSTATUS open_unix_file( HANDLE *handle, const char *unix_name, ACCESS_MASK acce
+ }
+ 
+ 
++#ifdef __ANDROID__
++static BOOL is_shared_gpu_resource_device( const UNICODE_STRING *name );
++static NTSTATUS shared_gpu_file_create( HANDLE *handle, IO_STATUS_BLOCK *io );
++#endif
++
+ /******************************************************************************
+  *              NtCreateFile   (NTDLL.@)
+  */
+@@ -4900,6 +4905,11 @@ NTSTATUS WINAPI NtCreateFile( HANDLE *handle, ACCESS_MASK access, OBJECT_ATTRIBU
+     *handle = 0;
+     if (!attr || !attr->ObjectName) return STATUS_INVALID_PARAMETER;
+ 
++#ifdef __ANDROID__
++    if (!attr->RootDirectory && is_shared_gpu_resource_device( attr->ObjectName ))
++        return shared_gpu_file_create( handle, io );
++#endif
++
+     if (alloc_size) FIXME( "alloc_size not supported\n" );
+ 
+     new_attr = *attr;
+@@ -7106,6 +7116,196 @@ NTSTATUS WINAPI NtWriteFileGather( HANDLE file, HANDLE event, PIO_APC_ROUTINE ap
+ }
+ 
+ 
++#ifdef __ANDROID__
++/* DXVK before 3.0 keeps the description of a shared texture next to its handle, through the
++ * ioctls of the sharedgpures.sys driver of earlier Proton versions: SET_METADATA when the
++ * texture is created, GET_METADATA when another device opens it. NT handles take the ioctls
++ * directly; legacy (KMT) handles go through a \\.\SharedGpuResource file opened on the
++ * resource with OPEN. Proton 11 shares textures as D3DKMT resources and has no such driver,
++ * so the description is lost and every open of such a texture fails with E_INVALIDARG (CEF in
++ * the Epic overlay, for example). Serve the ioctls here, keeping the description as the
++ * runtime data of the D3DKMT resource, as the driver kept it with its resource. */
++
++#define IOCTL_SHARED_GPU_RESOURCE_OPEN         CTL_CODE(FILE_DEVICE_VIDEO, 1, METHOD_BUFFERED, FILE_WRITE_ACCESS)
++#define IOCTL_SHARED_GPU_RESOURCE_SET_METADATA CTL_CODE(FILE_DEVICE_VIDEO, 4, METHOD_BUFFERED, FILE_WRITE_ACCESS)
++#define IOCTL_SHARED_GPU_RESOURCE_GET_METADATA CTL_CODE(FILE_DEVICE_VIDEO, 5, METHOD_BUFFERED, FILE_READ_ACCESS)
++
++/* the \\.\SharedGpuResource files of this process and the D3DKMT resource each one was opened on */
++static struct
++{
++    HANDLE          handle;
++    d3dkmt_handle_t global;
++} shared_gpu_files[64];
++static pthread_mutex_t shared_gpu_files_mutex = PTHREAD_MUTEX_INITIALIZER;
++static int shared_gpu_files_count;  /* entries in use, so that NtClose skips the lock when none is */
++
++static BOOL is_shared_gpu_resource_device( const UNICODE_STRING *name )
++{
++    static const WCHAR device[] = {'\\','?','?','\\','S','h','a','r','e','d','G','p','u','R','e','s','o','u','r','c','e'};
++
++    return name && name->Length == sizeof(device) && !wcsnicmp( name->Buffer, device, ARRAY_SIZE(device) );
++}
++
++/* CreateFile on \\.\SharedGpuResource: an event stands for the file until it is closed */
++static NTSTATUS shared_gpu_file_create( HANDLE *handle, IO_STATUS_BLOCK *io )
++{
++    NTSTATUS status;
++    unsigned int i;
++
++    if ((status = NtCreateEvent( handle, EVENT_ALL_ACCESS, NULL, NotificationEvent, FALSE ))) return status;
++
++    mutex_lock( &shared_gpu_files_mutex );
++    for (i = 0; i < ARRAY_SIZE(shared_gpu_files); i++) if (!shared_gpu_files[i].handle) break;
++    if (i < ARRAY_SIZE(shared_gpu_files))
++    {
++        shared_gpu_files[i].handle = *handle;
++        shared_gpu_files[i].global = 0;
++        __atomic_add_fetch( &shared_gpu_files_count, 1, __ATOMIC_RELAXED );
++    }
++    mutex_unlock( &shared_gpu_files_mutex );
++
++    if (i == ARRAY_SIZE(shared_gpu_files))
++    {
++        NtClose( *handle );
++        *handle = 0;
++        return STATUS_INSUFFICIENT_RESOURCES;
++    }
++    io->Status = STATUS_SUCCESS;
++    io->Information = FILE_OPENED;
++    return STATUS_SUCCESS;
++}
++
++static int shared_gpu_file_index( HANDLE handle )
++{
++    unsigned int i;
++    for (i = 0; i < ARRAY_SIZE(shared_gpu_files); i++) if (shared_gpu_files[i].handle == handle) return i;
++    return -1;
++}
++
++void shared_gpu_file_forget( HANDLE handle )
++{
++    int i;
++
++    if (!handle || !__atomic_load_n( &shared_gpu_files_count, __ATOMIC_RELAXED )) return;
++    mutex_lock( &shared_gpu_files_mutex );
++    if ((i = shared_gpu_file_index( handle )) >= 0)
++    {
++        shared_gpu_files[i].handle = 0;
++        __atomic_sub_fetch( &shared_gpu_files_count, 1, __ATOMIC_RELAXED );
++    }
++    mutex_unlock( &shared_gpu_files_mutex );
++}
++
++static NTSTATUS shared_resource_metadata_ioctl( HANDLE handle, IO_STATUS_BLOCK *io, ULONG code,
++                                                void *in_buffer, ULONG in_size, void *out_buffer, ULONG out_size )
++{
++    d3dkmt_handle_t global = 0;
++    obj_handle_t local = 0;
++    data_size_t size = 0;
++    void *runtime = NULL;
++    BOOL file = FALSE;
++    NTSTATUS status;
++    int i;
++
++    if (code != IOCTL_SHARED_GPU_RESOURCE_OPEN && code != IOCTL_SHARED_GPU_RESOURCE_SET_METADATA &&
++        code != IOCTL_SHARED_GPU_RESOURCE_GET_METADATA)
++        return STATUS_NOT_SUPPORTED;
++
++    mutex_lock( &shared_gpu_files_mutex );
++    if ((i = shared_gpu_file_index( handle )) >= 0)
++    {
++        file = TRUE;
++        global = shared_gpu_files[i].global;
++    }
++    mutex_unlock( &shared_gpu_files_mutex );
++
++    io->Information = 0;
++
++    if (code == IOCTL_SHARED_GPU_RESOURCE_OPEN)
++    {
++        if (!file) return STATUS_NOT_SUPPORTED;
++        /* struct { unsigned int kmt_handle; WCHAR name[1]; }, opening by name is not supported */
++        if (in_size < sizeof(UINT) || !(global = *(UINT *)in_buffer)) status = STATUS_INVALID_PARAMETER;
++        else
++        {
++            SERVER_START_REQ( d3dkmt_object_query )
++            {
++                req->type   = D3DKMT_RESOURCE;
++                req->global = global;
++                status = wine_server_call( req );
++            }
++            SERVER_END_REQ;
++        }
++        if (!status)
++        {
++            mutex_lock( &shared_gpu_files_mutex );
++            if ((i = shared_gpu_file_index( handle )) >= 0) shared_gpu_files[i].global = global;
++            mutex_unlock( &shared_gpu_files_mutex );
++        }
++        TRACE( "file %p, open %#x -> %#x\n", handle, global, status );
++        io->Status = status;
++        return status;
++    }
++
++    /* a file not opened on a resource yet */
++    if (file && !global) return io->Status = STATUS_INVALID_HANDLE;
++
++    /* an NT handle: let the server answer when it is not a D3DKMT shared resource */
++    SERVER_START_REQ( d3dkmt_object_query )
++    {
++        req->type   = D3DKMT_RESOURCE;
++        req->global = global;
++        req->handle = global ? 0 : wine_server_obj_handle( handle );
++        if (!(status = wine_server_call( req ))) size = reply->runtime_size;
++    }
++    SERVER_END_REQ;
++    if (status) return file ? (io->Status = status) : STATUS_NOT_SUPPORTED;
++
++    if (size && !(runtime = malloc( size ))) return io->Status = STATUS_NO_MEMORY;
++
++    SERVER_START_REQ( d3dkmt_object_open )
++    {
++        req->type   = D3DKMT_RESOURCE;
++        req->global = global;
++        req->handle = global ? 0 : wine_server_obj_handle( handle );
++        if (runtime) wine_server_set_reply( req, runtime, size );
++        if (!(status = wine_server_call( req )))
++        {
++            global = reply->global;
++            local  = reply->handle;
++        }
++    }
++    SERVER_END_REQ;
++    if (local) NtClose( wine_server_ptr_handle( local ) );
++
++    if (status) WARN( "Failed to open the D3DKMT resource of handle %p, status %#x\n", handle, status );
++    else if (code == IOCTL_SHARED_GPU_RESOURCE_SET_METADATA)
++    {
++        SERVER_START_REQ( d3dkmt_object_update )
++        {
++            req->type   = D3DKMT_RESOURCE;
++            req->global = global;
++            if (in_size) wine_server_add_data( req, in_buffer, in_size );
++            status = wine_server_call( req );
++        }
++        SERVER_END_REQ;
++    }
++    else if (!size) status = STATUS_NOT_FOUND;
++    else if (size > out_size) status = STATUS_BUFFER_TOO_SMALL;
++    else
++    {
++        memcpy( out_buffer, runtime, size );
++        io->Information = size;
++    }
++
++    free( runtime );
++    TRACE( "handle %p, global %#x, code %#x, in_size %#x, out_size %#x, runtime size %#x -> %#x\n",
++           handle, global, code, in_size, out_size, size, status );
++    io->Status = status;
++    return status;
++}
++#endif
++
+ /******************************************************************************
+  *              NtDeviceIoControlFile   (NTDLL.@)
+  */
+@@ -7147,6 +7347,11 @@ NTSTATUS WINAPI NtDeviceIoControlFile( HANDLE handle, HANDLE event, PIO_APC_ROUT
+         status = tape_DeviceIoControl( handle, event, apc, apc_context, io, code,
+                                        in_buffer, in_size, out_buffer, out_size );
+         break;
++#ifdef __ANDROID__
++    case FILE_DEVICE_VIDEO:
++        status = shared_resource_metadata_ioctl( handle, io, code, in_buffer, in_size, out_buffer, out_size );
++        break;
++#endif
+     }
+ 
+     if (status == STATUS_NOT_SUPPORTED || status == STATUS_BAD_DEVICE_TYPE)
+diff --git a/dlls/ntdll/unix/server.c b/dlls/ntdll/unix/server.c
+--- a/dlls/ntdll/unix/server.c
++++ b/dlls/ntdll/unix/server.c
+@@ -1999,6 +1999,9 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
+      * retrieve it again */
+     fd = remove_fd_from_cache( handle );
+     close_inproc_sync( handle );
++#ifdef __ANDROID__
++    shared_gpu_file_forget( handle );
++#endif
+ 
+     SERVER_START_REQ( close_handle )
+     {
+diff --git a/dlls/ntdll/unix/unix_private.h b/dlls/ntdll/unix/unix_private.h
+--- a/dlls/ntdll/unix/unix_private.h
++++ b/dlls/ntdll/unix/unix_private.h
+@@ -379,6 +379,9 @@ extern NTSTATUS sock_read( HANDLE handle, int fd, HANDLE event, PIO_APC_ROUTINE
+ extern NTSTATUS sock_write( HANDLE handle, int fd, HANDLE event, PIO_APC_ROUTINE apc, void *apc_user,
+                             IO_STATUS_BLOCK *io, const void *buffer, ULONG length );
+ extern void sock_recv_fastpath_forget( HANDLE handle );
++#ifdef __ANDROID__
++extern void shared_gpu_file_forget( HANDLE handle );
++#endif
+ extern void sock_server_ioctl_done( UINT code );
+ extern NTSTATUS tape_DeviceIoControl( HANDLE device, HANDLE event, PIO_APC_ROUTINE apc, void *apc_user,
+                                       IO_STATUS_BLOCK *io, UINT code, void *in_buffer,
