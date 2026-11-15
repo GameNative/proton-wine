@@ -148,9 +148,9 @@ static void diagnose_state(DWORD index, DWORD result, struct xinput_controller *
     if (samples[index].count < 512 && (!samples[index].count ||
         (elapsed >= 100 && (changed || elapsed >= 2000))))
     {
-        WARN("GN-XINPUT module %p index %lu result %lu enabled %d overlay_wait %#lx "
+        MESSAGE("GN-XINPUT pid %04lx tick %lu module %p index %lu result %lu enabled %d overlay_wait %#lx "
              "cached packet %lu buttons %#x triggers %u,%u sticks %d,%d,%d,%d "
-             "returned packet %lu buttons %#x\n", xinput_instance, index, result,
+             "returned packet %lu buttons %#x\n", GetCurrentProcessId(), tick, xinput_instance, index, result,
              controller ? controller->enabled : FALSE, overlay, cached.dwPacketNumber,
              cached.Gamepad.wButtons, cached.Gamepad.bLeftTrigger, cached.Gamepad.bRightTrigger,
              cached.Gamepad.sThumbLX, cached.Gamepad.sThumbLY, cached.Gamepad.sThumbRX,
