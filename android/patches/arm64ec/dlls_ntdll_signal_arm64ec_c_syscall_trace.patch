@@ -1,0 +1,11 @@
+diff --git a/dlls/ntdll/signal_arm64ec.c b/dlls/ntdll/signal_arm64ec.c
+--- a/dlls/ntdll/signal_arm64ec.c
++++ b/dlls/ntdll/signal_arm64ec.c
+@@ -1332,6 +1332,7 @@
+  */
+ static void dispatch_syscall( ARM64_NT_CONTEXT *context )
+ {
++    TRACE( "x64 syscall %#I64x at %I64x sp %I64x\n", context->X8, context->Pc, context->Sp );
+     if (context->X8 < __nb_syscalls)  /* syscall number in rax */
+     {
+         context->X0 = context->X4;  /* get first param from r10 */
