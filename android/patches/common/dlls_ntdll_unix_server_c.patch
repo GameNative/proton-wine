@@ -2,26 +2,34 @@ diff --git a/dlls/ntdll/unix/server.c b/dlls/ntdll/unix/server.c
 index 112157b0dd7..ff51533dbc7 100644
 --- a/dlls/ntdll/unix/server.c
 +++ b/dlls/ntdll/unix/server.c
-@@ -83,6 +83,10 @@
- 
+@@ -84,5 +84,9 @@
  #include "fsync.h"
- 
+-
 +#ifdef __ANDROID__
++#include <limits.h>
 +#include "../../../android/ntsync_android/ntsync_user.h"
 +#endif
 +
  WINE_DEFAULT_DEBUG_CHANNEL(server);
  WINE_DECLARE_DEBUG_CHANNEL(syscall);
  WINE_DECLARE_DEBUG_CHANNEL(client);
-@@ -1360,9 +1364,16 @@ static int setup_config_dir(void)
- 
+@@ -1361,8 +1365,24 @@ static int setup_config_dir(void)
      if (!mkdir( "dosdevices", 0777 ))
      {
 +#ifdef __ANDROID__
++        const char *imagefs = getenv( "WINE_ANDROID_IMAGEFS" );
++        char imagefs_path[PATH_MAX];
++        size_t len;
++
 +        mkdir( "drive_d", 0777 );
 +        symlink( "../drive_c", "dosdevices/c:" );
 +        symlink( "/storage/emulated/0/", "dosdevices/d:" );
-+        symlink( "/data/data/app.gamenative/files/imagefs/", "dosdevices/z:" );
++        /* the app tells us where its imagefs lives; GameNative layout as fallback */
++        if (!imagefs || !*imagefs) imagefs = "/data/data/app.gamenative/files/imagefs/";
++        len = strlen( imagefs );
++        snprintf( imagefs_path, sizeof(imagefs_path), "%s%s", imagefs,
++                  imagefs[len - 1] == '/' ? "" : "/" );
++        symlink( imagefs_path, "dosdevices/z:" );
 +#else
          mkdir( "drive_c", 0777 );
          symlink( "../drive_c", "dosdevices/c:" );
@@ -30,7 +38,7 @@ index 112157b0dd7..ff51533dbc7 100644
      }
      else if (errno != EEXIST) fatal_perror( "cannot create %s/dosdevices", config_dir );
  
-@@ -1703,6 +1714,17 @@ size_t server_init_process(void)
+@@ -1703,6 +1723,17 @@ size_t server_init_process(void)
                  inproc_device_fd = FSYNC_USED_BY_SERVER;
                  fsync_init( pid );
              }

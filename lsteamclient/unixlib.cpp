@@ -816,7 +816,21 @@ static NTSTATUS steamclient_init( Params *params, bool wow64 )
 #endif
 
 #if defined(__ANDROID__)
-    snprintf( path, PATH_MAX, "/data/data/app.gamenative/files/imagefs/usr/lib/libsteamclient.so" );
+    {
+        /* The app that ships this build tells us where its imagefs lives; this keeps the same
+         * binaries working under any package name. Fall back to the GameNative layout. */
+        const char *imagefs = getenv( "WINE_ANDROID_IMAGEFS" );
+
+        if (imagefs && *imagefs)
+        {
+            size_t len = strlen( imagefs );
+
+            snprintf( path, PATH_MAX, "%s%susr/lib/libsteamclient.so", imagefs,
+                      imagefs[len - 1] == '/' ? "" : "/" );
+        }
+        else
+            snprintf( path, PATH_MAX, "/data/data/app.gamenative/files/imagefs/usr/lib/libsteamclient.so" );
+    }
 #else
     snprintf( path, PATH_MAX, "%s/.steam/sdk" STEAM_ARCH "/steamclient.so", getenv( "HOME" ) );
 #endif
