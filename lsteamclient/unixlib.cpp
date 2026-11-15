@@ -102,7 +102,7 @@ void queue_vtable_callback( struct w_iface *w_iface, enum callback_type type, ui
     pthread_mutex_unlock( &callbacks_lock );
 }
 
-void queue_vtable_callback_0_server_responded( struct w_iface *w_iface, gameserveritem_t_105 *server )
+void queue_vtable_callback_0_server_responded( struct w_iface *w_iface, gameserveritem_t_165 *server )
 {
     uint32_t size = sizeof(*server);
     struct callback_entry *entry;
@@ -159,6 +159,28 @@ void queue_vtable_callback_0_rules_responded( struct w_iface *w_iface, const cha
     entry->callback.rules_responded.iface = w_iface;
     memcpy( (char *)entry->callback.rules_responded.rule_and_value, pchRule, rule_size );
     memcpy( (char *)entry->callback.rules_responded.rule_and_value + rule_size, pchValue, value_size );
+
+    pthread_mutex_lock( &callbacks_lock );
+    list_add_tail( &callbacks, &entry->entry );
+    pthread_mutex_unlock( &callbacks_lock );
+}
+
+void queue_vtable_callback_0_friends_responded( struct w_iface *w_iface, CSteamID steamID, const char *pchName, int8_t bCurrentlyConnected )
+{
+    uint32_t name_size = strlen( pchName ) + 1, size = name_size;
+    struct callback_entry *entry;
+
+    size += sizeof(struct callback_entry);
+    if (!(entry = (struct callback_entry *)calloc( 1, size ))) return;
+
+    entry->callback.type = CALL_IFACE_VTABLE_0_FRIENDS_RESPONDED;
+    size -= offsetof( struct callback_entry, callback );
+    entry->callback.size = size;
+
+    entry->callback.friends_responded.iface = w_iface;
+    entry->callback.friends_responded.steamid = steamID;
+    entry->callback.friends_responded.connected = bCurrentlyConnected;
+    memcpy( (char *)entry->callback.friends_responded.name, pchName, name_size );
 
     pthread_mutex_lock( &callbacks_lock );
     list_add_tail( &callbacks, &entry->entry );
@@ -600,6 +622,12 @@ static void setup_steam_registry( u_ISteamClient_SteamClient017 *client, int pip
 
     /* HACK: Bug 23597 Granado Espada Japan (1219160) launcher needs Japanese locale to display correctly */
     if (appid == 1219160) locale = "ja_JP.UTF-8";
+    /* HACK: Bug 26267 Worms Armageddon (217200) Game Set-Up Does Not Respond to Language Preference on Proton
+     * The game reports only English in ISteamApps::GetCurrentGameLanguage() and ISteamApps::GetAvailableGameLanguages().
+     * So LC_MESSAGES is always set to English. Not setting LC_MESSAGES causes the game to use that from the host.
+     * That allows the game to detect the host language settings for the "Create a new team" settings in game.
+     * The "Create a new team" setting is affected by Settings->Time & Language->Region->Country or Region on Windows 10. */
+    else if (appid == 217200) locale = NULL;
 
     if (locale)
     {
@@ -746,6 +774,14 @@ static NTSTATUS steamclient_init_registry( Params *params, bool wow64 )
     return 0;
 }
 
+static void sync_env_var( const char *name, bool unset, const char *val )
+{
+    const char *s = getenv( name );
+
+    if (unset && s)                           unsetenv( name );
+    else if (val && (!s || strcmp( s, val ))) setenv( name, val, 1 );
+}
+
 template< typename Params >
 static NTSTATUS steamclient_init( Params *params, bool wow64 )
 {
@@ -754,10 +790,8 @@ static NTSTATUS steamclient_init( Params *params, bool wow64 )
 
     g_tmppath = params->g_tmppath;
 
-    if (params->steam_app_id_unset) unsetenv( "SteamAppId" );
-    else if (params->steam_app_id) setenv( "SteamAppId", params->steam_app_id, TRUE );
-    if (params->ignore_child_processes_unset) unsetenv( "IgnoreChildProcesses" );
-    else if (params->ignore_child_processes) setenv( "IgnoreChildProcesses", params->ignore_child_processes, TRUE );
+    sync_env_var( "SteamAppId", params->steam_app_id_unset, params->steam_app_id );
+    sync_env_var( "IgnoreChildProcesses", params->ignore_child_processes_unset, params->ignore_child_processes );
 
     if (steamclient) return 0;
 
