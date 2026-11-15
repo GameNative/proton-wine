@@ -300,6 +300,12 @@ do
       # fail would-block receives on nonblocking sockets without a server round trip (DOOM 2016 DTLS poll thread);
       # WINE_SOCKET_POLL_FASTPATH=0 disables it
       "common/dlls_ntdll_unix_socket_c_recv_fastpath.patch"
+
+      # serve the sharedgpures.sys ioctls of DXVK before 3.0 (texture description on NT handles and \\.\SharedGpuResource) from D3DKMT resources
+      # (Proton 11 has no sharedgpures.sys; CEF shared textures in the Epic overlay)
+      "common/dlls_ntdll_unix_file_c_shared_resource_metadata.patch"
+      # wine_vkAcquireKeyedMutex / wine_vkReleaseKeyedMutex for the IDXGIKeyedMutex of DXVK before 3.0
+      "common/dlls_winevulkan_loader_c_dxvk2_keyed_mutex.patch"
     )
 
     for patch in "${PATCHES[@]}"; do
