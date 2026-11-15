@@ -1,0 +1,76 @@
+diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
+index aa8b141..3cf0273 100644
+--- a/dlls/ntdll/unix/virtual.c
++++ b/dlls/ntdll/unix/virtual.c
+@@ -5003,13 +5003,62 @@ NTSTATUS virtual_handle_fault( EXCEPTION_RECORD *rec, void *stack )
+ }
+ 
+ 
++/***********************************************************************
++ *           queue_emulated_code_write
++ *
++ * Tell the emulator that a system call wrote into a page it may have translated, the
++ * same way a write from another process is reported. The entry is applied the next
++ * time the emulator processes its cross-process work. When no entry is free, ask for
++ * a full flush instead, so the write is never lost.
++ */
++static void queue_emulated_code_write( void *addr, SIZE_T size )
++{
++    CHPEV2_PROCESS_INFO *info = peb->ChpeV2ProcessInfo;
++    CROSS_PROCESS_WORK_LIST *list;
++    CROSS_PROCESS_WORK_ENTRY *entry;
++    CROSS_PROCESS_WORK_HDR prev, new;
++
++    if (!info || !(list = (CROSS_PROCESS_WORK_LIST *)info->CrossProcessWorkList)) return;
++
++    do
++    {
++        prev.hdr = list->free_list.hdr;
++        if (!prev.first)
++        {
++            do
++            {
++                prev.hdr = list->work_list.hdr;
++                new.first = prev.first | CROSS_PROCESS_LIST_FLUSH;
++                new.counter = prev.counter + 1;
++            } while (InterlockedCompareExchange64( &list->work_list.hdr, new.hdr, prev.hdr ) != prev.hdr);
++            return;
++        }
++        entry = CROSS_PROCESS_LIST_ENTRY( &list->free_list, prev.first );
++        new.first = entry->next;
++        new.counter = prev.counter + 1;
++    } while (InterlockedCompareExchange64( &list->free_list.hdr, new.hdr, prev.hdr ) != prev.hdr);
++
++    entry->id = CrossProcessMemoryWrite;
++    entry->addr = (ULONG_PTR)addr;
++    entry->size = size;
++    do
++    {
++        prev.hdr = list->work_list.hdr;
++        entry->next = prev.first & ~CROSS_PROCESS_LIST_FLUSH;
++        new.first = ((char *)entry - (char *)&list->work_list) | (prev.first & CROSS_PROCESS_LIST_FLUSH);
++        new.counter = prev.counter + 1;
++    } while (InterlockedCompareExchange64( &list->work_list.hdr, new.hdr, prev.hdr ) != prev.hdr);
++}
++
++
+ /***********************************************************************
+  *           virtual_handle_emulated_code_write
+  *
+  * An ARM64EC emulator write-protects RWX pages it has translated code from, so that
+  * it notices self-modifying code. On Windows a system call writing its output into
+  * such a page succeeds; here the unix side faults and the call would return
+- * STATUS_ACCESS_VIOLATION. Make the page writable again so the call completes.
++ * STATUS_ACCESS_VIOLATION. Make the page writable again so the call completes, and
++ * report the write so the emulator drops its translations of the page.
+  */
+ BOOL virtual_handle_emulated_code_write( void *addr )
+ {
+@@ -5032,6 +5081,7 @@ BOOL virtual_handle_emulated_code_write( void *addr )
+         }
+     }
+     mutex_unlock( &virtual_mutex );
++    if (ret) queue_emulated_code_write( page, host_page_size );
+     return ret;
+ }
+ 

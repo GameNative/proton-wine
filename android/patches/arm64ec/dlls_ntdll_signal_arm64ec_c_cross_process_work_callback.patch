@@ -1,0 +1,37 @@
+diff --git a/dlls/ntdll/signal_arm64ec.c b/dlls/ntdll/signal_arm64ec.c
+index 72e3b98..145dcfa 100644
+--- a/dlls/ntdll/signal_arm64ec.c
++++ b/dlls/ntdll/signal_arm64ec.c
+@@ -1001,10 +1001,16 @@ void WINAPI ProcessPendingCrossProcessEmulatorWork(void)
+     CROSS_PROCESS_WORK_LIST *list = (void *)info->CrossProcessWorkList;
+     CROSS_PROCESS_WORK_ENTRY *entry;
+     BOOLEAN flush = FALSE;
++    BOOL callback;
+     UINT next;
+ 
+     if (!list) return;
+     entry = RtlWow64PopAllCrossProcessWorkFromWorkList( &list->work_list, &flush );
++    if (!entry && !flush) return;
++
++    /* the emulator may allocate or free memory while it applies the work; those calls
++     * must not be reported back to it, as for any other emulator callback */
++    callback = enter_syscall_callback();
+ 
+     if (flush)
+     {
+@@ -1015,6 +1021,7 @@ void WINAPI ProcessPendingCrossProcessEmulatorWork(void)
+             RtlWow64PushCrossProcessWorkOntoFreeList( &list->free_list, entry );
+             entry = next ? CROSS_PROCESS_LIST_ENTRY( &list->work_list, next ) : NULL;
+         }
++        if (callback) leave_syscall_callback();
+         return;
+     }
+ 
+@@ -1057,6 +1064,7 @@ void WINAPI ProcessPendingCrossProcessEmulatorWork(void)
+         RtlWow64PushCrossProcessWorkOntoFreeList( &list->free_list, entry );
+         entry = next ? CROSS_PROCESS_LIST_ENTRY( &list->work_list, next ) : NULL;
+     }
++    if (callback) leave_syscall_callback();
+ }
+ 
+ 
