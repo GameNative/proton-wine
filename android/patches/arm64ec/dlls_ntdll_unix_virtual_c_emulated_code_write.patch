@@ -1,7 +1,7 @@
 diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
 --- a/dlls/ntdll/unix/virtual.c
 +++ b/dlls/ntdll/unix/virtual.c
-@@ -5000,6 +5000,66 @@
+@@ -5000,6 +5000,42 @@
      mutex_unlock( &virtual_mutex );
      rec->ExceptionCode = ret;
      return ret;
@@ -20,10 +20,6 @@ diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
 +BOOL virtual_handle_emulated_code_write( void *addr )
 +{
 +    char *page = ROUND_ADDR( addr, host_page_mask );
-+    CHPEV2_PROCESS_INFO *info;
-+    CROSS_PROCESS_WORK_LIST *list;
-+    CROSS_PROCESS_WORK_ENTRY *entry;
-+    CROSS_PROCESS_WORK_HDR prev, new;
 +    struct file_view *view;
 +    BOOL ret = FALSE;
 +    BYTE vprot;
@@ -44,26 +40,6 @@ diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
 +    mutex_unlock( &virtual_mutex );
 +    if (!ret) return FALSE;
 +
-+    TRACE( "syscall write to emulated code page %p\n", page );
-+    if (!(info = peb->ChpeV2ProcessInfo) || !(list = (void *)info->CrossProcessWorkList)) return TRUE;
-+    do
-+    {
-+        prev.hdr = list->free_list.hdr;
-+        if (!prev.first) return TRUE;
-+        entry = CROSS_PROCESS_LIST_ENTRY( &list->free_list, prev.first );
-+        new.first = entry->next;
-+        new.counter = prev.counter + 1;
-+    } while (InterlockedCompareExchange64( &list->free_list.hdr, new.hdr, prev.hdr ) != prev.hdr);
-+    entry->id = CrossProcessMemoryWrite;
-+    entry->addr = (ULONG_PTR)page;
-+    entry->size = host_page_size;
-+    do
-+    {
-+        prev.hdr = list->work_list.hdr;
-+        entry->next = prev.first;
-+        new.first = ((char *)entry - (char *)&list->work_list) | (prev.first & CROSS_PROCESS_LIST_FLUSH);
-+        new.counter = prev.counter + 1;
-+    } while (InterlockedCompareExchange64( &list->work_list.hdr, new.hdr, prev.hdr ) != prev.hdr);
 +    return TRUE;
  }
  
