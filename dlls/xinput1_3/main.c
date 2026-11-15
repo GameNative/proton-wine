@@ -122,6 +122,27 @@ static HMODULE xinput_instance;
 static HANDLE start_event;
 static HANDLE update_event;
 static HANDLE steam_overlay_event;
+static BOOL diagnose_returned_state;
+static LONG diagnostic_count;
+
+/* Keep the diagnostic local to the affected executable and bound its output. */
+static void diagnose_xinput_result(const char *api, DWORD index, DWORD ret, const XINPUT_STATE *state)
+{
+    LONG count;
+
+    if (!diagnose_returned_state) return;
+    count = InterlockedIncrement(&diagnostic_count);
+    if (count > 16384) return;
+    if (ret == ERROR_SUCCESS)
+        WARN("GN_XINPUT_RETURN api=%s index=%lu ret=%lu packet=%lu buttons=%04x "
+             "lt=%u rt=%u lx=%d ly=%d rx=%d ry=%d\n", api, index, ret,
+             state->dwPacketNumber, state->Gamepad.wButtons, state->Gamepad.bLeftTrigger,
+             state->Gamepad.bRightTrigger, state->Gamepad.sThumbLX, state->Gamepad.sThumbLY,
+             state->Gamepad.sThumbRX, state->Gamepad.sThumbRY);
+    else
+        WARN("GN_XINPUT_RETURN api=%s index=%lu ret=%lu\n", api, index, ret);
+    if (count == 16384) WARN("GN_XINPUT_RETURN diagnostic limit reached\n");
+}
 
 static void check_value_caps(struct xinput_controller *controller, USHORT usage, HIDP_VALUE_CAPS *caps)
 {
@@ -790,6 +811,9 @@ static void controller_unlock(struct xinput_controller *controller)
 
 BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
 {
+    WCHAR path[MAX_PATH], *name;
+    DWORD len;
+
     TRACE("inst %p, reason %lu, reserved %p.\n", inst, reason, reserved);
 
     switch (reason)
@@ -797,6 +821,12 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
     case DLL_PROCESS_ATTACH:
         xinput_instance = inst;
         DisableThreadLibraryCalls(inst);
+        len = GetModuleFileNameW(NULL, path, ARRAY_SIZE(path));
+        if (len && len < ARRAY_SIZE(path))
+        {
+            name = wcsrchr(path, '\\');
+            diagnose_returned_state = !wcsicmp(name ? name + 1 : path, L"AliceMadnessReturns.exe");
+        }
         break;
     }
     return TRUE;
@@ -868,19 +898,25 @@ DWORD WINAPI DECLSPEC_HOTPATCH XInputGetState(DWORD index, XINPUT_STATE *state)
     TRACE("index %lu, state %p.\n", index, state);
 
     ret = xinput_get_state(index, state);
-    if (ret != ERROR_SUCCESS) return ret;
+    if (ret == ERROR_SUCCESS)
+    {
+        /* The main difference between this and the Ex version is the media guide button */
+        state->Gamepad.wButtons &= ~XINPUT_GAMEPAD_GUIDE;
+    }
+    diagnose_xinput_result("XInputGetState", index, ret, state);
 
-    /* The main difference between this and the Ex version is the media guide button */
-    state->Gamepad.wButtons &= ~XINPUT_GAMEPAD_GUIDE;
-
-    return ERROR_SUCCESS;
+    return ret;
 }
 
 DWORD WINAPI DECLSPEC_HOTPATCH XInputGetStateEx(DWORD index, XINPUT_STATE *state)
 {
+    DWORD ret;
+
     TRACE("index %lu, state %p.\n", index, state);
 
-    return xinput_get_state(index, state);
+    ret = xinput_get_state(index, state);
+    diagnose_xinput_result("XInputGetStateEx", index, ret, state);
+    return ret;
 }
 
 static const int JS_STATE_OFF = 0;
