@@ -1,0 +1,60 @@
+diff --git a/dlls/ntdll/signal_x86_64.c b/dlls/ntdll/signal_x86_64.c
+index d028d2ba13d..608588473f2 100644
+--- a/dlls/ntdll/signal_x86_64.c
++++ b/dlls/ntdll/signal_x86_64.c
+@@ -62,17 +62,48 @@ __ASM_GLOBAL_FUNC( __chkstk, "ret" );
+  *		invoke_arm64ec_syscall
+  *
+  * Helper to call a syscall entry point from x64 code.
++ *
++ * A syscall instruction leaves the user stack alone, and code that issues it
++ * directly (not through an ntdll thunk) may keep data in the slots above rsp.
++ * Run the entry point on a frame below rsp with a copy of the stack arguments,
++ * then resume like syscall does: rcx = return address, r11 = flags.
+  */
+ __ASM_GLOBAL_FUNC( invoke_arm64ec_syscall,
+-                   "movq %r10,8(%rsp)\n\t"  /* ret address to syscall thunk */
+-                   "popq %r10\n\t"          /* remove ret address to thunk caller */
+-                   "movq %r10,8(%rsp)\n\t"  /* and save it */
++                   "subq $0xa8,%rsp\n\t"
++                   "movq %r10,0x90(%rsp)\n\t"   /* return address after the syscall instruction */
++                   "movq 0xd0(%rsp),%r11\n\t"
++                   "movq %r11,0x20(%rsp)\n\t"
++                   "movq 0xd8(%rsp),%r11\n\t"
++                   "movq %r11,0x28(%rsp)\n\t"
++                   "movq 0xe0(%rsp),%r11\n\t"
++                   "movq %r11,0x30(%rsp)\n\t"
++                   "movq 0xe8(%rsp),%r11\n\t"
++                   "movq %r11,0x38(%rsp)\n\t"
++                   "movq 0xf0(%rsp),%r11\n\t"
++                   "movq %r11,0x40(%rsp)\n\t"
++                   "movq 0xf8(%rsp),%r11\n\t"
++                   "movq %r11,0x48(%rsp)\n\t"
++                   "movq 0x100(%rsp),%r11\n\t"
++                   "movq %r11,0x50(%rsp)\n\t"
++                   "movq 0x108(%rsp),%r11\n\t"
++                   "movq %r11,0x58(%rsp)\n\t"
++                   "movq 0x110(%rsp),%r11\n\t"
++                   "movq %r11,0x60(%rsp)\n\t"
++                   "movq 0x118(%rsp),%r11\n\t"
++                   "movq %r11,0x68(%rsp)\n\t"
++                   "movq 0x120(%rsp),%r11\n\t"
++                   "movq %r11,0x70(%rsp)\n\t"
++                   "movq 0x128(%rsp),%r11\n\t"
++                   "movq %r11,0x78(%rsp)\n\t"
++                   "movq 0x130(%rsp),%r11\n\t"
++                   "movq %r11,0x80(%rsp)\n\t"
+                    "leaq arm64ec_syscalls(%rip),%r10\n\t"
+                    "callq *(%r10,%rax,8)\n\t"
+-                   "movq (%rsp),%r10\n\t"
+-                   "pushq 8(%rsp)\n\t"      /* restore ret to caller */
+-                   "pushq %r10\n\t"         /* and return to syscall thunk */
+-                   "ret" )
++                   "movq 0x90(%rsp),%rcx\n\t"
++                   "pushfq\n\t"
++                   "popq %r11\n\t"
++                   "addq $0xa8,%rsp\n\t"
++                   "jmpq *%rcx" )
+ 
+ /*******************************************************************
+  *		KiUserExceptionDispatcher (NTDLL.@)
