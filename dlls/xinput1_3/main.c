@@ -122,6 +122,48 @@ static HMODULE xinput_instance;
 static HANDLE start_event;
 static HANDLE update_event;
 static HANDLE steam_overlay_event;
+static BOOL diagnose_input;
+
+/* Bounded, per-executable observation only: keep input and overlay semantics intact. */
+static void diagnose_state(DWORD index, DWORD result, struct xinput_controller *controller,
+                           const XINPUT_STATE *state, DWORD overlay)
+{
+    static struct
+    {
+        LONG busy;
+        DWORD count, tick, result, overlay;
+        XINPUT_STATE cached;
+    } samples[XUSER_MAX_COUNT];
+    XINPUT_STATE cached = {0};
+    DWORD tick, elapsed;
+    BOOL changed;
+
+    if (!diagnose_input || index >= XUSER_MAX_COUNT) return;
+    if (InterlockedCompareExchange(&samples[index].busy, 1, 0)) return;
+    tick = GetTickCount();
+    if (controller) cached = controller->state;
+    elapsed = tick - samples[index].tick;
+    changed = result != samples[index].result || overlay != samples[index].overlay ||
+              memcmp(&cached.Gamepad, &samples[index].cached.Gamepad, sizeof(cached.Gamepad));
+    if (samples[index].count < 512 && (!samples[index].count ||
+        (elapsed >= 100 && (changed || elapsed >= 2000))))
+    {
+        WARN("GN-XINPUT module %p index %lu result %lu enabled %d overlay_wait %#lx "
+             "cached packet %lu buttons %#x triggers %u,%u sticks %d,%d,%d,%d "
+             "returned packet %lu buttons %#x\n", xinput_instance, index, result,
+             controller ? controller->enabled : FALSE, overlay, cached.dwPacketNumber,
+             cached.Gamepad.wButtons, cached.Gamepad.bLeftTrigger, cached.Gamepad.bRightTrigger,
+             cached.Gamepad.sThumbLX, cached.Gamepad.sThumbLY, cached.Gamepad.sThumbRX,
+             cached.Gamepad.sThumbRY, state ? state->dwPacketNumber : 0,
+             state ? state->Gamepad.wButtons : 0);
+        samples[index].count++;
+        samples[index].tick = tick;
+        samples[index].result = result;
+        samples[index].overlay = overlay;
+        samples[index].cached = cached;
+    }
+    InterlockedExchange(&samples[index].busy, 0);
+}
 
 static void check_value_caps(struct xinput_controller *controller, USHORT usage, HIDP_VALUE_CAPS *caps)
 {
@@ -790,12 +832,19 @@ static void controller_unlock(struct xinput_controller *controller)
 
 BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
 {
+    WCHAR path[MAX_PATH] = {0}, *name;
+
     TRACE("inst %p, reason %lu, reserved %p.\n", inst, reason, reserved);
 
     switch (reason)
     {
     case DLL_PROCESS_ATTACH:
         xinput_instance = inst;
+        if (GetModuleFileNameW(NULL, path, ARRAY_SIZE(path)) < ARRAY_SIZE(path))
+        {
+            name = wcsrchr(path, '\\');
+            diagnose_input = !wcsicmp(name ? name + 1 : path, L"dotAge.exe");
+        }
         DisableThreadLibraryCalls(inst);
         break;
     }
@@ -846,16 +895,24 @@ DWORD WINAPI DECLSPEC_HOTPATCH XInputSetState(DWORD index, XINPUT_VIBRATION *vib
  * XInputGetState() in the hook, so we need a wrapper. */
 static DWORD xinput_get_state(DWORD index, XINPUT_STATE *state)
 {
+    DWORD overlay;
+
     if (!state) return ERROR_BAD_ARGUMENTS;
 
     start_update_thread();
 
     if (index >= XUSER_MAX_COUNT) return ERROR_BAD_ARGUMENTS;
-    if (!controller_lock(&controllers[index])) return ERROR_DEVICE_NOT_CONNECTED;
+    if (!controller_lock(&controllers[index]))
+    {
+        diagnose_state(index, ERROR_DEVICE_NOT_CONNECTED, NULL, NULL, WAIT_FAILED);
+        return ERROR_DEVICE_NOT_CONNECTED;
+    }
 
-    if (WaitForSingleObject(steam_overlay_event, 0) == WAIT_OBJECT_0) memset(state, 0, sizeof(*state));
+    overlay = WaitForSingleObject(steam_overlay_event, 0);
+    if (overlay == WAIT_OBJECT_0) memset(state, 0, sizeof(*state));
     else *state = controllers[index].state;
 
+    diagnose_state(index, ERROR_SUCCESS, &controllers[index], state, overlay);
     controller_unlock(&controllers[index]);
 
     return ERROR_SUCCESS;
