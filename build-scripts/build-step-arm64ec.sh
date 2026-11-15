@@ -341,7 +341,7 @@ do
       "arm64ec/dlls_ntdll_signal_arm64_c_no_unwind_progress.patch"
 
       # a system call writing into an RWX page the emulator write-protected for
-      # self-modifying-code tracking succeeds, as on Windows, and the emulator is told
+      # self-modifying-code tracking succeeds, as on Windows
       "arm64ec/dlls_ntdll_unix_virtual_c_emulated_code_write.patch"
     )
 
