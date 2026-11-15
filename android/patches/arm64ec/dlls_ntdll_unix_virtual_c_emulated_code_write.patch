@@ -1,0 +1,67 @@
+diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
+--- a/dlls/ntdll/unix/virtual.c
++++ b/dlls/ntdll/unix/virtual.c
+@@ -5004,6 +5004,39 @@
+ 
+ 
+ /***********************************************************************
++ *           virtual_handle_emulated_code_write
++ *
++ * An ARM64EC emulator write-protects RWX pages it has translated code from, so that
++ * it notices self-modifying code. On Windows a system call writing its output into
++ * such a page succeeds; here the unix side faults and the call would return
++ * STATUS_ACCESS_VIOLATION. Make the page writable again so the call completes.
++ */
++BOOL virtual_handle_emulated_code_write( void *addr )
++{
++    char *page = ROUND_ADDR( addr, host_page_mask );
++    struct file_view *view;
++    BOOL ret = FALSE;
++    BYTE vprot;
++
++    if (!is_arm64ec()) return FALSE;
++
++    mutex_lock( &virtual_mutex );  /* no need for signal masking inside signal handler */
++    if ((view = find_view( page, host_page_size )) && is_view_valloc( view ))
++    {
++        vprot = get_host_page_vprot( page );
++        if ((vprot & VPROT_COMMITTED) && (vprot & VPROT_EXEC) && (vprot & VPROT_READ) &&
++            !(vprot & (VPROT_WRITE | VPROT_WRITECOPY | VPROT_GUARD)))
++        {
++            set_page_vprot_bits( page, host_page_size, VPROT_WRITE, 0 );
++            ret = !mprotect_range( page, host_page_size, 0, 0 );
++        }
++    }
++    mutex_unlock( &virtual_mutex );
++    return ret;
++}
++
++
++/***********************************************************************
+  *           virtual_setup_exception
+  */
+ void *virtual_setup_exception( void *stack_ptr, size_t size, EXCEPTION_RECORD *rec )
+diff --git a/dlls/ntdll/unix/signal_arm64.c b/dlls/ntdll/unix/signal_arm64.c
+--- a/dlls/ntdll/unix/signal_arm64.c
++++ b/dlls/ntdll/unix/signal_arm64.c
+@@ -1165,6 +1165,9 @@
+     else rec.ExceptionInformation[0] = EXCEPTION_READ_FAULT;
+     rec.ExceptionInformation[1] = (ULONG_PTR)siginfo->si_addr;
+     if (!virtual_handle_fault( &rec, (void *)SP_sig(context) )) return;
++    if (rec.ExceptionCode == STATUS_ACCESS_VIOLATION && rec.ExceptionInformation[0] == EXCEPTION_WRITE_FAULT &&
++        is_inside_syscall( SP_sig(context) ) && virtual_handle_emulated_code_write( siginfo->si_addr ))
++        return;
+     if (handle_syscall_fault( context, &rec )) return;
+     setup_exception( context, &rec );
+ }
+diff --git a/dlls/ntdll/unix/unix_private.h b/dlls/ntdll/unix/unix_private.h
+--- a/dlls/ntdll/unix/unix_private.h
++++ b/dlls/ntdll/unix/unix_private.h
+@@ -316,6 +316,7 @@
+ extern void virtual_map_user_shared_data(void);
+ extern void virtual_init_user_shared_data(void);
+ extern NTSTATUS virtual_handle_fault( EXCEPTION_RECORD *rec, void *stack );
++extern BOOL virtual_handle_emulated_code_write( void *addr );
+ extern unsigned int virtual_locked_server_call( void *req_ptr );
+ extern ssize_t virtual_locked_read( int fd, void *addr, size_t size );
+ extern ssize_t virtual_locked_pread( int fd, void *addr, size_t size, off_t offset );
