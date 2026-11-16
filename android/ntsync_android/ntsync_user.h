@@ -95,6 +95,25 @@ int32_t ntsync_init(const char *path);
  * process exits. Returns the number of freed objects or a negative errno. */
 int32_t ntsync_sweep_dead(void);
 
+/* Optional SIGUSR1 cooperation, for hosts whose SIGUSR1 handler suspends the
+ * thread (Wine). A thread suspended while it holds the shared region lock
+ * would wedge every process on it, so by default the library blocks SIGUSR1
+ * around each lock acquisition: two sigprocmask syscalls per acquisition.
+ * A host can instead give each thread an int the library sets while the
+ * thread holds (or waits for) the lock:
+ *   - get_flag returns the calling thread's int (NULL: fall back to masking
+ *     for this acquisition). It is called in normal context only.
+ *   - Before taking the lock the library stores NTSYNC_LOCK_FLAG_HELD; after
+ *     releasing it, it atomically swaps the int to 0 and, if
+ *     NTSYNC_LOCK_FLAG_SIGNAL_PENDING was set, re-raises SIGUSR1.
+ *   - The host's SIGUSR1 handler must, before doing anything else, check the
+ *     int: if nonzero, atomically OR in NTSYNC_LOCK_FLAG_SIGNAL_PENDING and
+ *     return without suspending.
+ * Pass NULL to uninstall. Returns 0. */
+#define NTSYNC_LOCK_FLAG_HELD           1
+#define NTSYNC_LOCK_FLAG_SIGNAL_PENDING 2
+int32_t ntsync_set_lock_flag_hook(int *(*get_flag)(void));
+
 /* Create objects. Return 0 and store the handle, or a negative errno.
  * Handles are never 0: slot 0 is permanently reserved because 0 is the
  * "no alert" sentinel in ntsync_wait_args.alert. */

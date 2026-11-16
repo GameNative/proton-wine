@@ -1,0 +1,72 @@
+userspace ntsync: defer a SIGUSR1 suspend through a per-thread lock flag
+
+The userspace ntsync library holds one shared region lock across every process. A thread suspended inside it
+wedges all of them, so the library blocks SIGUSR1 around every acquisition: two sigprocmask syscalls each time.
+ntdll now gives each thread a flag in its ntdll_thread_data that the library sets while the thread holds or waits
+for the lock (ntsync_set_lock_flag_hook); usr1_handler (arm64, x86_64: see the per-arch patches) marks the signal
+pending and returns while the flag is set, and the library re-raises SIGUSR1 right after the unlock.
+
+diff --git a/dlls/ntdll/unix/unix_private.h b/dlls/ntdll/unix/unix_private.h
+index 272d8d5..bb19375 100644
+--- a/dlls/ntdll/unix/unix_private.h
++++ b/dlls/ntdll/unix/unix_private.h
+@@ -119,8 +119,29 @@ struct ntdll_thread_data
+     int                      *fsync_apc_futex;
+     unsigned int              sleep0_count;  /* consecutive yields that did not switch */
+     ULONGLONG                 sleep0_last;   /* time of the last one, in Win32 ticks */
++#ifdef __ANDROID__
++    int                       ntsync_lock_flag; /* set by userspace ntsync while this thread holds its region lock */
++#endif
+ };
+ 
++#ifdef __ANDROID__
++/* userspace ntsync lock flag protocol (android/ntsync_android/ntsync_user.h): while the flag is nonzero the
++ * thread holds or waits for the shared region lock, and a SIGUSR1 suspend must not park it there (every
++ * process would wedge on the lock). usr1_handler ORs in this bit and returns; the library re-raises SIGUSR1
++ * right after the unlock. */
++#ifndef NTSYNC_LOCK_FLAG_SIGNAL_PENDING
++#define NTSYNC_LOCK_FLAG_SIGNAL_PENDING 2
++#endif
++
++static inline BOOL ntsync_defer_suspend(void)
++{
++    int *flag = &((struct ntdll_thread_data *)&NtCurrentTeb()->GdiTebBatch)->ntsync_lock_flag;
++    if (!*flag) return FALSE;
++    __atomic_fetch_or( flag, NTSYNC_LOCK_FLAG_SIGNAL_PENDING, __ATOMIC_SEQ_CST );
++    return TRUE;
++}
++#endif
++
+ C_ASSERT( sizeof(struct ntdll_thread_data) <= sizeof(((TEB *)0)->GdiTebBatch) );
+ #ifdef _WIN64
+ C_ASSERT( offsetof( TEB, GdiTebBatch ) + offsetof( struct ntdll_thread_data, syscall_table ) == 0x370 );
+diff --git a/dlls/ntdll/unix/server.c b/dlls/ntdll/unix/server.c
+index 7d06767..ff2eff8 100644
+--- a/dlls/ntdll/unix/server.c
++++ b/dlls/ntdll/unix/server.c
+@@ -87,6 +87,14 @@
+ #include "../../../android/ntsync_android/ntsync_user.h"
+ #endif
+ 
++#if defined(__ANDROID__) && (defined(__aarch64__) || defined(__x86_64__))
++/* the calling thread's userspace ntsync lock flag; usr1_handler on these arches honors it */
++static int *ntsync_lock_flag(void)
++{
++    return &ntdll_get_thread_data()->ntsync_lock_flag;
++}
++#endif
++
+ WINE_DEFAULT_DEBUG_CHANNEL(server);
+ WINE_DECLARE_DEBUG_CHANNEL(syscall);
+ WINE_DECLARE_DEBUG_CHANNEL(client);
+@@ -1722,6 +1730,10 @@ size_t server_init_process(void)
+                 {
+                     inproc_device_fd = 0;
+                     ntsync_userspace = 1;
++#if defined(__aarch64__) || defined(__x86_64__)
++                    /* defer SIGUSR1 through the thread's flag instead of two sigprocmask calls per lock */
++                    ntsync_set_lock_flag_hook( ntsync_lock_flag );
++#endif
+                 }
+             }
+ #endif

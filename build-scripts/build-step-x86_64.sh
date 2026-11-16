@@ -300,6 +300,11 @@ do
       # fail would-block receives on nonblocking sockets without a server round trip (DOOM 2016 DTLS poll thread);
       # WINE_SOCKET_POLL_FASTPATH=0 disables it
       "common/dlls_ntdll_unix_socket_c_recv_fastpath.patch"
+
+      # userspace ntsync: SIGUSR1 suspend deferred through a per-thread flag while the thread holds the
+      # library's region lock, instead of two sigprocmask calls around every lock acquisition
+      "common/dlls_ntdll_unix_server_c_ntsync_lock_flag.patch"
+      "x86_64/dlls_ntdll_unix_signal_x86_64_c_ntsync_lock_flag.patch"
     )
 
     for patch in "${PATCHES[@]}"; do

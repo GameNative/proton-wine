@@ -1,0 +1,18 @@
+userspace ntsync: usr1_handler defers a suspend while the thread holds the ntsync region lock
+
+(common/dlls_ntdll_unix_server_c_ntsync_lock_flag.patch has the flag and the protocol.)
+
+diff --git a/dlls/ntdll/unix/signal_x86_64.c b/dlls/ntdll/unix/signal_x86_64.c
+index 3802bd0..a9952cc 100644
+--- a/dlls/ntdll/unix/signal_x86_64.c
++++ b/dlls/ntdll/unix/signal_x86_64.c
+@@ -2936,6 +2936,9 @@ static void usr1_handler( int signal, siginfo_t *siginfo, void *sigcontext )
+ {
+     ucontext_t *ucontext = init_handler( sigcontext );
+ 
++#ifdef __ANDROID__
++    if (ntsync_defer_suspend()) return;
++#endif
+     if (is_inside_syscall( RSP_sig(ucontext) ))
+     {
+         struct syscall_frame *frame = get_syscall_frame();

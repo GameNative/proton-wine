@@ -118,14 +118,14 @@ jobs:
 
       # Pinned to an exact commit, not a branch, so the artifact does not depend
       # on when it was built or on what master moves to. Layout v10 (v0.2.0)
-      # plus budgeted wakes: a signal op wakes only as many single-object
-      # waiters as it can satisfy (GameNative/ntsync-android#1). Replace with
-      # the release tag once that is merged and tagged.
+      # plus budgeted wakes issued after the region unlock and the per-thread
+      # lock flag that replaces SIGUSR1 masking (GameNative/ntsync-android#1).
+      # Replace with the release tag once that is merged and tagged.
       - name: Check out ntsync-android (userspace ntsync)
         uses: actions/checkout@v4
         with:
           repository: GameNative/ntsync-android
-          ref: f4656096ecd1f4550b4a09829bf066ac8a572274
+          ref: 6342614affcff9658e1e297b5d0e63c1430cb306
           path: ntsync-android
 
       - name: Set up Rust for ntsync-android
