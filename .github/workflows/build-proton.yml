@@ -116,15 +116,16 @@ jobs:
           wget https://github.com/bylaws/llvm-mingw/releases/download/20250920/llvm-mingw-20250920-ucrt-ubuntu-22.04-x86_64.tar.xz
           tar -xf llvm-mingw-20250920-ucrt-ubuntu-22.04-x86_64.tar.xz
 
-      # Pinned to a tag, not a branch, so the artifact does not depend on when
-      # it was built or on what master moves to. v0.2.0 is layout v10:
-      # objects are held by every process that has the handle, which is what
-      # the ntdll retain/release calls in this tree need.
+      # Pinned to an exact commit, not a branch, so the artifact does not depend
+      # on when it was built or on what master moves to. Layout v10 (v0.2.0)
+      # plus budgeted wakes issued after the region unlock and the per-thread
+      # lock flag that replaces SIGUSR1 masking (GameNative/ntsync-android#1).
+      # Replace with the release tag once that is merged and tagged.
       - name: Check out ntsync-android (userspace ntsync)
         uses: actions/checkout@v4
         with:
           repository: GameNative/ntsync-android
-          ref: v0.2.0
+          ref: 6342614affcff9658e1e297b5d0e63c1430cb306
           path: ntsync-android
 
       - name: Set up Rust for ntsync-android

@@ -1,0 +1,18 @@
+userspace ntsync: usr1_handler defers a suspend while the thread holds the ntsync region lock
+
+(common/dlls_ntdll_unix_server_c_ntsync_lock_flag.patch has the flag and the protocol.)
+
+diff --git a/dlls/ntdll/unix/signal_arm64.c b/dlls/ntdll/unix/signal_arm64.c
+index c94dd98..abfb4d3 100644
+--- a/dlls/ntdll/unix/signal_arm64.c
++++ b/dlls/ntdll/unix/signal_arm64.c
+@@ -1384,6 +1384,9 @@ static void usr1_handler( int signal, siginfo_t *siginfo, void *sigcontext )
+     CHPE_V2_CPU_AREA_INFO *chpe;
+     CONTEXT context;
+ 
++#ifdef __ANDROID__
++    if (ntsync_defer_suspend()) return;
++#endif
+     if ((chpe = NtCurrentTeb()->ChpeV2CpuAreaInfo) && chpe->SuspendDoorbell &&
+              (chpe->InSimulation || chpe->InSyscallCallback))
+     {

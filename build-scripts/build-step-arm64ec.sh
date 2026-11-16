@@ -349,6 +349,11 @@ do
       # while it invalidates code are not reported back to it
       "arm64ec/dlls_ntdll_unix_virtual_c_report_emulated_code_write.patch"
       "arm64ec/dlls_ntdll_signal_arm64ec_c_cross_process_work_callback.patch"
+
+      # userspace ntsync: SIGUSR1 suspend deferred through a per-thread flag while the thread holds the
+      # library's region lock, instead of two sigprocmask calls around every lock acquisition
+      "common/dlls_ntdll_unix_server_c_ntsync_lock_flag.patch"
+      "arm64ec/dlls_ntdll_unix_signal_arm64_c_ntsync_lock_flag.patch"
     )
 
     for patch in "${PATCHES[@]}"; do
