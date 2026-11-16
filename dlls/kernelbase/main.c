@@ -37,6 +37,170 @@ WINE_DEFAULT_DEBUG_CHANNEL(kernelbase);
 
 BOOL is_wow64 = FALSE;
 
+#if defined(__x86_64__)
+/*
+ * Temporary, executable-scoped hang diagnostic. Do not unwind a remote
+ * thread in-process: its loader/JIT locks may be held. Only get its context
+ * while suspended; all memory queries and output happen after resuming it.
+ * The stack scan is consequently best-effort, NOT an unwound call stack.
+ */
+static BOOL stolen_sample_address( ULONG round, HANDLE tid, const char *kind,
+                                  ULONG slot, ULONG_PTR address )
+{
+    MEMORY_BASIC_INFORMATION mbi;
+    ULONG_PTR buffer[256];
+    MEMORY_SECTION_NAME *name = (MEMORY_SECTION_NAME *)buffer;
+    WCHAR *base;
+    USHORT len, i;
+    NTSTATUS status;
+
+    if (address < 0x10000) return FALSE;
+    status = NtQueryVirtualMemory( GetCurrentProcess(), (void *)address,
+                                  MemoryBasicInformation, &mbi, sizeof(mbi), NULL );
+    if (status || mbi.State != MEM_COMMIT) return FALSE;
+    if (!(mbi.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ |
+                        PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY))) return FALSE;
+
+    status = NtQueryVirtualMemory( GetCurrentProcess(), (void *)address,
+                                  MemoryMappedFilenameInformation, buffer, sizeof(buffer), NULL );
+    if (!status)
+    {
+        base = name->SectionFileName.Buffer;
+        len = name->SectionFileName.Length / sizeof(WCHAR);
+        for (i = len; i; --i)
+            if (base[i - 1] == '\\' || base[i - 1] == '/') break;
+        MESSAGE( "GN_STALL round=%lu tid=%p %s[%lu]=%p module=%s base=%p offset=%#Ix\n",
+                 round, tid, kind, slot, (void *)address, debugstr_wn(base + i, len - i),
+                 mbi.AllocationBase, address - (ULONG_PTR)mbi.AllocationBase );
+    }
+    else
+        MESSAGE( "GN_STALL round=%lu tid=%p %s[%lu]=%p private-code base=%p offset=%#Ix\n",
+                 round, tid, kind, slot, (void *)address, mbi.AllocationBase,
+                 address - (ULONG_PTR)mbi.AllocationBase );
+    return TRUE;
+}
+
+static BOOL stolen_sample_thread( HANDLE thread, ULONG round )
+{
+    THREAD_BASIC_INFORMATION info;
+    ULONG_PTR name_buffer[64], stack[128];
+    THREAD_NAME_INFORMATION *name = (THREAD_NAME_INFORMATION *)name_buffer;
+    CONTEXT context = {0};
+    MEMORY_BASIC_INFORMATION mbi;
+    NTSTATUS status, resume_status, read_status = STATUS_UNSUCCESSFUL;
+    SIZE_T bytes = 0, size;
+    ULONG previous, i, found = 0;
+
+    if (NtQueryInformationThread( thread, ThreadBasicInformation, &info, sizeof(info), NULL ))
+        return TRUE;
+    if (info.ClientId.UniqueThread == NtCurrentTeb()->ClientId.UniqueThread) return TRUE;
+
+    MESSAGE( "GN_STALL round=%lu sampling tid=%p\n", round, info.ClientId.UniqueThread );
+    status = NtSuspendThread( thread, &previous );
+    if (status)
+    {
+        MESSAGE( "GN_STALL suspend tid=%p status=%#lx\n", info.ClientId.UniqueThread, status );
+        return TRUE;
+    }
+    context.ContextFlags = CONTEXT_CONTROL | CONTEXT_INTEGER;
+    status = NtGetContextThread( thread, &context );
+    /* Always balance precisely our suspend, even when context capture fails. */
+    resume_status = NtResumeThread( thread, NULL );
+    if (resume_status)
+    {
+        MESSAGE( "GN_STALL resume tid=%p status=%#lx; sampling stopped\n",
+                 info.ClientId.UniqueThread, resume_status );
+        return FALSE;
+    }
+    if (status)
+    {
+        MESSAGE( "GN_STALL context tid=%p status=%#lx\n", info.ClientId.UniqueThread, status );
+        return TRUE;
+    }
+
+    MESSAGE( "GN_STALL round=%lu tid=%p pc=%p sp=%p bp=%p previous_suspend=%lu\n",
+             round, info.ClientId.UniqueThread, (void *)context.Rip,
+             (void *)context.Rsp, (void *)context.Rbp, previous );
+    if (!NtQueryInformationThread( thread, ThreadNameInformation, name_buffer, sizeof(name_buffer), NULL ))
+        MESSAGE( "GN_STALL round=%lu tid=%p name=%s\n", round, info.ClientId.UniqueThread,
+                 debugstr_wn(name->ThreadName.Buffer, name->ThreadName.Length / sizeof(WCHAR)) );
+    stolen_sample_address( round, info.ClientId.UniqueThread, "pc", 0, context.Rip );
+
+    /* Do not touch an unmapped/guard stack page, or cross the queried region. */
+    if (!NtQueryVirtualMemory( GetCurrentProcess(), (void *)context.Rsp,
+                              MemoryBasicInformation, &mbi, sizeof(mbi), NULL ) &&
+        mbi.State == MEM_COMMIT && !(mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)))
+    {
+        size = min( sizeof(stack), (ULONG_PTR)mbi.BaseAddress + mbi.RegionSize - context.Rsp );
+        read_status = NtReadVirtualMemory( GetCurrentProcess(), (void *)context.Rsp, stack, size, &bytes );
+    }
+    MESSAGE( "GN_STALL round=%lu tid=%p live-stack status=%#lx bytes=%Iu; candidates-not-frames\n",
+             round, info.ClientId.UniqueThread, read_status, bytes );
+    for (i = 0; i < bytes / sizeof(stack[0]) && found < 12; ++i)
+        if (stolen_sample_address( round, info.ClientId.UniqueThread, "candidate", i, stack[i] )) ++found;
+    return TRUE;
+}
+
+static DWORD WINAPI stolen_sampler( void *arg )
+{
+    LARGE_INTEGER delay;
+    HANDLE thread, next;
+    ULONG round, count;
+    NTSTATUS status;
+    ULONGLONG start = GetTickCount64();
+
+    MESSAGE( "GN_STALL sampler-entry v1: bounded context samples; stack candidates are not frames\n" );
+    delay.QuadPart = -120 * (LONGLONG)10000000;
+    NtDelayExecution( FALSE, &delay );
+    for (round = 1; round <= 9; ++round)
+    {
+        MESSAGE( "GN_STALL round=%lu elapsed_ms=%I64u begin\n", round, GetTickCount64() - start );
+        thread = NULL;
+        for (count = 0; count < 128; ++count)
+        {
+            status = NtGetNextThread( GetCurrentProcess(), thread,
+                                     THREAD_QUERY_INFORMATION | THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT,
+                                     0, 0, &next );
+            if (thread) NtClose( thread );
+            thread = NULL;
+            if (status) break;
+            thread = next;
+            if (!stolen_sample_thread( thread, round ))
+            {
+                NtClose( thread );
+                return 0;
+            }
+        }
+        if (thread) NtClose( thread );
+        MESSAGE( "GN_STALL round=%lu elapsed_ms=%I64u end threads=%lu\n",
+                 round, GetTickCount64() - start, count );
+        if (round == 9) break;
+        delay.QuadPart = -30 * (LONGLONG)10000000;
+        NtDelayExecution( FALSE, &delay );
+    }
+    MESSAGE( "GN_STALL sampler-complete\n" );
+    return 0;
+}
+
+static void start_stolen_sampler(void)
+{
+    const UNICODE_STRING *image = &NtCurrentTeb()->Peb->ProcessParameters->ImagePathName;
+    const WCHAR *base = image->Buffer;
+    static const WCHAR target[] = L"Probably Stolen.exe";
+    unsigned int i, len = image->Length / sizeof(WCHAR);
+    HANDLE thread;
+
+    for (i = len; i; --i)
+        if (base[i - 1] == '\\' || base[i - 1] == '/') break;
+    if (is_wow64 || len - i != ARRAY_SIZE(target) - 1 ||
+        wcsnicmp( base + i, target, ARRAY_SIZE(target) - 1 )) return;
+    /* Normal thread startup waits for process DLL initialization to finish. */
+    thread = CreateThread( NULL, 0, stolen_sampler, NULL, 0, NULL );
+    if (thread) NtClose( thread );
+    else MESSAGE( "GN_STALL sampler-start failed error=%lu\n", GetLastError() );
+}
+#endif
+
 /***********************************************************************
  *           DllMain
  */
@@ -50,6 +214,9 @@ BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
         init_locale( hinst );
         init_startup_info( NtCurrentTeb()->Peb->ProcessParameters );
         init_console();
+#if defined(__x86_64__)
+        start_stolen_sampler();
+#endif
     }
     return TRUE;
 }
