@@ -125,7 +125,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: GameNative/ntsync-android
-          ref: c904dd8e3a3449a14afec0236b172deb142caf34
+          ref: f4656096ecd1f4550b4a09829bf066ac8a572274
           path: ntsync-android
 
       - name: Set up Rust for ntsync-android
