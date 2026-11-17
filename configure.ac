@@ -2488,6 +2488,7 @@ enable_msiexec=${enable_msiexec:-yes}
 enable_netsh=${enable_netsh:-yes}
 enable_regsvr32=${enable_regsvr32:-yes}
 enable_rundll32=${enable_rundll32:-yes}
+enable_wmic=${enable_wmic:-yes}
 
 dnl Disable Win16-related modules
 enable_win16=${enable_win16:-i386}
