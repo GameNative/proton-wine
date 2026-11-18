@@ -399,6 +399,60 @@ static BOOL is_unix_console_handle( HANDLE handle )
 
 
 /***********************************************************************
+ *           monitor_native_exit
+ *
+ * Diagnostic only: keep a Unix parent for Carrion so that deaths which
+ * bypass NtTerminateProcess (including SIGKILL) leave a wait status.
+ * Called in the detached grandchild; the original launcher never waits
+ * for this monitor. Only the exec child retains Wine's inherited fds.
+ */
+static void monitor_native_exit( long max_fd )
+{
+    struct sigaction action = {0}, previous;
+    char buffer[256];
+    pid_t pid, ret;
+    int fd, status, len, err;
+
+    action.sa_handler = SIG_DFL;
+    sigemptyset( &action.sa_mask );
+    if (sigaction( SIGCHLD, &action, &previous ) == -1)
+    {
+        len = snprintf( buffer, sizeof(buffer), "[CARRION_EXIT_DIAG] monitor unavailable: sigaction errno=%d\n", errno );
+        write( STDERR_FILENO, buffer, len );
+        return;
+    }
+    pid = fork();
+    err = errno;
+    if (pid <= 0)
+    {
+        sigaction( SIGCHLD, &previous, NULL );
+        if (pid == -1)
+        {
+            len = snprintf( buffer, sizeof(buffer), "[CARRION_EXIT_DIAG] monitor unavailable: fork errno=%d\n", err );
+            write( STDERR_FILENO, buffer, len );
+        }
+        return; /* exec child, or fall back to the normal launch on failure */
+    }
+
+    for (fd = 0; fd < max_fd; fd++)
+        if (fd != STDERR_FILENO) close( fd );
+    len = snprintf( buffer, sizeof(buffer), "[CARRION_EXIT_DIAG] watching unix_pid=%d monitor_pid=%d\n", (int)pid, (int)getpid() );
+    write( STDERR_FILENO, buffer, len );
+    do ret = waitpid( pid, &status, 0 ); while (ret == -1 && errno == EINTR);
+    if (ret == -1)
+        len = snprintf( buffer, sizeof(buffer), "[CARRION_EXIT_DIAG] unix_pid=%d waitpid errno=%d\n", (int)pid, errno );
+    else if (WIFSIGNALED(status))
+        len = snprintf( buffer, sizeof(buffer), "[CARRION_EXIT_DIAG] unix_pid=%d raw_status=%#x signal=%d\n", (int)pid, status, WTERMSIG(status) );
+    else if (WIFEXITED(status))
+        len = snprintf( buffer, sizeof(buffer), "[CARRION_EXIT_DIAG] unix_pid=%d raw_status=%#x exit_status=%d\n", (int)pid, status, WEXITSTATUS(status) );
+    else
+        len = snprintf( buffer, sizeof(buffer), "[CARRION_EXIT_DIAG] unix_pid=%d raw_status=%#x\n", (int)pid, status );
+    write( STDERR_FILENO, buffer, len );
+    _exit(0);
+}
+
+
+/***********************************************************************
  *           spawn_process
  */
 static NTSTATUS spawn_process( const RTL_USER_PROCESS_PARAMETERS *params, int socketfd,
@@ -408,6 +462,13 @@ static NTSTATUS spawn_process( const RTL_USER_PROCESS_PARAMETERS *params, int so
     int stdin_fd = -1, stdout_fd = -1;
     pid_t pid;
     char **argv;
+    static const WCHAR carrionW[] = {'c','a','r','r','i','o','n','.','e','x','e',0};
+    const WCHAR *name = params->ImagePathName.Buffer, *p;
+    long monitor_max_fd = -1;
+
+    if ((p = wcsrchr( name, '\\' ))) name = p + 1;
+    if ((p = wcsrchr( name, '/' ))) name = p + 1;
+    if (!wcsicmp( name, carrionW )) monitor_max_fd = sysconf( _SC_OPEN_MAX );
 
     if (wine_server_handle_to_fd( params->hStdInput, FILE_READ_DATA, &stdin_fd, NULL ) &&
         isatty(0) && is_unix_console_handle( params->hStdInput ))
@@ -421,6 +482,7 @@ static NTSTATUS spawn_process( const RTL_USER_PROCESS_PARAMETERS *params, int so
     {
         if (!(pid = fork()))  /* grandchild */
         {
+            if (monitor_max_fd > 0) monitor_native_exit( monitor_max_fd );
             if ((peb->ProcessParameters && params->ProcessGroupId != peb->ProcessParameters->ProcessGroupId) ||
                 params->ConsoleHandle == CONSOLE_HANDLE_ALLOC ||
                 params->ConsoleHandle == CONSOLE_HANDLE_ALLOC_NO_WINDOW ||
