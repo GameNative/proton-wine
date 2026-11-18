@@ -1773,6 +1773,28 @@ static HRESULT get_winexinput_interfaces( const WCHAR *hid_path, WCHAR **paths )
     return get_device_interfaces( GUID_DEVINTERFACE_WINEXINPUT, instance_id, paths );
 }
 
+static BOOL hide_xinput_duplicate( const WCHAR *path )
+{
+    WCHAR filename[MAX_PATH], *name, *tmp, *paths = NULL;
+    DWORD len;
+    BOOL hide;
+
+    len = GetModuleFileNameW( NULL, filename, ARRAY_SIZE(filename) );
+    if (!len || len >= ARRAY_SIZE(filename)) return FALSE;
+    name = filename;
+    if ((tmp = wcsrchr( name, '/' ))) name = tmp + 1;
+    if ((tmp = wcsrchr( name, '\\' ))) name = tmp + 1;
+    if (lstrcmpiW( name, L"castle.exe" )) return FALSE;
+
+    /* Castle Crashers counts both API views as separate controllers. Only hide
+     * the DirectInput view when its matching Wine XInput interface is present. */
+    if (FAILED(get_winexinput_interfaces( path, &paths ))) return FALSE;
+    hide = !!*paths;
+    free( paths );
+    if (hide) TRACE( "Hiding paired XInput device %s from Castle Crashers DirectInput\n", debugstr_w(path) );
+    return hide;
+}
+
 static HRESULT hid_joystick_device_try_open( WCHAR *path, HANDLE *device, PHIDP_PREPARSED_DATA *preparsed,
                                              HIDD_ATTRIBUTES *attrs, HIDP_CAPS *caps, DIDEVICEINSTANCEW *instance,
                                              DWORD version )
@@ -1811,6 +1833,7 @@ static HRESULT hid_joystick_device_try_open( WCHAR *path, HANDLE *device, PHIDP_
     if (!HidD_GetProductString( device_file, instance->tszProductName, MAX_PATH * sizeof(WCHAR) )) goto failed;
 
     if (device_instance_is_disabled( instance->tszInstanceName, &override )) goto failed;
+    if (hide_xinput_duplicate( path )) goto failed;
     if (override && !wcsstr( path, L"&XI_" ) && SUCCEEDED(get_winexinput_interfaces( path, &override_paths )))
     {
         HidD_FreePreparsedData( preparsed_data );
