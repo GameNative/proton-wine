@@ -130,12 +130,28 @@ done:
 
 GstElement *find_element(GstElementFactoryListType type, GstCaps *element_sink_caps, GstCaps *element_src_caps)
 {
+    const char *sgi = getenv("SteamGameId");
     GstElement *element = NULL;
     GList *tmp, *transforms;
     const gchar *name;
 
     if (!(transforms = find_element_factories(type, GST_RANK_MARGINAL, element_sink_caps, element_src_caps)))
         return NULL;
+
+    /* Enderal has no transcoded audio database on Android. Prefer a compatible
+     * WMA v2 decoder over protonaudioconverterbin, retaining the normal fallback
+     * if libav is unavailable or cannot be instantiated.
+     */
+    if (type == GST_ELEMENT_FACTORY_TYPE_DECODER && sgi && !strcmp(sgi, "976620"))
+    {
+        for (tmp = transforms; tmp; tmp = tmp->next)
+        {
+            name = gst_plugin_feature_get_name(GST_PLUGIN_FEATURE(tmp->data));
+            if (strcmp(name, "avdec_wmav2")) continue;
+            element = factory_create_element(GST_ELEMENT_FACTORY(tmp->data));
+            break;
+        }
+    }
 
     for (tmp = transforms; tmp != NULL && element == NULL; tmp = tmp->next)
     {
