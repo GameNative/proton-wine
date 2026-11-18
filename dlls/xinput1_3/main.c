@@ -86,6 +86,8 @@ struct xinput_controller
 };
 
 static struct xinput_controller controllers[XUSER_MAX_COUNT];
+static BOOL diagnose_controller_state;
+static LONG diagnostic_ticks[XUSER_MAX_COUNT];
 static CRITICAL_SECTION_DEBUG controller_critsect_debug[XUSER_MAX_COUNT] =
 {
     {
@@ -740,8 +742,20 @@ static DWORD WINAPI hid_update_thread_proc(void *param)
 
 static BOOL WINAPI start_update_thread_once( INIT_ONCE *once, void *param, void **context )
 {
+    WCHAR filename[MAX_PATH], *basename;
+    DWORD len;
     HANDLE thread;
     HMODULE module;
+
+    len = GetModuleFileNameW(NULL, filename, ARRAY_SIZE(filename));
+    if (len && len < ARRAY_SIZE(filename))
+    {
+        basename = wcsrchr(filename, '\\');
+        diagnose_controller_state = !wcsicmp(basename ? basename + 1 : filename, L"DeadIslandGame.exe");
+    }
+    if (diagnose_controller_state)
+        MESSAGE("gn-xinput-state: diagnostic-v1 module=%p pid=%lu sampling=100ms pre-guide-mask\n",
+                xinput_instance, GetCurrentProcessId());
 
     if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (void*)hid_update_thread_proc, &module))
         WARN("Failed to increase module's reference count, error: %lu\n", GetLastError());
@@ -842,20 +856,61 @@ DWORD WINAPI DECLSPEC_HOTPATCH XInputSetState(DWORD index, XINPUT_VIBRATION *vib
     return ret;
 }
 
+/* Called with the controller locked, or with NULL on a disconnected result.
+ * Keep this diagnostic bounded even when the game polls from several threads. */
+static void diagnose_state(DWORD index, DWORD result, const struct xinput_controller *controller,
+                           DWORD overlay, const XINPUT_STATE *state)
+{
+    LONG previous, now;
+    const XINPUT_GAMEPAD *raw, *returned;
+
+    if (!diagnose_controller_state) return;
+    now = GetTickCount();
+    previous = InterlockedCompareExchange(&diagnostic_ticks[index], 0, 0);
+    if ((DWORD)(now - (DWORD)previous) < 100) return;
+    if (InterlockedCompareExchange(&diagnostic_ticks[index], now, previous) != previous) return;
+
+    if (result != ERROR_SUCCESS)
+    {
+        MESSAGE("gn-xinput-state: module=%p pid=%lu tick=%lu index=%lu result=%lu\n",
+                xinput_instance, GetCurrentProcessId(), (DWORD)now, index, result);
+        return;
+    }
+
+    raw = &controller->state.Gamepad;
+    returned = &state->Gamepad;
+    MESSAGE("gn-xinput-state: module=%p pid=%lu tick=%lu index=%lu result=%lu enabled=%d overlay_wait=%lu "
+            "decoded={packet=%lu buttons=%04x lt=%u rt=%u lx=%d ly=%d rx=%d ry=%d} "
+            "returned={packet=%lu buttons=%04x lt=%u rt=%u lx=%d ly=%d rx=%d ry=%d}\n",
+            xinput_instance, GetCurrentProcessId(), (DWORD)now, index, result, controller->enabled, overlay,
+            controller->state.dwPacketNumber, raw->wButtons, raw->bLeftTrigger, raw->bRightTrigger,
+            raw->sThumbLX, raw->sThumbLY, raw->sThumbRX, raw->sThumbRY,
+            state->dwPacketNumber, returned->wButtons, returned->bLeftTrigger, returned->bRightTrigger,
+            returned->sThumbLX, returned->sThumbLY, returned->sThumbRX, returned->sThumbRY);
+}
+
 /* Some versions of SteamOverlayRenderer hot-patch XInputGetStateEx() and call
  * XInputGetState() in the hook, so we need a wrapper. */
 static DWORD xinput_get_state(DWORD index, XINPUT_STATE *state)
 {
+    DWORD overlay;
+
     if (!state) return ERROR_BAD_ARGUMENTS;
 
     start_update_thread();
 
     if (index >= XUSER_MAX_COUNT) return ERROR_BAD_ARGUMENTS;
-    if (!controller_lock(&controllers[index])) return ERROR_DEVICE_NOT_CONNECTED;
+    if (!controller_lock(&controllers[index]))
+    {
+        diagnose_state(index, ERROR_DEVICE_NOT_CONNECTED, NULL, 0, NULL);
+        return ERROR_DEVICE_NOT_CONNECTED;
+    }
 
-    if (WaitForSingleObject(steam_overlay_event, 0) == WAIT_OBJECT_0) memset(state, 0, sizeof(*state));
+    overlay = WaitForSingleObject(steam_overlay_event, 0);
+    if (overlay == WAIT_OBJECT_0) memset(state, 0, sizeof(*state));
     else *state = controllers[index].state;
 
+    diagnose_state(index, ERROR_SUCCESS, &controllers[index], overlay, state);
     controller_unlock(&controllers[index]);
 
     return ERROR_SUCCESS;
