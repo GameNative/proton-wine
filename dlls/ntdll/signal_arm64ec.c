@@ -1168,6 +1168,7 @@ static DWORD __attribute__((naked)) call_seh_handler( EXCEPTION_RECORD *rec, ULO
  */
 NTSTATUS call_seh_handlers( EXCEPTION_RECORD *rec, CONTEXT *orig_context )
 {
+    static LONG diagnostic_count;
     EXCEPTION_REGISTRATION_RECORD *teb_frame = NtCurrentTeb()->Tib.ExceptionList;
     DISPATCHER_CONTEXT_NONVOLREG_ARM64 nonvol_regs;
     UNWIND_HISTORY_TABLE table;
@@ -1176,6 +1177,10 @@ NTSTATUS call_seh_handlers( EXCEPTION_RECORD *rec, CONTEXT *orig_context )
     NTSTATUS status;
     ULONG_PTR frame;
     DWORD res;
+    unsigned int diagnostic_frames = 0, diagnostic_handlers = 0;
+    BOOL diagnostic = (rec->ExceptionCode == STATUS_ACCESS_VIOLATION ||
+                       rec->ExceptionCode == STATUS_INVALID_DISPOSITION) &&
+                      InterlockedIncrement( &diagnostic_count ) <= 8;
 
     context.AMD64_Context = *orig_context;
     context.ContextFlags &= ~0x40; /* Clear xstate flag. */
@@ -1187,7 +1192,21 @@ NTSTATUS call_seh_handlers( EXCEPTION_RECORD *rec, CONTEXT *orig_context )
 
     for (;;)
     {
+        BOOL log_frame = diagnostic && diagnostic_frames++ < 16;
+
+        if (log_frame)
+            WARN( "seh-diagnostic: unwind code=%lx pc=%I64x sp=%I64x ec=%u\n",
+                  rec->ExceptionCode, context.Pc, context.Sp, RtlIsEcCode( context.Pc ) );
         status = virtual_unwind( UNW_FLAG_EHANDLER, &dispatch, &context, need_backtrace( rec->ExceptionCode ) );
+        if (log_frame)
+        {
+            WARN( "seh-diagnostic: unwind status=%lx pc=%I64x image=%I64x entry=%p\n",
+                  status, dispatch.ControlPc, dispatch.ImageBase, dispatch.FunctionEntry );
+            if (!status)
+                WARN( "seh-diagnostic: frame=%I64x handler=%p data=%p next_pc=%I64x next_sp=%I64x\n",
+                      dispatch.EstablisherFrame, dispatch.LanguageHandler, dispatch.HandlerData,
+                      context.Pc, context.Sp );
+        }
         if (status != STATUS_SUCCESS) return status;
 
     unwind_done:
@@ -1203,10 +1222,18 @@ NTSTATUS call_seh_handlers( EXCEPTION_RECORD *rec, CONTEXT *orig_context )
 
         if (dispatch.LanguageHandler)
         {
+            BOOL log_handler = diagnostic && diagnostic_handlers++ < 16;
+
+            if (log_handler)
+                WARN( "seh-diagnostic: calling handler=%p code=%lx pc=%I64x frame=%I64x\n",
+                      dispatch.LanguageHandler, rec->ExceptionCode, dispatch.ControlPc, dispatch.EstablisherFrame );
             TRACE( "calling handler %p (rec=%p, frame=%I64x context=%p, dispatch=%p)\n",
                    dispatch.LanguageHandler, rec, dispatch.EstablisherFrame, orig_context, &dispatch );
             res = call_seh_handler( rec, dispatch.EstablisherFrame, orig_context,
                                     &dispatch, dispatch.LanguageHandler );
+            if (log_handler)
+                WARN( "seh-diagnostic: handler=%p returned=%lu code=%lx\n",
+                      dispatch.LanguageHandler, res, rec->ExceptionCode );
             rec->ExceptionFlags &= EXCEPTION_NONCONTINUABLE;
             TRACE( "handler at %p returned %lu\n", dispatch.LanguageHandler, res );
 
@@ -1233,10 +1260,18 @@ NTSTATUS call_seh_handlers( EXCEPTION_RECORD *rec, CONTEXT *orig_context )
         /* hack: call wine handlers registered in the tib list */
         else while (is_valid_frame( (ULONG_PTR)teb_frame ) && (ULONG64)teb_frame < context.Sp)
         {
+            BOOL log_handler = diagnostic && diagnostic_handlers++ < 16;
+
+            if (log_handler)
+                WARN( "seh-diagnostic: calling TEB handler=%p code=%lx frame=%p\n",
+                      teb_frame->Handler, rec->ExceptionCode, teb_frame );
             TRACE( "calling TEB handler %p (rec=%p frame=%p context=%p dispatch=%p) sp=%I64x\n",
                    teb_frame->Handler, rec, teb_frame, orig_context, &dispatch, context.Sp );
             res = call_seh_handler( rec, (ULONG_PTR)teb_frame, orig_context,
                                     &dispatch, (PEXCEPTION_ROUTINE)teb_frame->Handler );
+            if (log_handler)
+                WARN( "seh-diagnostic: TEB handler=%p returned=%lu code=%lx\n",
+                      teb_frame->Handler, res, rec->ExceptionCode );
             TRACE( "TEB handler at %p returned %lu\n", teb_frame->Handler, res );
 
             switch (res)
