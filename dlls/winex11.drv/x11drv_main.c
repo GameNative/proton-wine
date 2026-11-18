@@ -638,7 +638,9 @@ static void x11drv_load_xfixes(void)
     if (!pXFixesQueryExtension(gdi_display, &event, &error))
     {
         WARN("Xfixes extension not found, disabled.\n");
+        WARN("startup diagnostic: Xfixes dlclose begin, handle %p\n", xfixes);
         dlclose(xfixes);
+        WARN("startup diagnostic: Xfixes dlclose complete\n");
         return;
     }
 
@@ -773,20 +775,33 @@ static NTSTATUS x11drv_init( void *arg )
     /* initialize XRandR */
     X11DRV_XRandR_Init();
 #ifdef SONAME_LIBXFIXES
+    WARN("startup diagnostic: Xfixes init begin\n");
     x11drv_load_xfixes();
+    WARN("startup diagnostic: Xfixes init complete\n");
 #endif
 #ifdef SONAME_LIBXCOMPOSITE
+    WARN("startup diagnostic: XComposite init begin\n");
     X11DRV_XComposite_Init();
+    WARN("startup diagnostic: XComposite init complete\n");
 #endif
+    WARN("startup diagnostic: XInput2 load begin\n");
     x11drv_xinput2_load();
+    WARN("startup diagnostic: XInput2 load complete\n");
 
+    WARN("startup diagnostic: XkbUseExtension begin\n");
     XkbUseExtension( gdi_display, NULL, NULL );
+    WARN("startup diagnostic: XkbUseExtension complete; keyboard init begin\n");
     X11DRV_InitKeyboard( gdi_display );
+    WARN("startup diagnostic: keyboard init complete; mouse init begin\n");
     X11DRV_InitMouse( gdi_display );
+    WARN("startup diagnostic: mouse init complete; XIM init begin, enabled %u\n", use_xim);
     if (use_xim) use_xim = xim_init( input_style );
+    WARN("startup diagnostic: XIM init complete; ICM profile init begin\n");
 
     init_icm_profile();
+    WARN("startup diagnostic: ICM profile init complete; user driver init begin\n");
     init_user_driver();
+    WARN("startup diagnostic: user driver init complete\n");
 
     {
         RECT rect = NtUserGetVirtualScreenRect( MDT_DEFAULT );
@@ -804,6 +819,7 @@ static NTSTATUS x11drv_init( void *arg )
             }
         }
     }
+    WARN("startup diagnostic: X11 driver init complete\n");
     return STATUS_SUCCESS;
 }
 
