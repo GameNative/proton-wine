@@ -32,6 +32,46 @@ static HINSTANCE hinstance;
 static BOOL get_device_proc_addr_instance_procs = FALSE;
 static struct vulkan_instance_extensions instance_extensions; /* supported client instance extensions */
 
+/* Keep native-call exceptions separate from a VkResult returned by the driver.
+ * Log successful dispatch only once, and bound ordinary driver-error logging.
+ * In particular, do not turn a failed Unix call into a successful pipeline. */
+VkResult WINAPI vkCreateGraphicsPipelines(VkDevice device, VkPipelineCache pipeline_cache,
+        uint32_t count, const VkGraphicsPipelineCreateInfo *create_info,
+        const VkAllocationCallbacks *allocator, VkPipeline *pipelines)
+{
+    static LONG calls, driver_errors;
+    struct vkCreateGraphicsPipelines_params params = {0};
+    LONG call = InterlockedIncrement(&calls);
+    NTSTATUS status;
+
+    params.device = device;
+    params.pipelineCache = pipeline_cache;
+    params.createInfoCount = count;
+    params.pCreateInfos = create_info;
+    params.pAllocator = allocator;
+    params.pPipelines = pipelines;
+    params.result = VK_ERROR_UNKNOWN;
+
+    if (call == 1)
+        ERR("Pipeline diagnostic: vkCreateGraphicsPipelines first dispatch, device %p, count %u.\n",
+                device, count);
+
+    status = UNIX_CALL(vkCreateGraphicsPipelines, &params);
+    if (status)
+    {
+        ERR("Pipeline diagnostic: vkCreateGraphicsPipelines Unix exception %#lx, call %ld, "
+                "device %p, cache %s, count %u, create infos %p, allocator %p, outputs %p; "
+                "no valid VkResult.\n", status, call, device, wine_dbgstr_longlong(pipeline_cache),
+                count, create_info, allocator, pipelines);
+        ExitProcess(3);
+    }
+
+    if (call == 1 || (params.result < 0 && InterlockedIncrement(&driver_errors) <= 8))
+        ERR("Pipeline diagnostic: vkCreateGraphicsPipelines returned VkResult %d, call %ld, count %u.\n",
+                params.result, call, count);
+    return params.result;
+}
+
 VkResult WINAPI vkEnumerateInstanceLayerProperties(uint32_t *count, VkLayerProperties *properties)
 {
     TRACE("%p, %p\n", count, properties);
