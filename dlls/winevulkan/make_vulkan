@@ -283,6 +283,8 @@ MANUAL_LOADER_FUNCTIONS = {
 # functions which loader thunks are manually implemented
 MANUAL_LOADER_THUNKS = {
     "vkAllocateCommandBuffers",
+    "vkAllocateMemory",
+    "vkBindBufferMemory",
     "vkCreateCommandPool",
     "vkCreateDevice",
     "vkCreateInstance",
