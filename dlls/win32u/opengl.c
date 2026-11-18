@@ -40,6 +40,8 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(wgl);
 
+#include "wine/swap_profile.h"
+
 struct wgl_pbuffer
 {
     struct opengl_drawable *drawable;
@@ -169,8 +171,11 @@ static void opengl_drawable_flush( struct opengl_drawable *drawable, int interva
 
 static BOOL opengl_drawable_swap( struct opengl_drawable *drawable )
 {
+    struct swap_profile_time stamp = swap_profile_mark();
+
     if (!is_client_surface_window( drawable->client, 0 )) return FALSE;
     client_surface_update( drawable->client );
+    swap_profile_add( 5, "CLIENT_UPDATE", stamp );
     return drawable->funcs->swap( drawable );
 }
 
@@ -886,6 +891,7 @@ static BOOL framebuffer_surface_swap( struct opengl_drawable *drawable )
 {
     struct framebuffer_surface *surface = framebuffer_from_opengl_drawable( drawable );
     const struct opengl_funcs *funcs = &display_funcs;
+    struct swap_profile_time stamp = swap_profile_mark();
 
     TRACE( "%s\n", debugstr_opengl_drawable( drawable ) );
 
@@ -916,9 +922,12 @@ static BOOL framebuffer_surface_swap( struct opengl_drawable *drawable )
         }
     }
 
+    swap_profile_add( 6, "FRAMEBUFFER_ROTATE", stamp );
     if (surface->target)
     {
+        stamp = swap_profile_mark();
         blit_framebuffer_surface( surface );
+        swap_profile_add( 7, "FRAMEBUFFER_BLIT", stamp );
         opengl_drawable_swap( surface->target );
     }
     return TRUE;
@@ -2996,21 +3005,43 @@ static BOOL win32u_wglSwapBuffers( HDC hdc )
     int interval;
     HWND hwnd;
     BOOL ret;
+    struct swap_profile_time stamp;
 
-    if (!(hwnd = NtUserWindowFromDC( hdc ))) return flush_memory_pbuffer( funcs->p_glFlush );
+    swap_profile_begin( funcs );
+    stamp = swap_profile_mark();
+    if (!(hwnd = NtUserWindowFromDC( hdc )))
+    {
+        ret = flush_memory_pbuffer( funcs->p_glFlush );
+        swap_profile_end( "WIN32U_SWAP_PROFILE", ret, 0, -1 );
+        return ret;
+    }
 
     interval = get_window_swap_interval( hwnd );
+    swap_profile_add( 0, "LOOKUP", stamp );
 
     TRACE( "context %p, hwnd %p, hdc %p, interval %d\n", context, hwnd, hdc, interval );
 
+    stamp = swap_profile_mark();
     if (context) context_sync_drawables( context, 0, 0 );
 
     if (context) opengl_drawable_add_ref( (draw = context->draw) );
-    else if (!(draw = get_window_current_drawable( hwnd ))) return FALSE;
+    else if (!(draw = get_window_current_drawable( hwnd )))
+    {
+        swap_profile_end( "WIN32U_SWAP_PROFILE", FALSE, interval, -1 );
+        return FALSE;
+    }
+    swap_profile_add( 1, "SYNC", stamp );
 
+    stamp = swap_profile_mark();
     opengl_drawable_flush( draw, interval, 0 );
+    swap_profile_add( 2, "FLUSH", stamp );
+    stamp = swap_profile_mark();
     ret = opengl_drawable_swap( draw );
+    swap_profile_add( 3, "SWAP_INCLUSIVE", stamp );
+    stamp = swap_profile_mark();
     opengl_drawable_release( draw );
+    swap_profile_add( 4, "RELEASE", stamp );
+    swap_profile_end( "WIN32U_SWAP_PROFILE", ret, interval, -1 );
 
     return ret;
 }

@@ -1372,6 +1372,7 @@ static HRESULT wined3d_streaming_buffer_prepare(struct wined3d_device *device,
 
     if (SUCCEEDED(hr = wined3d_buffer_create(device, &desc, NULL, NULL, &wined3d_null_parent_ops, &wined3d_buffer)))
     {
+        wined3d_buffer->staged_streaming_uploads = device->adapter->d3d_info.staged_streaming_uploads;
         if (buffer->buffer)
             wined3d_buffer_decref(buffer->buffer);
         buffer->buffer = wined3d_buffer;
