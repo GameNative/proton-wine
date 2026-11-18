@@ -1658,6 +1658,8 @@ int get_window_pixel_format( HWND hwnd )
  */
 HANDLE WINAPI NtUserGetProp( HWND hwnd, const WCHAR *str )
 {
+    static LONG count;
+    ULONG sample;
     ULONG_PTR ret = 0;
 
     SERVER_START_REQ( get_window_property )
@@ -1668,6 +1670,15 @@ HANDLE WINAPI NtUserGetProp( HWND hwnd, const WCHAR *str )
         if (!wine_server_call_err( req )) ret = reply->data;
     }
     SERVER_END_REQ;
+    sample = InterlockedIncrement( &count );
+    if (sample <= 16 || (sample <= 1048576 && !(sample & 4095)))
+    {
+        DWORD error = NtCurrentTeb()->LastErrorValue;
+
+        ERR( "property-diag NtUserGetProp count=%lu hwnd=%p property=%s result=%p unix_caller=%p error=%lu\n",
+             sample, hwnd, debugstr_w(str), (HANDLE)ret, __builtin_return_address(0), error );
+        NtCurrentTeb()->LastErrorValue = error;
+    }
     return (HANDLE)ret;
 }
 

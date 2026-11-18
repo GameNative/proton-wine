@@ -27,9 +27,36 @@
 #include "winbase.h"
 #include "winnls.h"
 #include "ntuser.h"
+#include "wine/debug.h"
+
+WINE_DEFAULT_DEBUG_CHANNEL(win);
 
 /* size of buffer needed to store an atom string */
 #define ATOM_BUFFER_SIZE 256
+
+/* Temporary, bounded diagnostics for a property-query storm.  Keep the
+ * caller from the public entry point, including the ANSI entry point. */
+static void diagnose_get_prop( const char *api, LONG *counter, HWND hwnd, const WCHAR *str,
+                              HANDLE result, void *caller )
+{
+    ULONG count = InterlockedIncrement( counter );
+    DWORD error;
+    HMODULE module = NULL;
+    WCHAR path[MAX_PATH], *name;
+
+    if (count > 16 && (count > 1048576 || (count & 4095))) return;
+    error = GetLastError();
+    path[0] = 0;
+    if (GetModuleHandleExW( GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                           GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (WCHAR *)caller, &module ))
+        GetModuleFileNameW( module, path, ARRAY_SIZE(path) );
+    path[ARRAY_SIZE(path) - 1] = 0;
+    name = wcsrchr( path, '\\' );
+    ERR( "property-diag %s count=%lu hwnd=%p property=%s result=%p caller=%p module=%s offset=%Iu error=%lu\n",
+         api, count, hwnd, debugstr_w(str), result, caller, debugstr_w(name ? name + 1 : path),
+         module ? (ULONG_PTR)caller - (ULONG_PTR)module : 0, error );
+    SetLastError( error );
+}
 
 
 /***********************************************************************
@@ -103,11 +130,19 @@ INT WINAPI EnumPropsW( HWND hwnd, PROPENUMPROCW func )
  */
 HANDLE WINAPI GetPropA( HWND hwnd, LPCSTR str )
 {
+    static LONG count;
     WCHAR buffer[ATOM_BUFFER_SIZE];
+    const WCHAR *name = (const WCHAR *)str;
+    HANDLE ret;
 
-    if (IS_INTRESOURCE(str)) return GetPropW( hwnd, (LPCWSTR)str );
-    if (!MultiByteToWideChar( CP_ACP, 0, str, -1, buffer, ATOM_BUFFER_SIZE )) return 0;
-    return GetPropW( hwnd, buffer );
+    if (!IS_INTRESOURCE(str))
+    {
+        if (!MultiByteToWideChar( CP_ACP, 0, str, -1, buffer, ATOM_BUFFER_SIZE )) return 0;
+        name = buffer;
+    }
+    ret = GetPropW( hwnd, name );
+    diagnose_get_prop( "GetPropA", &count, hwnd, name, ret, __builtin_return_address(0) );
+    return ret;
 }
 
 
@@ -116,7 +151,11 @@ HANDLE WINAPI GetPropA( HWND hwnd, LPCSTR str )
  */
 HANDLE WINAPI GetPropW( HWND hwnd, LPCWSTR str )
 {
-    return NtUserGetProp( hwnd, str );
+    static LONG count;
+    HANDLE ret = NtUserGetProp( hwnd, str );
+
+    diagnose_get_prop( "GetPropW", &count, hwnd, str, ret, __builtin_return_address(0) );
+    return ret;
 }
 
 
