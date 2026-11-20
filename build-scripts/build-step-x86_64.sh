@@ -230,6 +230,7 @@ do
       "common/dlls_winex11_drv_init_c.patch"
       "common/dlls_winex11_drv_mouse_c_clip_regrab.patch"
       "common/dlls_winex11_drv_mouse_c_clip_grab_foreground.patch"
+      "common/dlls_winex11_drv_child_window_gl.patch"
 
       # address space patches
       "common/loader_preloader_c.patch"
