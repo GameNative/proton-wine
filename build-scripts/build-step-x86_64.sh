@@ -300,6 +300,14 @@ do
       # fail would-block receives on nonblocking sockets without a server round trip (DOOM 2016 DTLS poll thread);
       # WINE_SOCKET_POLL_FASTPATH=0 disables it
       "common/dlls_ntdll_unix_socket_c_recv_fastpath.patch"
+
+      # recycle private unnamed semaphores on close/create without a server round trip
+      # (Unity RenderNodeQueue); WINE_SEMAPHORE_RECYCLE=0 disables it
+      "common/dlls_ntdll_unix_sync_c_semaphore_recycle.patch"
+      "common/dlls_ntdll_unix_server_c_semaphore_recycle.patch"
+      "common/dlls_ntdll_unix_file_c_semaphore_recycle.patch"
+      "common/dlls_ntdll_unix_security_c_semaphore_recycle.patch"
+      "common/dlls_ntdll_unix_process_c_semaphore_recycle.patch"
     )
 
     for patch in "${PATCHES[@]}"; do

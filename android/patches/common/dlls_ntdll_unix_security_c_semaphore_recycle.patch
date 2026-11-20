@@ -1,0 +1,20 @@
+ntdll: recycle private unnamed semaphores (security.c part)
+
+NtSetSecurityObject stops recycling the handle.
+
+See dlls_ntdll_unix_sync_c_semaphore_recycle.patch.
+
+diff --git a/dlls/ntdll/unix/security.c b/dlls/ntdll/unix/security.c
+index 9931239..3e900fa 100644
+--- a/dlls/ntdll/unix/security.c
++++ b/dlls/ntdll/unix/security.c
+@@ -1081,6 +1081,9 @@ NTSTATUS WINAPI NtSetSecurityObject( HANDLE handle, SECURITY_INFORMATION info, P
+ 
+     if (!descr) return STATUS_ACCESS_VIOLATION;
+ 
++    /* a recycled semaphore must not carry a changed security descriptor */
++    if ((status = make_inproc_sync_public( handle ))) return status;
++
+     /* reuse the object attribute SD marshalling */
+     InitializeObjectAttributes( &attr, NULL, 0, 0, descr );
+     if ((status = alloc_object_attributes( &attr, &objattr, &len ))) return status;

@@ -1,0 +1,49 @@
+ntdll: recycle private unnamed semaphores (server.c part)
+
+NtClose parks a recyclable semaphore instead of closing it (and fails a second close of a
+parked handle with STATUS_INVALID_HANDLE); NtDuplicateObject stops recycling the source.
+
+See dlls_ntdll_unix_sync_c_semaphore_recycle.patch.
+
+diff --git a/dlls/ntdll/unix/server.c b/dlls/ntdll/unix/server.c
+index 7d06767..5e0dd9e 100644
+--- a/dlls/ntdll/unix/server.c
++++ b/dlls/ntdll/unix/server.c
+@@ -1912,6 +1912,12 @@ NTSTATUS WINAPI NtDuplicateObject( HANDLE source_process, HANDLE source, HANDLE
+         return result.dup_handle.status;
+     }
+ 
++    /* a duplicated semaphore is never recycled; a parked one was closed by the
++     * application. The source handle may be in another process, so only fail
++     * for the current one. */
++    if (make_inproc_sync_public( source ) && source_process == NtCurrentProcess())
++        return STATUS_INVALID_HANDLE;
++
+     /* hold fd_cache_mutex to prevent the fd from being added again between the
+      * call to remove_fd_from_cache and close_handle */
+     server_enter_uninterrupted_section( &fd_cache_mutex, &sigset );
+@@ -1998,14 +2004,19 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
+     /* always remove the cached fd; if the server request fails we'll just
+      * retrieve it again */
+     fd = remove_fd_from_cache( handle );
+-    close_inproc_sync( handle );
+ 
+-    SERVER_START_REQ( close_handle )
++    /* a private unnamed semaphore is parked for reuse without a server call */
++    if ((ret = recycle_inproc_semaphore( handle )) == STATUS_NOT_IMPLEMENTED)
+     {
+-        req->handle = wine_server_obj_handle( handle );
+-        ret = wine_server_call( req );
++        close_inproc_sync( handle );
++
++        SERVER_START_REQ( close_handle )
++        {
++            req->handle = wine_server_obj_handle( handle );
++            ret = wine_server_call( req );
++        }
++        SERVER_END_REQ;
+     }
+-    SERVER_END_REQ;
+     sock_recv_fastpath_forget( handle );
+ 
+     server_leave_uninterrupted_section( &fd_cache_mutex, &sigset );

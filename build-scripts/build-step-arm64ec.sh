@@ -349,6 +349,14 @@ do
       # while it invalidates code are not reported back to it
       "arm64ec/dlls_ntdll_unix_virtual_c_report_emulated_code_write.patch"
       "arm64ec/dlls_ntdll_signal_arm64ec_c_cross_process_work_callback.patch"
+
+      # recycle private unnamed semaphores on close/create without a server round trip
+      # (Unity RenderNodeQueue); WINE_SEMAPHORE_RECYCLE=0 disables it
+      "common/dlls_ntdll_unix_sync_c_semaphore_recycle.patch"
+      "common/dlls_ntdll_unix_server_c_semaphore_recycle.patch"
+      "common/dlls_ntdll_unix_file_c_semaphore_recycle.patch"
+      "common/dlls_ntdll_unix_security_c_semaphore_recycle.patch"
+      "common/dlls_ntdll_unix_process_c_semaphore_recycle.patch"
     )
 
     for patch in "${PATCHES[@]}"; do

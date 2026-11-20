@@ -1,0 +1,20 @@
+ntdll: recycle private unnamed semaphores (file.c part)
+
+NtSetInformationObject (handle flags) stops recycling the handle.
+
+See dlls_ntdll_unix_sync_c_semaphore_recycle.patch.
+
+diff --git a/dlls/ntdll/unix/file.c b/dlls/ntdll/unix/file.c
+index 0a81d2e..aebfb77 100644
+--- a/dlls/ntdll/unix/file.c
++++ b/dlls/ntdll/unix/file.c
+@@ -8389,6 +8389,9 @@ NTSTATUS WINAPI NtSetInformationObject( HANDLE handle, OBJECT_INFORMATION_CLASS
+ 
+         if (len < sizeof(*p)) return STATUS_INVALID_BUFFER_SIZE;
+ 
++        /* an inheritable or protected handle is never recycled */
++        if ((status = make_inproc_sync_public( handle ))) return status;
++
+         SERVER_START_REQ( set_handle_info )
+         {
+             req->handle = wine_server_obj_handle( handle );

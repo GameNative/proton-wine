@@ -1,0 +1,24 @@
+ntdll: recycle private unnamed semaphores (process.c part)
+
+NtCreateUserProcess stops recycling the console and standard handles the server duplicates
+into the new process.
+
+See dlls_ntdll_unix_sync_c_semaphore_recycle.patch.
+
+diff --git a/dlls/ntdll/unix/process.c b/dlls/ntdll/unix/process.c
+index 1f4e3f7..4ceff1c 100644
+--- a/dlls/ntdll/unix/process.c
++++ b/dlls/ntdll/unix/process.c
+@@ -756,6 +756,12 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
+     }
+     if (!process_attr) process_attr = &empty_attr;
+ 
++    /* the server duplicates the console and standard handles into the new process */
++    make_inproc_sync_public( params->ConsoleHandle );
++    make_inproc_sync_public( params->hStdInput );
++    make_inproc_sync_public( params->hStdOutput );
++    make_inproc_sync_public( params->hStdError );
++
+     TRACE( "%s image %s cmdline %s parent %p machine %x\n", debugstr_us( &path ),
+            debugstr_us( &params->ImagePathName ), debugstr_us( &params->CommandLine ), parent, machine );
+ 
