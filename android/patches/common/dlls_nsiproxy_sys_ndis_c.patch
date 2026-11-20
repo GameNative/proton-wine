@@ -22,25 +22,31 @@ index 158a39e..ff5dcc8 100644
  static BOOL have_ethernet_iface;
  
  static struct if_entry *find_entry_from_index( UINT index )
-@@ -309,8 +311,16 @@ static struct if_entry *add_entry( UINT index, const char *name )
+@@ -309,8 +311,22 @@ static struct if_entry *add_entry( UINT index, const char *name )
          free( entry );
          return NULL;
      }
 -
-+#ifndef __ANDROID__
++
      if_get_physical( name, &entry->if_type, &entry->if_phys_addr );
-+#else
-+    if (strstr(name, "wlan") || strstr(name, "en") || strstr(name, "eth") || strstr(name, "dummy"))
-+        entry->if_type = MIB_IF_TYPE_ETHERNET;
-+    else if (strstr(name, "lo"))
-+        entry->if_type = MIB_IF_TYPE_LOOPBACK;
-+    else if (strstr(name, "rmnet"))
-+        entry->if_type = MIB_IF_TYPE_PPP;
++#ifdef __ANDROID__
++    /* Android still answers SIOCGIFHWADDR for app processes, so use the regular path first:
++     * without a MAC, programs that derive a machine key from adapters (Ubisoft Connect) cannot decrypt their own data
++     * Fall back to the name heuristic only when the ioctl did not resolve the type */
++    if (entry->if_type == MIB_IF_TYPE_OTHER)
++    {
++        if (strstr(name, "wlan") || strstr(name, "en") || strstr(name, "eth") || strstr(name, "dummy"))
++            entry->if_type = MIB_IF_TYPE_ETHERNET;
++        else if (strstr(name, "lo"))
++            entry->if_type = MIB_IF_TYPE_LOOPBACK;
++        else if (strstr(name, "rmnet"))
++            entry->if_type = MIB_IF_TYPE_PPP;
++    }
 +#endif
  
      entry->if_luid.Info.Reserved = 0;
      entry->if_luid.Info.NetLuidIndex = index;
-@@ -330,9 +340,35 @@ static struct if_entry *add_entry( UINT index, const char *name )
+@@ -330,9 +346,35 @@ static struct if_entry *add_entry( UINT index, const char *name )
  
  static unsigned int update_if_table( void )
  {
@@ -77,7 +83,7 @@ index 158a39e..ff5dcc8 100644
  
      for (entry = indices; entry->if_index; entry++)
      {
-@@ -532,7 +568,10 @@ static NTSTATUS ifinfo_enumerate_all( void *key_data, UINT key_size, void *rw_da
+@@ -532,7 +574,10 @@ static NTSTATUS ifinfo_enumerate_all( void *key_data, UINT key_size, void *rw_da
      pthread_mutex_lock( &if_list_lock );
  
      update_if_table();
