@@ -1,28 +1,30 @@
 ntdll: recycle private unnamed semaphores (server.c part)
 
 NtClose parks a recyclable semaphore instead of closing it (and fails a second close of a
-parked handle with STATUS_INVALID_HANDLE); NtDuplicateObject stops recycling the source.
+parked handle with STATUS_INVALID_HANDLE); NtDuplicateObject stops recycling the source and
+closes a parked source for real first.
 
 See dlls_ntdll_unix_sync_c_semaphore_recycle.patch.
 
 diff --git a/dlls/ntdll/unix/server.c b/dlls/ntdll/unix/server.c
-index 7d06767..5e0dd9e 100644
+index 7d06767..182e240 100644
 --- a/dlls/ntdll/unix/server.c
 +++ b/dlls/ntdll/unix/server.c
-@@ -1912,6 +1912,12 @@ NTSTATUS WINAPI NtDuplicateObject( HANDLE source_process, HANDLE source, HANDLE
+@@ -1912,6 +1912,13 @@ NTSTATUS WINAPI NtDuplicateObject( HANDLE source_process, HANDLE source, HANDLE
          return result.dup_handle.status;
      }
  
-+    /* a duplicated semaphore is never recycled; a parked one was closed by the
-+     * application. The source handle may be in another process, so only fail
-+     * for the current one. */
++    /* a duplicated semaphore is never recycled. Unless the source process is
++     * the pseudo-handle it may or may not be this process, so the handle is
++     * treated as ours: a parked one (closed by the application) is closed for
++     * real first, and the server then fails the duplication if it is ours. */
 +    if (make_inproc_sync_public( source ) && source_process == NtCurrentProcess())
 +        return STATUS_INVALID_HANDLE;
 +
      /* hold fd_cache_mutex to prevent the fd from being added again between the
       * call to remove_fd_from_cache and close_handle */
      server_enter_uninterrupted_section( &fd_cache_mutex, &sigset );
-@@ -1998,14 +2004,19 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
+@@ -1998,14 +2005,19 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
      /* always remove the cached fd; if the server request fails we'll just
       * retrieve it again */
      fd = remove_fd_from_cache( handle );
