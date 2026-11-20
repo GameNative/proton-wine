@@ -1,0 +1,31 @@
+ntdll: recycle private unnamed semaphores (file.c part)
+
+NtSetInformationObject (handle flags) stops recycling the handle; NtQueryObject closes a
+parked handle for real first, so the server reports it as invalid.
+
+See dlls_ntdll_unix_sync_c_semaphore_recycle.patch.
+
+diff --git a/dlls/ntdll/unix/file.c b/dlls/ntdll/unix/file.c
+index 0a81d2e87c7..8c117d09d01 100644
+--- a/dlls/ntdll/unix/file.c
++++ b/dlls/ntdll/unix/file.c
+@@ -8211,6 +8211,9 @@ NTSTATUS WINAPI NtQueryObject( HANDLE handle, OBJECT_INFORMATION_CLASS info_clas
+ 
+     if (used_len) *used_len = 0;
+ 
++    /* a parked semaphore was closed by the application; let the server say so */
++    close_parked_inproc_semaphore( handle );
++
+     switch (info_class)
+     {
+     case ObjectBasicInformation:
+@@ -8389,6 +8392,9 @@ NTSTATUS WINAPI NtSetInformationObject( HANDLE handle, OBJECT_INFORMATION_CLASS
+ 
+         if (len < sizeof(*p)) return STATUS_INVALID_BUFFER_SIZE;
+ 
++        /* an inheritable or protected handle is never recycled */
++        if ((status = make_inproc_sync_public( handle ))) return status;
++
+         SERVER_START_REQ( set_handle_info )
+         {
+             req->handle = wine_server_obj_handle( handle );

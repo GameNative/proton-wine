@@ -1,0 +1,506 @@
+ntdll: recycle private unnamed semaphores without a server round trip
+
+Unity's RenderNodeQueue creates an unnamed semaphore and closes it again on
+every call of a rendering function; each NtCreateSemaphore and NtClose is a
+wineserver round trip. With in-process sync (kernel or userspace ntsync),
+NtCreateSemaphore of an unnamed, non-inheritable semaphore with only specific
+access rights marks the handle as private (no extra server call, no fd; the
+create request and the mark are made under fd_cache_mutex). Its close, if the
+mark is still set and the semaphore has no other user in process, fetches its
+in-process sync if it was not used in process yet (in place of the close
+request), drains its count to 0 in process and parks the still-open handle in
+a 64-entry free list (the oldest entry is closed for real when the list is
+full). The next matching NtCreateSemaphore (same access and maximum count)
+releases a parked handle to the initial count in process and returns it,
+without a server call.
+
+The mark is cleared when the handle is duplicated (by this process, or by
+another process: wineserver makes another process run a duplication of a
+semaphore out of this process here, as APC_DUP_HANDLE, see
+server_handle_c_semaphore_recycle.patch; the unmark and the duplicate request
+are made under one hold of fd_cache_mutex), has its flags or security changed,
+is made permanent, is passed as a standard handle or is opened again as the
+root object of NtOpenSemaphore with an empty name. A parked handle is closed
+for real when one of those calls, NtQueryObject, NtCompareObjects,
+NtQuerySecurityObject or NtMakeTemporaryObject reaches it, so the server
+reports it as invalid.
+
+Switch: WINE_SEMAPHORE_RECYCLE=0 disables it.
+
+Also needs dlls_ntdll_unix_server_c_semaphore_recycle.patch,
+dlls_ntdll_unix_file_c_semaphore_recycle.patch,
+dlls_ntdll_unix_security_c_semaphore_recycle.patch,
+dlls_ntdll_unix_process_c_semaphore_recycle.patch,
+server_handle_c_semaphore_recycle.patch and
+server_process_c_semaphore_recycle.patch.
+
+diff --git a/dlls/ntdll/unix/sync.c b/dlls/ntdll/unix/sync.c
+index ecebcb3..f2b00c0 100644
+--- a/dlls/ntdll/unix/sync.c
++++ b/dlls/ntdll/unix/sync.c
+@@ -747,10 +747,14 @@ struct inproc_sync
+     LONG           refcount;  /* reference count of the sync object */
+     int            fd;        /* unix file descriptor */
+     unsigned int   access;    /* handle access rights */
+-    unsigned short type;      /* enum inproc_sync_type as short to save space */
+-    unsigned short closed;    /* fd has been closed but sync is still referenced */
++    unsigned char  type;      /* enum inproc_sync_type as char to save space */
++    unsigned char  recycle;   /* the handle is a private unnamed semaphore, see NtCreateSemaphore() */
++    unsigned short closed;    /* INPROC_SYNC_* flags below */
+ };
+ 
++#define INPROC_SYNC_CLOSED  0x01  /* fd has been closed but sync is still referenced */
++#define INPROC_SYNC_PARKED  0x02  /* closed by the application, parked for reuse */
++
+ #define INPROC_SYNC_CACHE_BLOCK_SIZE  (65536 / sizeof(struct inproc_sync))
+ #define INPROC_SYNC_CACHE_ENTRIES     128
+ 
+@@ -869,7 +873,7 @@ static struct inproc_sync *get_cached_inproc_sync( HANDLE handle )
+      * cache_inproc_sync()] */
+     if (!interlocked_inc_if_nonzero( &cache->refcount )) return NULL;
+ 
+-    if (cache->closed)
++    if (cache->closed & INPROC_SYNC_CLOSED)
+     {
+         /* The object is still being used, but "handle" has been closed. The
+          * handle value might have been reused for another object in the
+@@ -882,6 +886,28 @@ static struct inproc_sync *get_cached_inproc_sync( HANDLE handle )
+     return cache;
+ }
+ 
++/* cache entry of a handle, without taking a reference */
++static struct inproc_sync *get_inproc_sync_slot( HANDLE handle )
++{
++    unsigned int entry, idx;
++
++    if (!handle || is_pseudo_handle( handle )) return NULL;
++    idx = inproc_sync_handle_to_index( handle, &entry );
++    if (entry >= INPROC_SYNC_CACHE_ENTRIES || !inproc_sync_cache[entry]) return NULL;
++    return &inproc_sync_cache[entry][idx];
++}
++
++/* a parked semaphore handle is still open on the server, but the application
++ * closed it; report it as invalid instead of asking the server.
++ * caller must hold fd_cache_mutex */
++static NTSTATUS check_parked_handle( HANDLE handle )
++{
++    struct inproc_sync *slot = get_inproc_sync_slot( handle );
++
++    if (slot && (slot->closed & INPROC_SYNC_PARKED)) return STATUS_INVALID_HANDLE;
++    return STATUS_SUCCESS;
++}
++
+ /* fd_cache_mutex must be held to avoid races with other thread receiving fds */
+ static NTSTATUS get_server_inproc_sync( HANDLE handle, struct inproc_sync *sync )
+ {
+@@ -948,7 +974,7 @@ static NTSTATUS get_inproc_sync( HANDLE handle, enum inproc_sync_type desired_ty
+         server_enter_uninterrupted_section( &fd_cache_mutex, &sigset );
+         if (!(sync = get_cached_inproc_sync( handle )))
+         {
+-            if ((ret = get_server_inproc_sync( handle, stack )))
++            if ((ret = check_parked_handle( handle )) || (ret = get_server_inproc_sync( handle, stack )))
+             {
+                 server_leave_uninterrupted_section( &fd_cache_mutex, &sigset );
+                 return ret;
+@@ -1007,13 +1033,325 @@ void close_inproc_sync( HANDLE handle )
+     if (inproc_device_fd < 0) return;
+     if ((cache = get_cached_inproc_sync( handle )))
+     {
+-        cache->closed = 1;
++        cache->closed = INPROC_SYNC_CLOSED;
+         /* once for the reference we just grabbed, and once for the handle */
+         release_inproc_sync( cache );
+         release_inproc_sync( cache );
+     }
+ }
+ 
++/* Recycling of private unnamed semaphores.
++ *
++ * Some programs create an unnamed semaphore and close it again on every call
++ * of a hot function (Unity's RenderNodeQueue does it once per render call).
++ * Each create and each close is a wineserver round trip.
++ *
++ * NtCreateSemaphore with no name, no root directory, no OBJ_INHERIT or
++ * OBJ_PERMANENT, no security descriptor, no QoS and only specific access
++ * rights sets the "recycle" byte of the handle's cache entry. It costs no
++ * server call and no fd: the in-process sync is fetched on first use, as for
++ * any other semaphore. The create request and the mark are made under
++ * fd_cache_mutex. The byte is cleared, under fd_cache_mutex, when the handle
++ * is closed for real or can be reached from anywhere else: duplication (by
++ * this process, or by another process: the server makes another process run
++ * a duplication of a semaphore out of this process here, as APC_DUP_HANDLE,
++ * and the unmark and the duplicate request are made under one hold of
++ * fd_cache_mutex), handle flag or security changes, making the object
++ * permanent, or passing it as a standard handle to a new process. A marked
++ * handle has therefore never been reachable from outside this process.
++ *
++ * NtClose of a marked handle that holds the only reference (no thread is
++ * waiting on it or using it) does not close it on the server. If the
++ * semaphore was not used in process yet, its sync is fetched first, in place
++ * of the close request. The cache entry is detached with a refcount 1 -> 0
++ * compare-and-swap, the count is drained to 0 in process and the handle,
++ * still open on the server, is parked in a 64-entry free list (the oldest
++ * entry is closed for real when it is full) with INPROC_SYNC_PARKED set.
++ * Lookups of a parked handle miss the cache;
++ * waits, releases, queries and NtClose report STATUS_INVALID_HANDLE for it, as
++ * for a closed handle. NtDuplicateObject, the handle flag, security and
++ * permanence setters, NtCreateUserProcess, NtQueryObject, NtCompareObjects,
++ * NtQuerySecurityObject and NtMakeTemporaryObject close a parked handle for
++ * real first, so the server reports it as invalid.
++ *
++ * The next qualifying NtCreateSemaphore with the same access and maximum count
++ * takes a parked handle, releases it to the initial count in process and
++ * returns it, without a server call.
++ *
++ * Only with in-process sync (kernel or userspace ntsync), never with fsync or
++ * server-side sync. WINE_SEMAPHORE_RECYCLE=0 disables it.
++ */
++#define SEMAPHORE_RECYCLE_MAX        64
++#define SEMAPHORE_RECYCLE_MAX_DRAIN  64
++
++struct parked_semaphore
++{
++    HANDLE      handle;
++    ACCESS_MASK access;
++    LONG        max;
++};
++
++/* protected by fd_cache_mutex */
++static struct parked_semaphore parked_semaphores[SEMAPHORE_RECYCLE_MAX];
++static unsigned int parked_semaphore_count;
++static int semaphore_recycle_used;
++
++static BOOL semaphore_recycle_enabled(void)
++{
++    static int enabled = -1;
++
++    if (enabled < 0)
++    {
++        const char *env = getenv( "WINE_SEMAPHORE_RECYCLE" );
++        enabled = !env || atoi( env ) != 0;
++        if (!enabled) TRACE( "WINE_SEMAPHORE_RECYCLE=0, not recycling semaphores\n" );
++    }
++    return enabled && !do_fsync() && inproc_device_fd >= 0;
++}
++
++static BOOL semaphore_attr_is_private( const OBJECT_ATTRIBUTES *attr )
++{
++    if (!attr) return TRUE;
++    return attr->Length == sizeof(*attr) && !attr->RootDirectory && !attr->ObjectName &&
++           !attr->SecurityDescriptor && !attr->SecurityQualityOfService &&
++           !(attr->Attributes & ~(OBJ_OPENIF | OBJ_CASE_INSENSITIVE));
++}
++
++static void free_inproc_sync_fd( int fd )
++{
++#ifdef __ANDROID__
++    if (ntsync_userspace)
++    {
++        ntsync_release( fd );
++        return;
++    }
++#endif
++    close( fd );
++}
++
++/* close a parked handle for real; caller must hold fd_cache_mutex */
++static void close_parked_semaphore( struct inproc_sync *slot, HANDLE handle )
++{
++    TRACE( "closing parked semaphore %p\n", handle );
++    slot->closed = INPROC_SYNC_CLOSED;
++    slot->recycle = 0;
++    free_inproc_sync_fd( slot->fd );
++    SERVER_START_REQ( close_handle )
++    {
++        req->handle = wine_server_obj_handle( handle );
++        wine_server_call( req );
++    }
++    SERVER_END_REQ;
++}
++
++/* take a handle off the free list and close it for real; caller must hold fd_cache_mutex */
++static void unpark_semaphore( HANDLE handle )
++{
++    unsigned int i;
++
++    for (i = 0; i < parked_semaphore_count; i++) if (parked_semaphores[i].handle == handle) break;
++    assert( i < parked_semaphore_count );
++    memmove( parked_semaphores + i, parked_semaphores + i + 1,
++             (--parked_semaphore_count - i) * sizeof(*parked_semaphores) );
++    close_parked_semaphore( get_inproc_sync_slot( handle ), handle );
++}
++
++/* mark a just created private semaphore; caller must hold fd_cache_mutex, so
++ * that a duplication run here for another process (APC_DUP_HANDLE) sees the
++ * handle either before the create (an invalid or other handle) or marked */
++static void mark_semaphore_recyclable( HANDLE handle )
++{
++    struct inproc_sync *slot = get_inproc_sync_slot( handle );
++
++    if (!slot) return;  /* its cache block is not allocated yet */
++    slot->recycle = 1;
++    semaphore_recycle_used = 1;
++}
++
++/* set the count of a semaphore nothing else can reach to 0 in process;
++ * returns its state before the drain in "info" */
++static BOOL drain_semaphore( int fd, SEMAPHORE_BASIC_INFORMATION *info )
++{
++    static const LARGE_INTEGER zero_timeout;
++    SEMAPHORE_BASIC_INFORMATION after;
++    LONG i;
++
++    if (linux_query_semaphore_obj( fd, info ) || info->CurrentCount > SEMAPHORE_RECYCLE_MAX_DRAIN) return FALSE;
++    if (!info->CurrentCount) return TRUE;
++    for (i = 0; i < info->CurrentCount; i++)
++        if (linux_wait_objs( inproc_device_fd, 1, &fd, WaitAny, 0, &zero_timeout )) return FALSE;
++    return !linux_query_semaphore_obj( fd, &after ) && !after.CurrentCount;
++}
++
++/* take a parked semaphore with the same access and maximum count and set its
++ * count to "initial"; returns STATUS_NOT_FOUND if there is none or it cannot
++ * be reused (it is then closed for real) */
++static NTSTATUS reuse_parked_semaphore( HANDLE *handle, ACCESS_MASK access, LONG initial, LONG max )
++{
++    NTSTATUS ret = STATUS_NOT_FOUND;
++    unsigned int i;
++    sigset_t sigset;
++
++    if (!parked_semaphore_count) return STATUS_NOT_FOUND;  /* unlocked read, only a hint */
++
++    server_enter_uninterrupted_section( &fd_cache_mutex, &sigset );
++    for (i = parked_semaphore_count; i--;)
++    {
++        HANDLE parked = parked_semaphores[i].handle;
++        struct inproc_sync *slot;
++
++        if (parked_semaphores[i].access != access || parked_semaphores[i].max != max) continue;
++        parked_semaphores[i] = parked_semaphores[--parked_semaphore_count];
++
++        slot = get_inproc_sync_slot( parked );
++        assert( slot && (slot->closed & INPROC_SYNC_PARKED) && slot->recycle && !slot->refcount );
++
++        /* drained to 0 at park time, and nothing could reach it since */
++        if (initial && linux_release_semaphore_obj( slot->fd, initial, NULL ))
++        {
++            close_parked_semaphore( slot, parked );
++            break;
++        }
++
++        /* fields first, the refcount last [paired with the load in get_cached_inproc_sync()] */
++        slot->closed = 0;
++        InterlockedExchange( &slot->refcount, 1 );
++        TRACE( "reusing parked semaphore %p, initial %d, max %d\n", parked, initial, max );
++        *handle = parked;
++        ret = STATUS_SUCCESS;
++        break;
++    }
++    server_leave_uninterrupted_section( &fd_cache_mutex, &sigset );
++    return ret;
++}
++
++/* NtClose of a recyclable semaphore: park it instead of closing it.
++ * Returns STATUS_SUCCESS if parked, STATUS_INVALID_HANDLE if the handle is
++ * already parked (closed twice), STATUS_NOT_IMPLEMENTED to close it normally.
++ * caller must hold fd_cache_mutex */
++NTSTATUS recycle_inproc_semaphore( HANDLE handle )
++{
++    struct inproc_sync *slot;
++    SEMAPHORE_BASIC_INFORMATION info;
++
++    if (!semaphore_recycle_used) return STATUS_NOT_IMPLEMENTED;
++    if (!(slot = get_inproc_sync_slot( handle ))) return STATUS_NOT_IMPLEMENTED;
++    if (slot->closed & INPROC_SYNC_PARKED) return STATUS_INVALID_HANDLE;
++    if (!slot->recycle) return STATUS_NOT_IMPLEMENTED;
++    slot->recycle = 0;  /* closed for real unless it is parked below */
++
++    if (!InterlockedCompareExchange( &slot->refcount, 0, 0 ))
++    {
++        /* not used in process yet: fetch its sync now, in place of the close request */
++        struct inproc_sync stack;
++
++        if (get_server_inproc_sync( handle, &stack )) return STATUS_NOT_IMPLEMENTED;
++        if (cache_inproc_sync( handle, &stack ) != slot)
++        {
++            release_inproc_sync( &stack );
++            return STATUS_NOT_IMPLEMENTED;
++        }
++        release_inproc_sync( slot );  /* the caller's reference; the handle keeps its own */
++    }
++
++    /* Detach the entry if it is cached for this handle and the handle holds
++     * the only reference. A thread waiting on the semaphore or using it holds
++     * another one, and then the semaphore is closed normally. Once the
++     * refcount is 0 lock-free lookups miss, and the slow path blocks on
++     * fd_cache_mutex. */
++    if ((slot->closed & INPROC_SYNC_CLOSED) || slot->type != INPROC_SYNC_SEMAPHORE) return STATUS_NOT_IMPLEMENTED;
++    if (InterlockedCompareExchange( &slot->refcount, 0, 1 ) != 1) return STATUS_NOT_IMPLEMENTED;
++
++    /* The handle was marked, so no other process has a handle to the object
++     * and no other thread of this one uses it: drain the count to 0 now. */
++    if (!drain_semaphore( slot->fd, &info ))
++    {
++        /* give the reference back to the handle and close it normally */
++        InterlockedExchange( &slot->refcount, 1 );
++        return STATUS_NOT_IMPLEMENTED;
++    }
++
++    if (parked_semaphore_count == SEMAPHORE_RECYCLE_MAX)
++    {
++        /* list full: close the bottom (oldest) entry for real, so entries with
++         * other access or maximum counts cannot starve this one */
++        unpark_semaphore( parked_semaphores[0].handle );
++    }
++
++    slot->closed = INPROC_SYNC_CLOSED | INPROC_SYNC_PARKED;
++    slot->recycle = 1;
++    parked_semaphores[parked_semaphore_count].handle = handle;
++    parked_semaphores[parked_semaphore_count].access = slot->access;
++    parked_semaphores[parked_semaphore_count].max = info.MaximumCount;
++    parked_semaphore_count++;
++    TRACE( "parked semaphore %p, max %d\n", handle, (int)info.MaximumCount );
++    return STATUS_SUCCESS;
++}
++
++/* close a parked handle for real; with "unmark", also never recycle a live one.
++ * Returns STATUS_INVALID_HANDLE if the handle was parked.
++ * caller must hold fd_cache_mutex */
++static NTSTATUS unpark_inproc_semaphore_locked( HANDLE handle, BOOL unmark )
++{
++    struct inproc_sync *slot;
++
++    if (!(slot = get_inproc_sync_slot( handle )) || !slot->recycle) return STATUS_SUCCESS;
++    if (slot->closed & INPROC_SYNC_PARKED)
++    {
++        unpark_semaphore( handle );
++        return STATUS_INVALID_HANDLE;
++    }
++    if (unmark)
++    {
++        TRACE( "%p is no longer private\n", handle );
++        slot->recycle = 0;
++    }
++    return STATUS_SUCCESS;
++}
++
++static NTSTATUS unpark_inproc_semaphore( HANDLE handle, BOOL unmark )
++{
++    struct inproc_sync *slot;
++    NTSTATUS ret;
++    sigset_t sigset;
++
++    /* unlocked reads, only hints */
++    if (!semaphore_recycle_used) return STATUS_SUCCESS;
++    if (!unmark && (!parked_semaphore_count || !(slot = get_inproc_sync_slot( handle )) ||
++                    !(slot->closed & INPROC_SYNC_PARKED)))
++        return STATUS_SUCCESS;
++
++    server_enter_uninterrupted_section( &fd_cache_mutex, &sigset );
++    ret = unpark_inproc_semaphore_locked( handle, unmark );
++    server_leave_uninterrupted_section( &fd_cache_mutex, &sigset );
++    return ret;
++}
++
++/* The handle can be reached from outside this process, or its object state
++ * changes in a way a recycled semaphore must not carry over: never recycle it.
++ * A parked handle was closed by the application: it is closed for real now
++ * and STATUS_INVALID_HANDLE is returned. */
++NTSTATUS make_inproc_sync_public( HANDLE handle )
++{
++    return unpark_inproc_semaphore( handle, TRUE );
++}
++
++/* same as make_inproc_sync_public(); caller must hold fd_cache_mutex, and
++ * keeps holding it until the server request that publishes the handle is done */
++NTSTATUS make_inproc_sync_public_locked( HANDLE handle )
++{
++    if (!semaphore_recycle_used) return STATUS_SUCCESS;
++    return unpark_inproc_semaphore_locked( handle, TRUE );
++}
++
++/* A server call is about to use the handle: if it is parked (closed by the
++ * application), close it for real so that the server reports it as invalid.
++ * A live handle stays recyclable. */
++void close_parked_inproc_semaphore( HANDLE handle )
++{
++    unpark_inproc_semaphore( handle, FALSE );
++}
++
+ static NTSTATUS inproc_release_semaphore( HANDLE handle, ULONG count, ULONG *prev_count )
+ {
+     struct inproc_sync stack, *sync;
+@@ -1242,14 +1580,20 @@ NTSTATUS WINAPI NtCreateSemaphore( HANDLE *handle, ACCESS_MASK access, const OBJ
+     unsigned int ret;
+     data_size_t len;
+     struct object_attributes *objattr;
++    BOOL recycle;
++    sigset_t sigset;
+ 
+     TRACE( "access %#x, name %s, initial %d, max %d\n", access,
+            attr ? debugstr_us(attr->ObjectName) : "(null)", initial, max );
+ 
+     *handle = 0;
+     if (max <= 0 || initial < 0 || initial > max) return STATUS_INVALID_PARAMETER;
++    recycle = semaphore_attr_is_private( attr ) && !(access & (MAXIMUM_ALLOWED | GENERIC_ALL | GENERIC_READ |
++              GENERIC_WRITE | GENERIC_EXECUTE)) && semaphore_recycle_enabled();
++    if (recycle && !reuse_parked_semaphore( handle, access, initial, max )) return STATUS_SUCCESS;
+     if ((ret = alloc_object_attributes( attr, &objattr, &len ))) return ret;
+ 
++    if (recycle) server_enter_uninterrupted_section( &fd_cache_mutex, &sigset );
+     SERVER_START_REQ( create_semaphore )
+     {
+         req->access  = access;
+@@ -1260,6 +1604,11 @@ NTSTATUS WINAPI NtCreateSemaphore( HANDLE *handle, ACCESS_MASK access, const OBJ
+         *handle = wine_server_ptr_handle( reply->handle );
+     }
+     SERVER_END_REQ;
++    if (recycle)
++    {
++        if (ret == STATUS_SUCCESS) mark_semaphore_recyclable( *handle );
++        server_leave_uninterrupted_section( &fd_cache_mutex, &sigset );
++    }
+ 
+     free( objattr );
+     return ret;
+@@ -1277,6 +1626,8 @@ NTSTATUS WINAPI NtOpenSemaphore( HANDLE *handle, ACCESS_MASK access, const OBJEC
+ 
+     *handle = 0;
+     if ((ret = validate_open_object_attributes( attr ))) return ret;
++    /* an empty name opens the root object itself: a second handle to it */
++    if (attr->RootDirectory && (ret = make_inproc_sync_public( attr->RootDirectory ))) return ret;
+ 
+     SERVER_START_REQ( open_semaphore )
+     {
+@@ -2384,6 +2735,8 @@ NTSTATUS WINAPI NtMakePermanentObject( HANDLE handle )
+ 
+     TRACE("%p\n", handle);
+ 
++    if ((ret = make_inproc_sync_public( handle ))) return ret;
++
+     SERVER_START_REQ( set_object_permanence )
+     {
+         req->handle = wine_server_obj_handle( handle );
+@@ -2404,6 +2757,8 @@ NTSTATUS WINAPI NtMakeTemporaryObject( HANDLE handle )
+ 
+     TRACE("%p\n", handle);
+ 
++    close_parked_inproc_semaphore( handle );
++
+     SERVER_START_REQ( set_object_permanence )
+     {
+         req->handle = wine_server_obj_handle( handle );
+diff --git a/dlls/ntdll/unix/unix_private.h b/dlls/ntdll/unix/unix_private.h
+index 272d8d5..cd71805 100644
+--- a/dlls/ntdll/unix/unix_private.h
++++ b/dlls/ntdll/unix/unix_private.h
+@@ -424,6 +424,10 @@ extern NTSTATUS wow64_wine_spawnvp( void *args );
+ extern void dbg_init(void);
+ 
+ extern void close_inproc_sync( HANDLE handle );
++extern NTSTATUS recycle_inproc_semaphore( HANDLE handle );
++extern NTSTATUS make_inproc_sync_public( HANDLE handle );
++extern NTSTATUS make_inproc_sync_public_locked( HANDLE handle );
++extern void close_parked_inproc_semaphore( HANDLE handle );
+ 
+ extern NTSTATUS call_user_apc_dispatcher( CONTEXT *context_ptr, unsigned int flags, ULONG_PTR arg1, ULONG_PTR arg2,
+                                           ULONG_PTR arg3, PNTAPCFUNC func, NTSTATUS status );
