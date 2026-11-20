@@ -2,30 +2,110 @@ ntdll: recycle private unnamed semaphores (server.c part)
 
 NtClose parks a recyclable semaphore instead of closing it (and fails a second close of a
 parked handle with STATUS_INVALID_HANDLE); NtDuplicateObject stops recycling the source and
-closes a parked source for real first; NtCompareObjects closes parked handles for real first,
-so the server reports them as invalid.
+closes a parked source for real first, under the same hold of fd_cache_mutex as the duplicate
+request, and runs the duplication in the source process (APC_DUP_HANDLE) when the server
+answers STATUS_MORE_PROCESSING_REQUIRED for a semaphore of another process; NtCompareObjects
+closes parked handles for real first, so the server reports them as invalid.
 
 See dlls_ntdll_unix_sync_c_semaphore_recycle.patch.
 
 diff --git a/dlls/ntdll/unix/server.c b/dlls/ntdll/unix/server.c
-index 7d067673e5c..955faae7da2 100644
+index 7d06767..6714ddd 100644
 --- a/dlls/ntdll/unix/server.c
 +++ b/dlls/ntdll/unix/server.c
-@@ -1912,6 +1912,13 @@ NTSTATUS WINAPI NtDuplicateObject( HANDLE source_process, HANDLE source, HANDLE
-         return result.dup_handle.status;
-     }
+@@ -1879,6 +1879,31 @@ NTSTATUS WINAPI NtAllocateReserveObject( HANDLE *handle, const OBJECT_ATTRIBUTES
+ }
  
-+    /* a duplicated semaphore is never recycled. Unless the source process is
-+     * the pseudo-handle it may or may not be this process, so the handle is
-+     * treated as ours: a parked one (closed by the application) is closed for
-+     * real first, and the server then fails the duplication if it is ours. */
-+    if (make_inproc_sync_public( source ) && source_process == NtCurrentProcess())
-+        return STATUS_INVALID_HANDLE;
+ 
++/* run a duplication out of another process in that process, as APC_DUP_HANDLE */
++static NTSTATUS dup_handle_in_source_process( HANDLE source_process, HANDLE source, HANDLE dest_process,
++                                              HANDLE *dest, ACCESS_MASK access, ULONG attributes, ULONG options )
++{
++    union apc_call call;
++    union apc_result result;
++    unsigned int ret;
 +
++    memset( &call, 0, sizeof(call) );
++
++    call.dup_handle.type        = APC_DUP_HANDLE;
++    call.dup_handle.src_handle  = wine_server_obj_handle( source );
++    call.dup_handle.dst_process = wine_server_obj_handle( dest_process );
++    call.dup_handle.access      = access;
++    call.dup_handle.attributes  = attributes;
++    call.dup_handle.options     = options;
++    ret = server_queue_process_apc( source_process, &call, &result );
++    if (ret != STATUS_SUCCESS) return ret;
++
++    if (!result.dup_handle.status && dest)
++        *dest = wine_server_ptr_handle( result.dup_handle.handle );
++    return result.dup_handle.status;
++}
++
++
+ /******************************************************************************
+  *           NtDuplicateObject
+  */
+@@ -1892,30 +1917,26 @@ NTSTATUS WINAPI NtDuplicateObject( HANDLE source_process, HANDLE source, HANDLE
+     if (dest) *dest = 0;
+ 
+     if ((options & DUPLICATE_CLOSE_SOURCE) && source_process != NtCurrentProcess())
+-    {
+-        union apc_call call;
+-        union apc_result result;
+-
+-        memset( &call, 0, sizeof(call) );
+-
+-        call.dup_handle.type        = APC_DUP_HANDLE;
+-        call.dup_handle.src_handle  = wine_server_obj_handle( source );
+-        call.dup_handle.dst_process = wine_server_obj_handle( dest_process );
+-        call.dup_handle.access      = access;
+-        call.dup_handle.attributes  = attributes;
+-        call.dup_handle.options     = options;
+-        ret = server_queue_process_apc( source_process, &call, &result );
+-        if (ret != STATUS_SUCCESS) return ret;
+-
+-        if (!result.dup_handle.status)
+-            *dest = wine_server_ptr_handle( result.dup_handle.handle );
+-        return result.dup_handle.status;
+-    }
++        return dup_handle_in_source_process( source_process, source, dest_process, dest,
++                                             access, attributes, options );
+ 
      /* hold fd_cache_mutex to prevent the fd from being added again between the
       * call to remove_fd_from_cache and close_handle */
      server_enter_uninterrupted_section( &fd_cache_mutex, &sigset );
-@@ -1956,6 +1963,9 @@ NTSTATUS WINAPI NtCompareObjects( HANDLE first, HANDLE second )
+ 
++    /* A duplicated semaphore is never recycled. The mark is cleared in the
++     * same hold of fd_cache_mutex as the duplicate request, so the handle
++     * cannot be closed and its value reused by a new marked semaphore in
++     * between. Unless the source process is the pseudo-handle it may or may
++     * not be this process, so the handle is treated as ours: a parked one
++     * (closed by the application) is closed for real first, and the server
++     * then fails the duplication if it is ours. */
++    if (make_inproc_sync_public_locked( source ) && source_process == NtCurrentProcess())
++    {
++        server_leave_uninterrupted_section( &fd_cache_mutex, &sigset );
++        return STATUS_INVALID_HANDLE;
++    }
++
+     /* always remove the cached fd; if the server request fails we'll just
+      * retrieve it again */
+     if (options & DUPLICATE_CLOSE_SOURCE)
+@@ -1945,6 +1966,13 @@ NTSTATUS WINAPI NtDuplicateObject( HANDLE source_process, HANDLE source, HANDLE
+     server_leave_uninterrupted_section( &fd_cache_mutex, &sigset );
+ 
+     if (fd != -1) close( fd );
++
++    /* The source is a semaphore of another process, whose ntdll may recycle it
++     * once the application closes it: the duplication has to run in that
++     * process, where its ntdll stops recycling the handle. */
++    if (ret == STATUS_MORE_PROCESSING_REQUIRED)
++        ret = dup_handle_in_source_process( source_process, source, dest_process, dest,
++                                            access, attributes, options );
+     return ret;
+ }
+ 
+@@ -1956,6 +1984,9 @@ NTSTATUS WINAPI NtCompareObjects( HANDLE first, HANDLE second )
  {
      unsigned int status;
  
@@ -35,7 +115,7 @@ index 7d067673e5c..955faae7da2 100644
      SERVER_START_REQ( compare_objects )
      {
          req->first = wine_server_obj_handle( first );
-@@ -1998,14 +2008,19 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
+@@ -1998,14 +2029,19 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
      /* always remove the cached fd; if the server request fails we'll just
       * retrieve it again */
      fd = remove_fd_from_cache( handle );

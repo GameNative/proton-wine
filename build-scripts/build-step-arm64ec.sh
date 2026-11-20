@@ -357,6 +357,8 @@ do
       "common/dlls_ntdll_unix_file_c_semaphore_recycle.patch"
       "common/dlls_ntdll_unix_security_c_semaphore_recycle.patch"
       "common/dlls_ntdll_unix_process_c_semaphore_recycle.patch"
+      "common/server_handle_c_semaphore_recycle.patch"
+      "common/server_process_c_semaphore_recycle.patch"
     )
 
     for patch in "${PATCHES[@]}"; do
