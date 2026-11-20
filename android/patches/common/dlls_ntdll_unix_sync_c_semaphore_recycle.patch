@@ -19,7 +19,8 @@ another process: wineserver makes another process run a duplication of a
 semaphore out of this process here, as APC_DUP_HANDLE, see
 server_handle_c_semaphore_recycle.patch; the unmark and the duplicate request
 are made under one hold of fd_cache_mutex), has its flags or security changed,
-is made permanent or is passed as a standard handle. A parked handle is closed
+is made permanent, is passed as a standard handle or is opened again as the
+root object of NtOpenSemaphore with an empty name. A parked handle is closed
 for real when one of those calls, NtQueryObject, NtCompareObjects,
 NtQuerySecurityObject or NtMakeTemporaryObject reaches it, so the server
 reports it as invalid.
@@ -34,7 +35,7 @@ server_handle_c_semaphore_recycle.patch and
 server_process_c_semaphore_recycle.patch.
 
 diff --git a/dlls/ntdll/unix/sync.c b/dlls/ntdll/unix/sync.c
-index ecebcb3..28ea684 100644
+index ecebcb3..f2b00c0 100644
 --- a/dlls/ntdll/unix/sync.c
 +++ b/dlls/ntdll/unix/sync.c
 @@ -747,10 +747,14 @@ struct inproc_sync
@@ -461,7 +462,16 @@ index ecebcb3..28ea684 100644
  
      free( objattr );
      return ret;
-@@ -2384,6 +2733,8 @@ NTSTATUS WINAPI NtMakePermanentObject( HANDLE handle )
+@@ -1277,6 +1626,8 @@ NTSTATUS WINAPI NtOpenSemaphore( HANDLE *handle, ACCESS_MASK access, const OBJEC
+ 
+     *handle = 0;
+     if ((ret = validate_open_object_attributes( attr ))) return ret;
++    /* an empty name opens the root object itself: a second handle to it */
++    if (attr->RootDirectory && (ret = make_inproc_sync_public( attr->RootDirectory ))) return ret;
+ 
+     SERVER_START_REQ( open_semaphore )
+     {
+@@ -2384,6 +2735,8 @@ NTSTATUS WINAPI NtMakePermanentObject( HANDLE handle )
  
      TRACE("%p\n", handle);
  
@@ -470,7 +480,7 @@ index ecebcb3..28ea684 100644
      SERVER_START_REQ( set_object_permanence )
      {
          req->handle = wine_server_obj_handle( handle );
-@@ -2404,6 +2755,8 @@ NTSTATUS WINAPI NtMakeTemporaryObject( HANDLE handle )
+@@ -2404,6 +2757,8 @@ NTSTATUS WINAPI NtMakeTemporaryObject( HANDLE handle )
  
      TRACE("%p\n", handle);
  
