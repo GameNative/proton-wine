@@ -2,12 +2,13 @@ ntdll: recycle private unnamed semaphores (server.c part)
 
 NtClose parks a recyclable semaphore instead of closing it (and fails a second close of a
 parked handle with STATUS_INVALID_HANDLE); NtDuplicateObject stops recycling the source and
-closes a parked source for real first.
+closes a parked source for real first; NtCompareObjects closes parked handles for real first,
+so the server reports them as invalid.
 
 See dlls_ntdll_unix_sync_c_semaphore_recycle.patch.
 
 diff --git a/dlls/ntdll/unix/server.c b/dlls/ntdll/unix/server.c
-index 7d06767..182e240 100644
+index 7d067673e5c..955faae7da2 100644
 --- a/dlls/ntdll/unix/server.c
 +++ b/dlls/ntdll/unix/server.c
 @@ -1912,6 +1912,13 @@ NTSTATUS WINAPI NtDuplicateObject( HANDLE source_process, HANDLE source, HANDLE
@@ -24,7 +25,17 @@ index 7d06767..182e240 100644
      /* hold fd_cache_mutex to prevent the fd from being added again between the
       * call to remove_fd_from_cache and close_handle */
      server_enter_uninterrupted_section( &fd_cache_mutex, &sigset );
-@@ -1998,14 +2005,19 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
+@@ -1956,6 +1963,9 @@ NTSTATUS WINAPI NtCompareObjects( HANDLE first, HANDLE second )
+ {
+     unsigned int status;
+ 
++    close_parked_inproc_semaphore( first );
++    close_parked_inproc_semaphore( second );
++
+     SERVER_START_REQ( compare_objects )
+     {
+         req->first = wine_server_obj_handle( first );
+@@ -1998,14 +2008,19 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
      /* always remove the cached fd; if the server request fails we'll just
       * retrieve it again */
      fd = remove_fd_from_cache( handle );
