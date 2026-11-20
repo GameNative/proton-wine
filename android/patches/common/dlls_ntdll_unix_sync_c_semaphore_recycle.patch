@@ -5,8 +5,9 @@ every call of a rendering function; each NtCreateSemaphore and NtClose is a
 wineserver round trip. With in-process sync (kernel or userspace ntsync),
 NtCreateSemaphore of an unnamed, non-inheritable semaphore with only specific
 access rights marks the handle as private (no server call, no fd). Its close,
-if the semaphore was used in process, was not seen leaving the process and has
-no other user, parks the still-open handle in a 64-entry free list after
+if the semaphore was not seen leaving the process and has no other user,
+fetches its in-process sync if it was not used in process yet (in place of the
+close request) and parks the still-open handle in a 64-entry free list after
 draining its count in process (the oldest entry is closed for real when the
 list is full); the next matching NtCreateSemaphore (same access and maximum
 count) reuses it and releases it to the initial count in process. Handles that
@@ -22,7 +23,7 @@ dlls_ntdll_unix_security_c_semaphore_recycle.patch and
 dlls_ntdll_unix_process_c_semaphore_recycle.patch.
 
 diff --git a/dlls/ntdll/unix/sync.c b/dlls/ntdll/unix/sync.c
-index 47dd0bd..1a2e8be 100644
+index ecebcb3..f4a7447 100644
 --- a/dlls/ntdll/unix/sync.c
 +++ b/dlls/ntdll/unix/sync.c
 @@ -747,10 +747,14 @@ struct inproc_sync
@@ -89,7 +90,7 @@ index 47dd0bd..1a2e8be 100644
              {
                  server_leave_uninterrupted_section( &fd_cache_mutex, &sigset );
                  return ret;
-@@ -1007,13 +1033,255 @@ void close_inproc_sync( HANDLE handle )
+@@ -1007,13 +1033,269 @@ void close_inproc_sync( HANDLE handle )
      if (inproc_device_fd < 0) return;
      if ((cache = get_cached_inproc_sync( handle )))
      {
@@ -116,9 +117,10 @@ index 47dd0bd..1a2e8be 100644
 + * duplication, handle flag or security changes, making the object permanent,
 + * or passing it as a standard handle to a new process.
 + *
-+ * NtClose of a marked handle whose in-process sync is cached and that holds
-+ * the only reference (no thread is waiting on it or using it) does not call
-+ * the server: the cache entry is detached with a refcount 1 -> 0
++ * NtClose of a marked handle that holds the only reference (no thread is
++ * waiting on it or using it) does not close it on the server. If the
++ * semaphore was not used in process yet, its sync is fetched first, in place
++ * of the close request. The cache entry is detached with a refcount 1 -> 0
 + * compare-and-swap, the count is drained to 0 in process and the handle,
 + * still open on the server, is parked in a 64-entry free list (the oldest
 + * entry is closed for real when it is full) with INPROC_SYNC_PARKED set.
@@ -277,12 +279,25 @@ index 47dd0bd..1a2e8be 100644
 +    if (!slot->recycle) return STATUS_NOT_IMPLEMENTED;
 +    slot->recycle = 0;  /* closed for real unless it is parked below */
 +
-+    /* Detach the entry if it is cached for this handle (the semaphore was used
-+     * in process) and the handle holds the only reference. A thread waiting on
-+     * the semaphore or using it holds another one, and then the semaphore is
-+     * closed normally: the object has to live on until that thread is done
-+     * with it. Once the refcount is 0 lock-free lookups miss, and the slow
-+     * path blocks on fd_cache_mutex. */
++    if (!InterlockedCompareExchange( &slot->refcount, 0, 0 ))
++    {
++        /* not used in process yet: fetch its sync now, in place of the close request */
++        struct inproc_sync stack;
++
++        if (get_server_inproc_sync( handle, &stack )) return STATUS_NOT_IMPLEMENTED;
++        if (cache_inproc_sync( handle, &stack ) != slot)
++        {
++            release_inproc_sync( &stack );
++            return STATUS_NOT_IMPLEMENTED;
++        }
++        release_inproc_sync( slot );  /* the caller's reference; the handle keeps its own */
++    }
++
++    /* Detach the entry if it is cached for this handle and the handle holds
++     * the only reference. A thread waiting on the semaphore or using it holds
++     * another one, and then the semaphore is closed normally: the object has
++     * to live on until that thread is done with it. Once the refcount is 0
++     * lock-free lookups miss, and the slow path blocks on fd_cache_mutex. */
 +    if ((slot->closed & INPROC_SYNC_CLOSED) || slot->type != INPROC_SYNC_SEMAPHORE) return STATUS_NOT_IMPLEMENTED;
 +    if (InterlockedCompareExchange( &slot->refcount, 0, 1 ) != 1) return STATUS_NOT_IMPLEMENTED;
 +
@@ -346,7 +361,7 @@ index 47dd0bd..1a2e8be 100644
  static NTSTATUS inproc_release_semaphore( HANDLE handle, ULONG count, ULONG *prev_count )
  {
      struct inproc_sync stack, *sync;
-@@ -1242,12 +1510,16 @@ NTSTATUS WINAPI NtCreateSemaphore( HANDLE *handle, ACCESS_MASK access, const OBJ
+@@ -1242,12 +1524,16 @@ NTSTATUS WINAPI NtCreateSemaphore( HANDLE *handle, ACCESS_MASK access, const OBJ
      unsigned int ret;
      data_size_t len;
      struct object_attributes *objattr;
@@ -363,7 +378,7 @@ index 47dd0bd..1a2e8be 100644
      if ((ret = alloc_object_attributes( attr, &objattr, &len ))) return ret;
  
      SERVER_START_REQ( create_semaphore )
-@@ -1262,6 +1534,7 @@ NTSTATUS WINAPI NtCreateSemaphore( HANDLE *handle, ACCESS_MASK access, const OBJ
+@@ -1262,6 +1548,7 @@ NTSTATUS WINAPI NtCreateSemaphore( HANDLE *handle, ACCESS_MASK access, const OBJ
      SERVER_END_REQ;
  
      free( objattr );
@@ -371,7 +386,7 @@ index 47dd0bd..1a2e8be 100644
      return ret;
  }
  
-@@ -2384,6 +2657,8 @@ NTSTATUS WINAPI NtMakePermanentObject( HANDLE handle )
+@@ -2384,6 +2671,8 @@ NTSTATUS WINAPI NtMakePermanentObject( HANDLE handle )
  
      TRACE("%p\n", handle);
  
@@ -381,10 +396,10 @@ index 47dd0bd..1a2e8be 100644
      {
          req->handle = wine_server_obj_handle( handle );
 diff --git a/dlls/ntdll/unix/unix_private.h b/dlls/ntdll/unix/unix_private.h
-index 0285af2..e9878e9 100644
+index 272d8d5..716af44 100644
 --- a/dlls/ntdll/unix/unix_private.h
 +++ b/dlls/ntdll/unix/unix_private.h
-@@ -425,6 +425,8 @@ extern NTSTATUS wow64_wine_spawnvp( void *args );
+@@ -424,6 +424,8 @@ extern NTSTATUS wow64_wine_spawnvp( void *args );
  extern void dbg_init(void);
  
  extern void close_inproc_sync( HANDLE handle );
