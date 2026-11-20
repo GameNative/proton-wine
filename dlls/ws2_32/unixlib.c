@@ -790,6 +790,9 @@ static NTSTATUS unix_getaddrinfo( void *args )
             dst->ai_socktype = socktype_from_unix( src->ai_socktype );
             dst->ai_protocol = protocol_from_unix( src->ai_protocol );
         }
+        /* A discarded duplicate may leave data in this slot, including past
+         * its header when the next result has a shorter canonical name. */
+        dst->ai_canonname = NULL;
         if (src->ai_canonname)
         {
             size_t len = strlen( src->ai_canonname ) + 1;
