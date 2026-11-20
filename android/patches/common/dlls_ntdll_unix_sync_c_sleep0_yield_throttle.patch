@@ -8,101 +8,63 @@ this way. After 50000 consecutive yields that did not switch, with no gap over
 2 ms and no wait with a non-zero timeout in between, each further one still
 yields and then sleeps 250 us.
 
-Unity's render thread (UnityGfxDeviceW) spins with SwitchToThread for a few
-milliseconds every frame while it waits for the main thread, which never
-reaches 50000. A second, short tier covers it: after 100 yields back to back,
-each starting within 50 us of the previous one, each further one sleeps 50 us.
-Any work between two yields longer than 50 us starts the count over.
-
-Switch: WINE_SLEEP0_THROTTLE=0 disables both tiers;
-WINE_SLEEP0_THROTTLE=<iters>[,<usec>[,<short_iters>[,<short_usec>]]] sets the
-long tier's threshold and sleep length, then the short tier's (short_iters 0
-disables only the short tier).
+Switch: WINE_SLEEP0_THROTTLE=0 disables it; WINE_SLEEP0_THROTTLE=<iters>[,<usec>]
+sets the threshold and the sleep length.
 
 PR: https://github.com/GameNative/proton-wine/pull/119
 
 diff --git a/dlls/ntdll/unix/sync.c b/dlls/ntdll/unix/sync.c
-index 713d365..47dd0bd 100644
+index b40bfe4..fd815e9 100644
 --- a/dlls/ntdll/unix/sync.c
 +++ b/dlls/ntdll/unix/sync.c
-@@ -2572,6 +2572,137 @@ NTSTATUS WINAPI NtQueryTimer( HANDLE handle, TIMER_INFORMATION_CLASS class,
+@@ -2544,6 +2544,93 @@ NTSTATUS WINAPI NtQueryTimer( HANDLE handle, TIMER_INFORMATION_CLASS class,
  }
  
  
 +/* Sleep(0) / SwitchToThread storm throttle.
 + *
-+ * A thread that does nothing but yield, with Sleep(0) or SwitchToThread, is a
-+ * spinner (e.g. a worker polling a flag, or a render thread waiting for the next
-+ * frame's commands); on Windows that is cheap enough, here every NtYieldExecution
-+ * is a sched_yield() plus two getrusage() and it burns a core. Only yields that
-+ * did not switch are counted. There are two tiers; past either threshold each
-+ * further yield still yields, then sleeps briefly.
++ * A thread that does nothing but yield thousands of times in a row, with Sleep(0)
++ * or SwitchToThread, is an idle spinner (e.g. a worker polling a flag); on Windows
++ * that is cheap enough, here every NtYieldExecution is a sched_yield() plus two
++ * getrusage() and it pins a core. Only yields that did not switch are counted.
++ * Past the threshold each further one still yields, then sleeps briefly. A
++ * gap of more than SLEEP0_WINDOW between two of them, or any other sleep or wait
++ * with a non-zero timeout, starts a new run. The default threshold takes more
++ * than 100 ms of continuous spinning, so frame limiters and flag waits, which
++ * all wait or work at least once per frame, never get here.
 + *
-+ * Short tier: SLEEP0_SHORT_ITERS yields back to back, each one starting less
-+ * than SLEEP0_SHORT_GAP after the previous one returned, then each further one
-+ * sleeps SLEEP0_SHORT_USEC. This catches the per-frame spin of a few milliseconds
-+ * that never reaches the long tier. A thread that does any real work between two
-+ * yields (more than SLEEP0_SHORT_GAP) starts over, so a loop that yields once
-+ * per iteration between work is never slowed.
-+ *
-+ * Long tier: SLEEP0_DEFAULT_ITERS yields with no gap over SLEEP0_WINDOW between
-+ * them, then each further one sleeps SLEEP0_DEFAULT_USEC.
-+ *
-+ * Any other sleep or wait with a non-zero timeout resets both tiers.
-+ *
-+ * WINE_SLEEP0_THROTTLE=0 disables both tiers.
-+ * WINE_SLEEP0_THROTTLE=<iters>[,<usec>[,<short_iters>[,<short_usec>]]] sets the
-+ * long tier's threshold and sleep length, then the short tier's; a short_iters
-+ * of 0 disables only the short tier.
++ * WINE_SLEEP0_THROTTLE=0 disables it, WINE_SLEEP0_THROTTLE=<iters>[,<usec>] sets
++ * the threshold and the sleep length.
 + */
 +#define SLEEP0_DEFAULT_ITERS 50000  /* > 100 ms of uninterrupted Sleep(0) */
 +#define SLEEP0_DEFAULT_USEC  250
 +#define SLEEP0_WINDOW        (2 * TICKSPERSEC / 1000)  /* 2 ms */
-+#define SLEEP0_SHORT_ITERS   100    /* a few hundred us of back-to-back yields */
-+#define SLEEP0_SHORT_USEC    50
-+#define SLEEP0_SHORT_GAP     (50 * TICKSPERSEC / 1000000)  /* 50 us */
 +
 +static pthread_once_t sleep0_once = PTHREAD_ONCE_INIT;
 +static unsigned int sleep0_iters;
 +static unsigned int sleep0_usec;
-+static unsigned int sleep0_short_iters;
-+static unsigned int sleep0_short_usec;
 +
 +static void sleep0_init(void)
 +{
 +    const char *env = getenv( "WINE_SLEEP0_THROTTLE" );
 +    unsigned long iters = SLEEP0_DEFAULT_ITERS, usec = SLEEP0_DEFAULT_USEC;
-+    unsigned long short_iters = SLEEP0_SHORT_ITERS, short_usec = SLEEP0_SHORT_USEC;
 +    char *end;
 +
 +    if (env && *env)
 +    {
 +        iters = strtoul( env, &end, 10 );
-+        if (*end == ',' && !(usec = strtoul( end + 1, &end, 10 ))) usec = SLEEP0_DEFAULT_USEC;
-+        if (*end == ',') short_iters = strtoul( end + 1, &end, 10 );
-+        if (*end == ',' && !(short_usec = strtoul( end + 1, &end, 10 ))) short_usec = SLEEP0_SHORT_USEC;
++        if (*end == ',' && !(usec = strtoul( end + 1, NULL, 10 ))) usec = SLEEP0_DEFAULT_USEC;
 +    }
 +    if (iters > 0x7fffffff) iters = 0x7fffffff;
 +    if (usec > 100000) usec = 100000;
-+    if (short_iters > 0x7fffffff) short_iters = 0x7fffffff;
-+    if (short_usec > 100000) short_usec = 100000;
 +    sleep0_iters = iters;
 +    sleep0_usec = usec;
-+    sleep0_short_iters = short_iters;
-+    sleep0_short_usec = short_usec;
-+    if (env) TRACE( "WINE_SLEEP0_THROTTLE %lu iterations, %lu us, short %lu iterations, %lu us\n",
-+                    iters, usec, short_iters, short_usec );
++    if (env) TRACE( "WINE_SLEEP0_THROTTLE %lu iterations, %lu us\n", iters, usec );
 +}
 +
 +static inline void sleep0_reset( const LARGE_INTEGER *timeout )
 +{
-+    if (!timeout || timeout->QuadPart)
-+    {
-+        struct ntdll_thread_data *thread_data = ntdll_get_thread_data();
-+
-+        thread_data->sleep0_count = 0;
-+        thread_data->sleep0_short = 0;
-+    }
++    if (!timeout || timeout->QuadPart) ntdll_get_thread_data()->sleep0_count = 0;
 +}
 +
 +/* called after each yield that did not switch */
@@ -110,50 +72,36 @@ index 713d365..47dd0bd 100644
 +{
 +    struct ntdll_thread_data *thread_data = ntdll_get_thread_data();
 +    struct timespec ts;
-+    unsigned int usec = 0;
-+    ULONGLONG now, gap;
++    ULONGLONG now;
 +
 +    pthread_once( &sleep0_once, sleep0_init );
 +    if (!sleep0_iters) return;
 +
 +    now = monotonic_counter();
-+    gap = now - thread_data->sleep0_last;
-+    if (gap > SLEEP0_WINDOW) thread_data->sleep0_count = 0;
-+    if (gap > SLEEP0_SHORT_GAP) thread_data->sleep0_short = 0;
++    if (now - thread_data->sleep0_last > SLEEP0_WINDOW) thread_data->sleep0_count = 0;
 +    thread_data->sleep0_last = now;
 +
-+    if (thread_data->sleep0_count < sleep0_iters) thread_data->sleep0_count++;
-+    else
++    if (thread_data->sleep0_count < sleep0_iters)
 +    {
-+        if (thread_data->sleep0_count == sleep0_iters)
-+        {
-+            static BOOL warned;
-+
-+            thread_data->sleep0_count++;
-+            TRACE( "thread %04x Sleep(0) storm after %u calls, sleeping %u us per call\n",
-+                   (int)GetCurrentThreadId(), sleep0_iters, sleep0_usec );
-+            if (!warned)
-+            {
-+                warned = TRUE;
-+                WARN( "thread %04x Sleep(0) storm, throttling\n", (int)GetCurrentThreadId() );
-+            }
-+        }
-+        usec = sleep0_usec;
++        thread_data->sleep0_count++;
++        return;
 +    }
-+
-+    if (!usec)
++    if (thread_data->sleep0_count == sleep0_iters)
 +    {
-+        if (thread_data->sleep0_short < sleep0_short_iters)
++        static BOOL warned;
++
++        thread_data->sleep0_count++;
++        TRACE( "thread %04x Sleep(0) storm after %u calls, sleeping %u us per call\n",
++               (int)GetCurrentThreadId(), sleep0_iters, sleep0_usec );
++        if (!warned)
 +        {
-+            thread_data->sleep0_short++;
-+            return;
++            warned = TRUE;
++            WARN( "thread %04x Sleep(0) storm, throttling\n", (int)GetCurrentThreadId() );
 +        }
-+        if (!sleep0_short_iters) return;
-+        usec = sleep0_short_usec;
 +    }
 +
 +    ts.tv_sec = 0;
-+    ts.tv_nsec = usec * 1000;
++    ts.tv_nsec = sleep0_usec * 1000;
 +    while (nanosleep( &ts, &ts ) == -1 && errno == EINTR);
 +    /* measure the next gap from the end of our own sleep */
 +    thread_data->sleep0_last = monotonic_counter();
@@ -163,7 +111,7 @@ index 713d365..47dd0bd 100644
  /******************************************************************
   *		NtWaitForMultipleObjects (NTDLL.@)
   */
-@@ -2583,6 +2714,7 @@ NTSTATUS WINAPI NtWaitForMultipleObjects( DWORD count, const HANDLE *handles, WA
+@@ -2555,6 +2642,7 @@ NTSTATUS WINAPI NtWaitForMultipleObjects( DWORD count, const HANDLE *handles, WA
      unsigned int ret;
  
      if (!count || count > MAXIMUM_WAIT_OBJECTS) return STATUS_INVALID_PARAMETER_1;
@@ -171,7 +119,7 @@ index 713d365..47dd0bd 100644
      if (type != WaitAll && type != WaitAny) FIXME( "Unsupported wait type %u\n", type );
  
      if (TRACE_ON(sync))
-@@ -2624,6 +2756,8 @@ NTSTATUS WINAPI NtWaitForSingleObject( HANDLE handle, BOOLEAN alertable, const L
+@@ -2596,6 +2684,8 @@ NTSTATUS WINAPI NtWaitForSingleObject( HANDLE handle, BOOLEAN alertable, const L
  
      TRACE( "handle %p, alertable %u, timeout %s\n", handle, alertable, debugstr_timeout(timeout) );
  
@@ -180,7 +128,7 @@ index 713d365..47dd0bd 100644
      if ((ret = inproc_wait( 1, &handle, WaitAny, alertable, timeout )) != STATUS_NOT_IMPLEMENTED)
      {
          TRACE( "-> %#x\n", ret );
-@@ -2652,6 +2786,7 @@ NTSTATUS WINAPI NtSignalAndWaitForSingleObject( HANDLE signal, HANDLE wait,
+@@ -2624,6 +2714,7 @@ NTSTATUS WINAPI NtSignalAndWaitForSingleObject( HANDLE signal, HANDLE wait,
      TRACE( "signal %p, wait %p, alertable %u, timeout %s\n", signal, wait, alertable, debugstr_timeout(timeout) );
  
      if (!signal) return STATUS_INVALID_HANDLE;
@@ -188,7 +136,7 @@ index 713d365..47dd0bd 100644
  
      if ((ret = inproc_signal_and_wait( signal, wait, alertable, timeout )) != STATUS_NOT_IMPLEMENTED)
          return ret;
-@@ -2692,7 +2827,11 @@ NTSTATUS WINAPI NtYieldExecution(void)
+@@ -2664,7 +2755,11 @@ NTSTATUS WINAPI NtYieldExecution(void)
      sched_yield();
  #ifdef RUSAGE_THREAD
      if (!ret) ret = getrusage( RUSAGE_THREAD, &u2 );
@@ -201,7 +149,7 @@ index 713d365..47dd0bd 100644
  #endif
      return STATUS_SUCCESS;
  #else
-@@ -2711,6 +2850,7 @@ NTSTATUS WINAPI NtDelayExecution( BOOLEAN alertable, const LARGE_INTEGER *timeou
+@@ -2683,6 +2778,7 @@ NTSTATUS WINAPI NtDelayExecution( BOOLEAN alertable, const LARGE_INTEGER *timeou
      /* if alertable, we need to query the server */
      if (alertable)
      {
@@ -209,7 +157,7 @@ index 713d365..47dd0bd 100644
          if (do_fsync())
          {
              NTSTATUS ret = fsync_wait_objects( 0, NULL, TRUE, TRUE, timeout );
-@@ -2739,6 +2879,8 @@ NTSTATUS WINAPI NtDelayExecution( BOOLEAN alertable, const LARGE_INTEGER *timeou
+@@ -2711,6 +2807,8 @@ NTSTATUS WINAPI NtDelayExecution( BOOLEAN alertable, const LARGE_INTEGER *timeou
              when = now.QuadPart - when;
          }
  
@@ -219,15 +167,14 @@ index 713d365..47dd0bd 100644
             we only care about the result of the yield for zero timeouts */
          status = NtYieldExecution();
 diff --git a/dlls/ntdll/unix/unix_private.h b/dlls/ntdll/unix/unix_private.h
-index 830499d..cb62c90 100644
+index 830499d..30ede20 100644
 --- a/dlls/ntdll/unix/unix_private.h
 +++ b/dlls/ntdll/unix/unix_private.h
-@@ -117,6 +117,9 @@ struct ntdll_thread_data
+@@ -117,6 +117,8 @@ struct ntdll_thread_data
      void                     *param;         /* thread entry point parameter */
      void                     *jmp_buf;       /* setjmp buffer for exception handling */
      int                      *fsync_apc_futex;
 +    unsigned int              sleep0_count;  /* consecutive yields that did not switch */
-+    unsigned int              sleep0_short;  /* of those, back to back (short tier) */
 +    ULONGLONG                 sleep0_last;   /* time of the last one, in Win32 ticks */
  };
  
