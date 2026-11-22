@@ -60,6 +60,8 @@ struct xinput_controller
     HANDLE device;
     WCHAR device_path[MAX_PATH];
     BOOL enabled;
+    DWORD diagnostic_read_tick;
+    DWORD diagnostic_return_tick;
 
     struct
     {
@@ -365,6 +367,10 @@ static BOOL controller_init(struct xinput_controller *controller, PHIDP_PREPARSE
     if (!(event = CreateEventW(NULL, TRUE, FALSE, NULL))) goto failed;
 
     TRACE("Found gamepad %s\n", debugstr_w(device_path));
+    WARN("stickdiag device index %Iu path %s, RX bits %u range %ld..%ld, RY bits %u range %ld..%ld.\n",
+         controller - controllers, debugstr_w(device_path),
+         controller->hid.rx_caps.BitSize, controller->hid.rx_caps.LogicalMin, controller->hid.rx_caps.LogicalMax,
+         controller->hid.ry_caps.BitSize, controller->hid.ry_caps.LogicalMin, controller->hid.ry_caps.LogicalMax);
 
     controller->hid.preparsed = preparsed;
     controller->hid.read_event = event;
@@ -565,6 +571,9 @@ static void read_controller_state(struct xinput_controller *controller)
     NTSTATUS status;
     USAGE buttons[11];
     ULONG i, button_length, value;
+    ULONG raw_rx = 0, raw_ry = 0;
+    NTSTATUS rx_status, ry_status;
+    DWORD diagnostic_tick;
     BOOL ret;
 
     if (!GetOverlappedResult(controller->device, &controller->hid.read_ovl, &read_len, TRUE))
@@ -633,10 +642,14 @@ static void read_controller_state(struct xinput_controller *controller)
     else state.Gamepad.sThumbLY = scale_value(value, &controller->hid.ly_caps, -32768, 32767);
 
     status = HidP_GetUsageValue(HidP_Input, HID_USAGE_PAGE_GENERIC, 0, HID_USAGE_GENERIC_RX, &value, controller->hid.preparsed, report_buf, report_len);
+    rx_status = status;
+    if (status == HIDP_STATUS_SUCCESS) raw_rx = value;
     if (status != HIDP_STATUS_SUCCESS) WARN("HidP_GetUsageValue HID_USAGE_PAGE_GENERIC / HID_USAGE_GENERIC_RX returned %#lx\n", status);
     else state.Gamepad.sThumbRX = scale_value(value, &controller->hid.rx_caps, -32768, 32767);
 
     status = HidP_GetUsageValue(HidP_Input, HID_USAGE_PAGE_GENERIC, 0, HID_USAGE_GENERIC_RY, &value, controller->hid.preparsed, report_buf, report_len);
+    ry_status = status;
+    if (status == HIDP_STATUS_SUCCESS) raw_ry = value;
     if (status != HIDP_STATUS_SUCCESS) WARN("HidP_GetUsageValue HID_USAGE_PAGE_GENERIC / HID_USAGE_GENERIC_RY returned %#lx\n", status);
     else state.Gamepad.sThumbRY = scale_value(value, &controller->hid.ry_caps, -32768, 32767);
 
@@ -649,6 +662,17 @@ static void read_controller_state(struct xinput_controller *controller)
     else state.Gamepad.bLeftTrigger = scale_value(value, &controller->hid.lt_caps, 0, 255);
 
     EnterCriticalSection(&controller->crit);
+    diagnostic_tick = GetTickCount();
+    if (diagnostic_tick - controller->diagnostic_read_tick >= 250)
+    {
+        controller->diagnostic_read_tick = diagnostic_tick;
+        WARN("stickdiag read index %Iu bytes %lu/%lu enabled %u RX raw %#lx status %#lx scaled %ld, RY raw %#lx status %#lx scaled %ld.\n",
+             controller - controllers, read_len, report_len, controller->enabled,
+             raw_rx, rx_status, rx_status == HIDP_STATUS_SUCCESS ?
+             scale_value(raw_rx, &controller->hid.rx_caps, -32768, 32767) : 0,
+             raw_ry, ry_status, ry_status == HIDP_STATUS_SUCCESS ?
+             scale_value(raw_ry, &controller->hid.ry_caps, -32768, 32767) : 0);
+    }
     if (controller->enabled)
     {
         state.dwPacketNumber = controller->state.dwPacketNumber + 1;
@@ -846,6 +870,8 @@ DWORD WINAPI DECLSPEC_HOTPATCH XInputSetState(DWORD index, XINPUT_VIBRATION *vib
  * XInputGetState() in the hook, so we need a wrapper. */
 static DWORD xinput_get_state(DWORD index, XINPUT_STATE *state)
 {
+    DWORD overlay_wait, diagnostic_tick;
+
     if (!state) return ERROR_BAD_ARGUMENTS;
 
     start_update_thread();
@@ -853,8 +879,19 @@ static DWORD xinput_get_state(DWORD index, XINPUT_STATE *state)
     if (index >= XUSER_MAX_COUNT) return ERROR_BAD_ARGUMENTS;
     if (!controller_lock(&controllers[index])) return ERROR_DEVICE_NOT_CONNECTED;
 
-    if (WaitForSingleObject(steam_overlay_event, 0) == WAIT_OBJECT_0) memset(state, 0, sizeof(*state));
+    overlay_wait = WaitForSingleObject(steam_overlay_event, 0);
+    if (overlay_wait == WAIT_OBJECT_0) memset(state, 0, sizeof(*state));
     else *state = controllers[index].state;
+
+    diagnostic_tick = GetTickCount();
+    if (diagnostic_tick - controllers[index].diagnostic_return_tick >= 250)
+    {
+        controllers[index].diagnostic_return_tick = diagnostic_tick;
+        WARN("stickdiag return index %lu success enabled %u overlay_wait %#lx cached_packet %lu packet %lu buttons %#x L %d,%d R %d,%d triggers %u,%u.\n",
+             index, controllers[index].enabled, overlay_wait, controllers[index].state.dwPacketNumber,
+             state->dwPacketNumber, state->Gamepad.wButtons, state->Gamepad.sThumbLX, state->Gamepad.sThumbLY,
+             state->Gamepad.sThumbRX, state->Gamepad.sThumbRY, state->Gamepad.bLeftTrigger, state->Gamepad.bRightTrigger);
+    }
 
     controller_unlock(&controllers[index]);
 
