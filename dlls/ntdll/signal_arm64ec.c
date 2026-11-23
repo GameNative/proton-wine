@@ -2153,6 +2153,8 @@ void WINAPI LdrInitializeThunk( CONTEXT *arm_context, ULONG_PTR unk2, ULONG_PTR 
 
     context_arm_to_x64( &context.context, (ARM64_NT_CONTEXT *)arm_context );
     loader_init( &context.context.AMD64_Context, (void **)&context.context.X0 );
+    WARN( "startup-diagnostic arm64ec: Starting thread proc %p (arg=%p), BaseThreadInitThunk=%p\n",
+          (void *)context.context.X0, (void *)context.context.X1, pBaseThreadInitThunk );
     TRACE_(relay)( "\1Starting thread proc %p (arg=%p)\n", (void *)context.context.X0, (void *)context.context.X1 );
     NtContinue( &context.context.AMD64_Context, TRUE );
 }
