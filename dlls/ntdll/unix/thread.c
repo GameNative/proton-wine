@@ -1359,6 +1359,8 @@ NTSTATUS WINAPI NtCreateThreadEx( HANDLE *handle, ACCESS_MASK access, OBJECT_ATT
         union apc_call call;
         union apc_result result;
 
+        WARN_(seh)( "startup-diagnostic remote thread: process=%p proc=%p arg=%p flags=%#x\n",
+                    process, start, param, flags );
         memset( &call, 0, sizeof(call) );
 
         call.create_thread.type      = APC_CREATE_THREAD;
@@ -1371,6 +1373,8 @@ NTSTATUS WINAPI NtCreateThreadEx( HANDLE *handle, ACCESS_MASK access, OBJECT_ATT
         status = server_queue_process_apc( process, &call, &result );
         if (status != STATUS_SUCCESS) return status;
 
+        WARN_(seh)( "startup-diagnostic remote result: status=%#x pid=%04x tid=%04x\n",
+                    result.create_thread.status, result.create_thread.pid, result.create_thread.tid );
         if (!(status = result.create_thread.status))
         {
             CLIENT_ID client_id;

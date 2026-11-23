@@ -940,6 +940,8 @@ void WINAPI LdrInitializeThunk( CONTEXT *context, ULONG_PTR unk2, ULONG_PTR unk3
     }
 
     loader_init( context, (void **)&context->X0 );
+    WARN( "startup-diagnostic arm64: Starting thread proc %p (arg=%p), BaseThreadInitThunk=%p\n",
+          (void *)context->X0, (void *)context->X1, pBaseThreadInitThunk );
     TRACE_(relay)( "\1Starting thread proc %p (arg=%p)\n", (void *)context->X0, (void *)context->X1 );
     NtContinue( context, TRUE );
 }
