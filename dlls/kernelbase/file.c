@@ -666,6 +666,29 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateDirectoryA( LPCSTR path, LPSECURITY_ATTRIBUT
 /***********************************************************************
  *	CreateDirectoryW   (kernelbase.@)
  */
+static void trace_kenshi_directory( const WCHAR *path, const UNICODE_STRING *nt_name, NTSTATUS status )
+{
+    const WCHAR *image = NtCurrentTeb()->Peb->ProcessParameters->ImagePathName.Buffer;
+    const WCHAR *name;
+    static LONG count;
+    DWORD error = GetLastError();
+    LONG sequence;
+
+    if (!image) return;
+    name = wcsrchr( image, '\\' );
+    if (wcsicmp( name ? name + 1 : image, L"kenshi_x64.exe" )) return;
+    sequence = InterlockedIncrement( &count );
+    if (sequence > 128) return;
+
+    /* Diagnostic only: keep file tracing off and leave API results unchanged. */
+    ERR( "GN_DIRECTORY_DIAGNOSTIC #%ld path=%s nt_path=%s status=%#lx win32=%lu%s\n",
+         sequence, debugstr_w(path),
+         nt_name ? debugstr_wn(nt_name->Buffer, nt_name->Length / sizeof(WCHAR)) : "<path conversion failed>",
+         status, status ? RtlNtStatusToDosError(status) : ERROR_SUCCESS,
+         sequence == 128 ? " (logging limit reached)" : "" );
+    SetLastError( error );
+}
+
 BOOL WINAPI DECLSPEC_HOTPATCH CreateDirectoryW( LPCWSTR path, LPSECURITY_ATTRIBUTES sa )
 {
     OBJECT_ATTRIBUTES attr;
@@ -678,6 +701,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateDirectoryW( LPCWSTR path, LPSECURITY_ATTRIBU
 
     if (!RtlDosPathNameToNtPathName_U( path, &nt_name, NULL, NULL ))
     {
+        trace_kenshi_directory( path, NULL, STATUS_OBJECT_PATH_NOT_FOUND );
         SetLastError( ERROR_PATH_NOT_FOUND );
         return FALSE;
     }
@@ -687,6 +711,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateDirectoryW( LPCWSTR path, LPSECURITY_ATTRIBU
                            FILE_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_REPARSE_POINT, NULL, 0 );
     if (status == STATUS_SUCCESS) NtClose( handle );
 
+    trace_kenshi_directory( path, &nt_name, status );
     RtlFreeUnicodeString( &nt_name );
     return set_ntstatus( status );
 }
