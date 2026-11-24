@@ -194,10 +194,47 @@ static LONG call_vectored_handlers( EXCEPTION_RECORD *rec, CONTEXT *context )
 /*******************************************************************
  *		dispatch_exception
  */
+static void log_bg3_access_violation( EXCEPTION_RECORD *rec, CONTEXT *context )
+{
+#if defined(__x86_64__)
+    static LONG count;
+    const WCHAR *image, *name;
+
+    if (rec->ExceptionCode != EXCEPTION_ACCESS_VIOLATION) return;
+    if (!NtCurrentTeb()->Peb->ProcessParameters) return;
+    image = NtCurrentTeb()->Peb->ProcessParameters->ImagePathName.Buffer;
+    if (!image) return;
+    name = wcsrchr( image, '\\' );
+    name = name ? name + 1 : image;
+    if (wcsicmp( name, L"bg3_dx11.exe" )) return;
+    if (InterlockedIncrement( &count ) > 4) return;
+
+    /* The report's +seh run omitted TRACE_CONTEXT. Log before game handlers
+     * terminate the process, without reading through the faulting pointer. */
+    WARN( "BG3_AV_DIAG code=%08lx address=%p image=%p flags=%08lx parameters=%lu\n",
+          rec->ExceptionCode, rec->ExceptionAddress, NtCurrentTeb()->Peb->ImageBaseAddress,
+          context->ContextFlags, rec->NumberParameters );
+    if (rec->NumberParameters >= 2)
+        WARN( "BG3_AV_DIAG access=%Iu target=%p\n",
+              rec->ExceptionInformation[0], (void *)rec->ExceptionInformation[1] );
+    WARN( "BG3_AV_DIAG rip=%016I64x rsp=%016I64x rbp=%016I64x eflags=%08lx\n",
+          context->Rip, context->Rsp, context->Rbp, context->EFlags );
+    WARN( "BG3_AV_DIAG rax=%016I64x rbx=%016I64x rcx=%016I64x rdx=%016I64x\n",
+          context->Rax, context->Rbx, context->Rcx, context->Rdx );
+    WARN( "BG3_AV_DIAG rsi=%016I64x rdi=%016I64x r8=%016I64x r9=%016I64x\n",
+          context->Rsi, context->Rdi, context->R8, context->R9 );
+    WARN( "BG3_AV_DIAG r10=%016I64x r11=%016I64x r12=%016I64x r13=%016I64x\n",
+          context->R10, context->R11, context->R12, context->R13 );
+    WARN( "BG3_AV_DIAG r14=%016I64x r15=%016I64x\n", context->R14, context->R15 );
+#endif
+}
+
 NTSTATUS WINAPI dispatch_exception( EXCEPTION_RECORD *rec, CONTEXT *context )
 {
     NTSTATUS status;
     DWORD i;
+
+    log_bg3_access_violation( rec, context );
 
     if (need_backtrace(rec->ExceptionCode))
     {
