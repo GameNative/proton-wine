@@ -147,13 +147,23 @@ static void init_caps_from_wave_format_wma1(GstCaps *caps, const MSAUDIO1WAVEFOR
 
 static void init_caps_from_wave_format_wma2(GstCaps *caps, const WMAUDIO2WAVEFORMAT *format, UINT32 format_size)
 {
+    const char *sgi = getenv("SteamGameId");
+    UINT depth = format->wfx.wBitsPerSample;
+
+    /* Enderal supplies its float output depth in the compressed WMA format.
+     * libav only accepts WMA v2 input depths up to 16; the output format is
+     * negotiated separately and must remain unchanged.
+     */
+    if (sgi && !strcmp(sgi, "976620") && depth == 32)
+        depth = 16;
+
     init_caps_codec_data(caps, &format->wfx + 1, format->wfx.cbSize);
 
     gst_structure_remove_field(gst_caps_get_structure(caps, 0), "format");
     gst_structure_set_name(gst_caps_get_structure(caps, 0), "audio/x-wma");
     gst_caps_set_simple(caps, "wmaversion", G_TYPE_INT, 2, NULL);
     gst_caps_set_simple(caps, "block_align", G_TYPE_INT, format->wfx.nBlockAlign, NULL);
-    gst_caps_set_simple(caps, "depth", G_TYPE_INT, format->wfx.wBitsPerSample, NULL);
+    gst_caps_set_simple(caps, "depth", G_TYPE_INT, depth, NULL);
     gst_caps_set_simple(caps, "bitrate", G_TYPE_INT, format->wfx.nAvgBytesPerSec * 8, NULL);
 }
 
