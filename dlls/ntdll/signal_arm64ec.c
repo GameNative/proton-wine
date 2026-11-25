@@ -1174,7 +1174,7 @@ NTSTATUS call_seh_handlers( EXCEPTION_RECORD *rec, CONTEXT *orig_context )
     DISPATCHER_CONTEXT_ARM64EC dispatch;
     ARM64EC_NT_CONTEXT context;
     NTSTATUS status;
-    ULONG_PTR frame;
+    ULONG_PTR frame, prev_pc, prev_sp;
     DWORD res;
 
     context.AMD64_Context = *orig_context;
@@ -1187,8 +1187,22 @@ NTSTATUS call_seh_handlers( EXCEPTION_RECORD *rec, CONTEXT *orig_context )
 
     for (;;)
     {
+        prev_pc = context.Pc;
+        prev_sp = context.Sp;
         status = virtual_unwind( UNW_FLAG_EHANDLER, &dispatch, &context, need_backtrace( rec->ExceptionCode ) );
         if (status != STATUS_SUCCESS) return status;
+
+        /* A leaf unwind must advance the PC or SP. The adjusted control PC
+         * can otherwise hide a self-referencing LR from the ARM64 unwinder. */
+        if (!dispatch.FunctionEntry && context.Pc == prev_pc && context.Sp == prev_sp)
+        {
+            ERR( "non-progressing leaf unwind pc=%I64x sp=%I64x lr=%I64x; "
+                 "original exception code=%lx addr=%p rip=%I64x rsp=%I64x\n",
+                 prev_pc, prev_sp, context.Lr, rec->ExceptionCode, rec->ExceptionAddress,
+                 orig_context->Rip, orig_context->Rsp );
+            rec->ExceptionFlags |= EXCEPTION_STACK_INVALID;
+            break;
+        }
 
     unwind_done:
         if (!dispatch.EstablisherFrame) break;
