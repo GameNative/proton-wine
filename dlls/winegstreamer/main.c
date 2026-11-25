@@ -1058,6 +1058,14 @@ static BOOL CALLBACK init_gstreamer_proc(INIT_ONCE *once, void *param, void **ct
         .err_on = ERR_ON(mfplat) || ERR_ON(quartz) || ERR_ON(wmvcore),
     };
     HINSTANCE handle;
+    WCHAR path[MAX_PATH], *name;
+    DWORD len;
+
+    if ((len = GetModuleFileNameW(NULL, path, ARRAY_SIZE(path))) && len < ARRAY_SIZE(path))
+    {
+        name = wcsrchr(path, '\\');
+        params.prefer_wmapro = !wcsicmp(name ? name + 1 : path, L"DP.exe");
+    }
 
     if (WINE_UNIX_CALL(unix_wg_init_gstreamer, &params))
         return FALSE;

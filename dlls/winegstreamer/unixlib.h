@@ -217,6 +217,7 @@ struct wg_init_gstreamer_params
     UINT8 trace_on;
     UINT8 warn_on;
     UINT8 err_on;
+    UINT8 prefer_wmapro;
 };
 
 struct wg_parser_create_params
