@@ -1353,6 +1353,10 @@ static NTSTATUS key_symmetric_decrypt( struct key *key, UCHAR *input, ULONG inpu
     if (key->u.s.mode == CHAIN_MODE_ECB && iv) return STATUS_INVALID_PARAMETER;
     if ((status = key_symmetric_set_vector( key, iv, iv_len, flags & BCRYPT_BLOCK_PADDING ))) return status;
 
+    FIXME( "cbc diagnostic: decrypt alg %u mode %u block %lu input %lu output %lu iv %lu flags %#lx in_place %u\n",
+           key->alg_id, key->u.s.mode, key->u.s.block_size, input_len, output_len, iv_len, flags,
+           input == output );
+
     decrypt_params.key = key;
     decrypt_params.input = input;
     decrypt_params.input_len = key->u.s.block_size;
@@ -1373,6 +1377,8 @@ static NTSTATUS key_symmetric_decrypt( struct key *key, UCHAR *input, ULONG inpu
         UCHAR *buf, *dst = decrypt_params.output;
         if (!(buf = malloc( key->u.s.block_size ))) return STATUS_NO_MEMORY;
         decrypt_params.output = buf;
+        FIXME( "cbc diagnostic: final padded block input %u output %lu\n",
+               decrypt_params.input_len, decrypt_params.output_len );
         status = UNIX_CALL( key_symmetric_decrypt, &decrypt_params );
         if (!status && buf[ key->u.s.block_size - 1 ] <= key->u.s.block_size)
         {
