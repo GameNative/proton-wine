@@ -200,6 +200,8 @@ struct gl_drawable
 {
     struct opengl_drawable         base;
     GLXDrawable                    drawable;     /* drawable for rendering with GL */
+    Window                         diagnostic_window;
+    unsigned int                   diagnostic_frames;
 };
 
 static struct gl_drawable *impl_from_opengl_drawable( struct opengl_drawable *base )
@@ -549,6 +551,9 @@ static BOOL x11drv_egl_surface_create( HWND hwnd, BOOL raw, int format, struct o
         opengl_drawable_release( &gl->base );
         return FALSE;
     }
+
+    gl->diagnostic_window = window;
+    gl->diagnostic_frames = 0;
 
     TRACE( "Created drawable %s with client window %lx\n", debugstr_opengl_drawable( &gl->base ), window );
     XFlush( gdi_display );
@@ -981,6 +986,9 @@ static BOOL x11drv_surface_create( HWND hwnd, BOOL raw, int format, struct openg
         opengl_drawable_release( &gl->base );
         return FALSE;
     }
+
+    gl->diagnostic_window = window;
+    gl->diagnostic_frames = 0;
 
     TRACE( "Created drawable %s with client window %lx\n", debugstr_opengl_drawable( &gl->base ), window );
     XFlush( gdi_display );
@@ -1465,14 +1473,134 @@ static const char *x11drv_init_wgl_extensions( struct opengl_funcs *funcs )
     return wglExtensions;
 }
 
+/* Container-local diagnostic: sample the GL back buffer and the X drawable,
+ * not the Android compositor. Sparse samples cannot prove a whole image black.
+ * Keep this bounded and restricted to the executable under investigation. */
+static BOOL barony_diagnostic_enabled(void)
+{
+    static const char name[] = "barony.exe";
+    const UNICODE_STRING *path = &NtCurrentTeb()->Peb->ProcessParameters->ImagePathName;
+    unsigned int len = path->Length / sizeof(WCHAR), i, start;
+
+    if (len < sizeof(name) - 1) return FALSE;
+    start = len - (sizeof(name) - 1);
+    if (start && path->Buffer[start - 1] != '\\' && path->Buffer[start - 1] != '/') return FALSE;
+    for (i = 0; i < sizeof(name) - 1; ++i)
+    {
+        WCHAR c = path->Buffer[start + i];
+        if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+        if (c != name[i]) return FALSE;
+    }
+    return TRUE;
+}
+
+static void barony_sample_gl( struct gl_drawable *gl, unsigned int width, unsigned int height )
+{
+    static const GLenum pack_names[] = {GL_PACK_ALIGNMENT, GL_PACK_ROW_LENGTH,
+                                       GL_PACK_SKIP_ROWS, GL_PACK_SKIP_PIXELS};
+    GLint pack[ARRAY_SIZE(pack_names)], read_fbo, pack_buffer, read_buffer, draw_fbo;
+    GLenum status, draw_status;
+    unsigned int i, x, y;
+    GLubyte pixels[9][4];
+
+    funcs->p_glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo );
+    draw_status = funcs->p_glCheckFramebufferStatus( GL_DRAW_FRAMEBUFFER );
+    funcs->p_glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &read_fbo );
+    funcs->p_glGetIntegerv( GL_PIXEL_PACK_BUFFER_BINDING, &pack_buffer );
+    for (i = 0; i < ARRAY_SIZE(pack_names); ++i)
+    {
+        funcs->p_glGetIntegerv( pack_names[i], &pack[i] );
+        funcs->p_glPixelStorei( pack_names[i], i ? 0 : 1 );
+    }
+    funcs->p_glBindBuffer( GL_PIXEL_PACK_BUFFER, 0 );
+    funcs->p_glBindFramebuffer( GL_READ_FRAMEBUFFER, 0 );
+    funcs->p_glGetIntegerv( GL_READ_BUFFER, &read_buffer );
+    funcs->p_glReadBuffer( use_egl || gl->base.doublebuffer ? GL_BACK : GL_FRONT );
+    status = funcs->p_glCheckFramebufferStatus( GL_READ_FRAMEBUFFER );
+    memset( pixels, 0xa5, sizeof(pixels) );
+    if (status == GL_FRAMEBUFFER_COMPLETE)
+        for (y = 0; y < 3; ++y)
+            for (x = 0; x < 3; ++x)
+                funcs->p_glReadPixels( (x + 1) * (width - 1) / 4, (y + 1) * (height - 1) / 4,
+                                       1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixels[y * 3 + x] );
+    funcs->p_glReadBuffer( read_buffer );
+    funcs->p_glBindFramebuffer( GL_READ_FRAMEBUFFER, read_fbo );
+    funcs->p_glBindBuffer( GL_PIXEL_PACK_BUFFER, pack_buffer );
+    for (i = 0; i < ARRAY_SIZE(pack_names); ++i) funcs->p_glPixelStorei( pack_names[i], pack[i] );
+
+    MESSAGE( "[BARONY_GL_DIAG] frame=%u window=%lx size=%ux%u draw_fbo=%d draw_status=%#x default_read_status=%#x buffer=%s\n",
+             gl->diagnostic_frames, gl->diagnostic_window, width, height, draw_fbo, draw_status, status,
+             use_egl || gl->base.doublebuffer ? "back" : "front" );
+    for (i = 0; i < 9; ++i)
+        MESSAGE( "[BARONY_GL_DIAG] frame=%u gl_sample=%u rgba=%02x%02x%02x%02x (a5 sentinel if unread)\n",
+                 gl->diagnostic_frames, i, pixels[i][0], pixels[i][1], pixels[i][2], pixels[i][3] );
+}
+
+static int barony_image_error( Display *display, XErrorEvent *event, void *arg )
+{
+    return event->error_code == BadMatch || event->error_code == BadDrawable || event->error_code == BadValue;
+}
+
+static void barony_sample_x11( struct gl_drawable *gl, unsigned int width, unsigned int height )
+{
+    unsigned int x, y;
+    XImage *image;
+
+    /* XSync orders requests, but is not proof of Android display completion.
+     * In particular an asynchronous GLX swap may still show an older frame. */
+    XSync( gdi_display, False );
+    for (y = 0; y < 3; ++y)
+        for (x = 0; x < 3; ++x)
+        {
+            X11DRV_expect_error_no_user_lock( gdi_display, barony_image_error, NULL );
+            image = XGetImage( gdi_display, gl->diagnostic_window,
+                               (x + 1) * (width - 1) / 4, height - 1 - (y + 1) * (height - 1) / 4,
+                               1, 1, AllPlanes, ZPixmap );
+            X11DRV_check_error();
+            if (!image)
+            {
+                MESSAGE( "[BARONY_GL_DIAG] frame=%u x_sample=%u unavailable\n", gl->diagnostic_frames, y * 3 + x );
+                continue;
+            }
+            MESSAGE( "[BARONY_GL_DIAG] frame=%u x_sample=%u pixel=%lx masks=%lx/%lx/%lx\n",
+                     gl->diagnostic_frames, y * 3 + x, XGetPixel( image, 0, 0 ),
+                     image->red_mask, image->green_mask, image->blue_mask );
+            XDestroyImage( image );
+        }
+}
+
 static BOOL x11drv_surface_swap( struct opengl_drawable *base )
 {
     GLXContext ctx = NtCurrentTeb()->glReserved2;
     struct gl_drawable *gl = impl_from_opengl_drawable( base );
     INT64 ust, msc, sbc, target_sbc = 0;
     BOOL offscreen;
+    BOOL diagnostic = FALSE;
+    unsigned int width = 0, height = 0;
 
     TRACE( "drawable %s\n", debugstr_opengl_drawable( base ) );
+
+    if (ctx && gl->diagnostic_window && barony_diagnostic_enabled() && gl->diagnostic_frames < 6000)
+    {
+        ++gl->diagnostic_frames;
+        if (gl->diagnostic_frames == 1) MESSAGE( "[BARONY_GL_DIAG] backend=GLX diagnostic-v2\n" );
+        diagnostic = gl->diagnostic_frames <= 3 || !(gl->diagnostic_frames % 300);
+        if (diagnostic && pglXQueryDrawable && funcs->p_glCheckFramebufferStatus &&
+            funcs->p_glBindFramebuffer && funcs->p_glBindBuffer)
+        {
+            GLXDrawable (*get_read_drawable)(void) =
+                (void *)pglXGetProcAddressARB( (const GLubyte *)"glXGetCurrentReadDrawable" );
+            pglXQueryDrawable( gdi_display, gl->drawable, GLX_WIDTH, &width );
+            pglXQueryDrawable( gdi_display, gl->drawable, GLX_HEIGHT, &height );
+            diagnostic = width && height && width <= 16384 && height <= 16384;
+            diagnostic = diagnostic && pglXGetCurrentDrawable() == gl->drawable &&
+                         get_read_drawable && get_read_drawable() == gl->drawable;
+            if (!diagnostic)
+                MESSAGE( "[BARONY_GL_DIAG] frame=%u skipped: size or current GLX drawable mismatch\n", gl->diagnostic_frames );
+        }
+        else diagnostic = FALSE;
+        if (diagnostic) barony_sample_gl( gl, width, height );
+    }
 
     if (!(offscreen = InterlockedCompareExchange( &base->client->offscreen, 0, 0 )) ||
         !ctx || !pglXSwapBuffersMscOML) pglXSwapBuffers( gdi_display, gl->drawable );
@@ -1486,6 +1614,7 @@ static BOOL x11drv_surface_swap( struct opengl_drawable *base )
     if (offscreen && !pglXWaitForSbcOML) XFlush( gdi_display );
 
     client_surface_present( base->client );
+    if (diagnostic) barony_sample_x11( gl, width, height );
     return TRUE;
 }
 
@@ -1513,8 +1642,32 @@ static void x11drv_egl_surface_flush( struct opengl_drawable *base, UINT flags )
 static BOOL x11drv_egl_surface_swap( struct opengl_drawable *base )
 {
     struct gl_drawable *gl = impl_from_opengl_drawable( base );
+    BOOL diagnostic = FALSE;
+    EGLint width = 0, height = 0;
 
     TRACE( "%s\n", debugstr_opengl_drawable( base ) );
+
+    if (funcs->p_eglGetCurrentContext() && gl->diagnostic_window &&
+        barony_diagnostic_enabled() && gl->diagnostic_frames < 6000)
+    {
+        ++gl->diagnostic_frames;
+        if (gl->diagnostic_frames == 1) MESSAGE( "[BARONY_GL_DIAG] backend=EGL diagnostic-v2\n" );
+        diagnostic = gl->diagnostic_frames <= 3 || !(gl->diagnostic_frames % 300);
+        if (diagnostic && funcs->p_glCheckFramebufferStatus && funcs->p_glBindFramebuffer &&
+            funcs->p_glBindBuffer && funcs->p_eglGetCurrentSurface( EGL_READ ) == base->surface &&
+            funcs->p_eglGetCurrentSurface( EGL_DRAW ) == base->surface)
+        {
+            funcs->p_eglQuerySurface( egl->display, base->surface, EGL_WIDTH, &width );
+            funcs->p_eglQuerySurface( egl->display, base->surface, EGL_HEIGHT, &height );
+            diagnostic = width > 0 && height > 0 && width <= 16384 && height <= 16384;
+        }
+        else diagnostic = FALSE;
+        if (diagnostic)
+        {
+            MESSAGE( "[BARONY_GL_DIAG] backend=EGL\n" );
+            barony_sample_gl( gl, width, height );
+        }
+    }
 
     if (!funcs->p_eglSwapBuffers( egl->display, gl->base.surface ) && funcs->p_eglGetError() == EGL_BAD_SURFACE
         && !funcs->p_eglGetCurrentContext())
@@ -1531,6 +1684,7 @@ static BOOL x11drv_egl_surface_swap( struct opengl_drawable *base )
         XFlush( gdi_display );
 
     client_surface_present( base->client );
+    if (diagnostic) barony_sample_x11( gl, width, height );
     return TRUE;
 }
 
