@@ -194,12 +194,23 @@ static HRESULT STDMETHODCALLTYPE api_information_statics_IsEventPresent(
 static HRESULT STDMETHODCALLTYPE api_information_statics_IsPropertyPresent(
         IApiInformationStatics *iface, HSTRING type_name, HSTRING property_name, BOOLEAN *value)
 {
-    FIXME("iface %p, type_name %s, property_name %s, value %p stub!\n", iface,
+    TRACE("iface %p, type_name %s, property_name %s, value %p.\n", iface,
             debugstr_hstring(type_name), debugstr_hstring(property_name), value);
 
     if (!type_name)
         return E_INVALIDARG;
 
+    /* Graphics capture border control is not implemented. Capability probes
+     * must report it as absent instead of raising an error in WinRT callers. */
+    if (!wcscmp(WindowsGetStringRawBuffer(type_name, NULL), L"Windows.Graphics.Capture.GraphicsCaptureSession")
+            && !wcscmp(WindowsGetStringRawBuffer(property_name, NULL), L"IsBorderRequired"))
+    {
+        if (!value) return E_INVALIDARG;
+        *value = FALSE;
+        return S_OK;
+    }
+
+    FIXME("type_name %s, property_name %s stub!\n", debugstr_hstring(type_name), debugstr_hstring(property_name));
     return E_NOTIMPL;
 }
 
