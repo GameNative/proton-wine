@@ -610,6 +610,62 @@ static bool swapchain_present_is_partial_copy(struct wined3d_swapchain *swapchai
     return false;
 }
 
+/* CPU-side elapsed time, including driver waits, not GPU timestamps. Keep
+ * counters on the swapchain and emit only bounded aggregate windows. */
+static void swapchain_present_profile_stamp(struct wined3d_present_profile *profile,
+        enum wined3d_present_profile_phase phase)
+{
+    LARGE_INTEGER now;
+    LONGLONG elapsed;
+
+    if (!profile->enabled)
+        return;
+    QueryPerformanceCounter(&now);
+    elapsed = now.QuadPart - profile->stamp.QuadPart;
+    ++profile->phase[phase].count;
+    profile->phase[phase].total += elapsed;
+    if (elapsed > profile->phase[phase].maximum)
+        profile->phase[phase].maximum = elapsed;
+    profile->stamp = now;
+}
+
+static void swapchain_present_profile_report(struct wined3d_swapchain *swapchain,
+        unsigned int requested_interval)
+{
+    static const char * const names[] = {"CONTEXT", "PREPARE", "LOAD", "BLIT", "FINISH", "SWAP", "GDI", "TAIL"};
+    struct wined3d_present_profile *profile = &wined3d_swapchain_gl(swapchain)->present_profile;
+    double ms;
+    unsigned int i;
+
+    if (!profile->enabled)
+        return;
+    ++profile->frames;
+    if (profile->stamp.QuadPart - profile->window_start.QuadPart < 5 * profile->frequency.QuadPart)
+        return;
+
+    ms = 1000.0 / profile->frequency.QuadPart;
+    MESSAGE("PRESENT_PROFILE swapchain=%p thread=%lu window=%u wall_ms=%.3f calls=%u invalid=%u "
+            "windowed=%u effect=%u contexts=%u requested_interval=%u cached_interval=%u\n",
+            swapchain, GetCurrentThreadId(), ++profile->reports,
+            (profile->stamp.QuadPart - profile->window_start.QuadPart) * ms,
+            profile->frames, profile->invalid_contexts, swapchain->state.desc.windowed,
+            swapchain->state.desc.swap_effect, swapchain->device->context_count,
+            requested_interval, swapchain->swap_interval);
+    for (i = 0; i < ARRAY_SIZE(profile->phase); ++i)
+        if (profile->phase[i].count)
+            MESSAGE("PRESENT_PROFILE swapchain=%p window=%u phase=%s count=%u wall_ms=%.3f max_ms=%.3f\n",
+                    swapchain, profile->reports, names[i], profile->phase[i].count,
+                    profile->phase[i].total * ms, profile->phase[i].maximum * ms);
+    memset(profile->phase, 0, sizeof(profile->phase));
+    profile->frames = profile->invalid_contexts = 0;
+    QueryPerformanceCounter(&profile->window_start);
+    if (profile->reports == 60)
+    {
+        profile->enabled = false;
+        MESSAGE("PRESENT_PROFILE swapchain=%p complete; presentation timing disabled.\n", swapchain);
+    }
+}
+
 static void swapchain_gl_present(struct wined3d_swapchain *swapchain,
         const RECT *src_rect, const RECT *dst_rect, unsigned int swap_interval, uint32_t flags)
 {
@@ -618,12 +674,24 @@ static void swapchain_gl_present(struct wined3d_swapchain *swapchain,
     const struct wined3d_gl_info *gl_info;
     struct wined3d_context_gl *context_gl;
     struct wined3d_context *context;
+    struct wined3d_present_profile *profile = &wined3d_swapchain_gl(swapchain)->present_profile;
 
+    if (profile->enabled)
+    {
+        QueryPerformanceCounter(&profile->stamp);
+        if (!profile->window_start.QuadPart)
+            profile->window_start = profile->stamp;
+    }
     context = context_acquire(swapchain->device, swapchain->front_buffer, 0);
     context_gl = wined3d_context_gl(context);
+    swapchain_present_profile_stamp(profile, PRESENT_PROFILE_CONTEXT);
     if (!context_gl->valid)
     {
         context_release(context);
+        if (profile->enabled)
+            ++profile->invalid_contexts;
+        swapchain_present_profile_stamp(profile, PRESENT_PROFILE_TAIL);
+        swapchain_present_profile_report(swapchain, swap_interval);
         WARN("Invalid context, skipping present.\n");
         return;
     }
@@ -635,26 +703,33 @@ static void swapchain_gl_present(struct wined3d_swapchain *swapchain,
             || (pixel_format->swap_method != WGL_SWAP_COPY_ARB
             && swapchain_present_is_partial_copy(swapchain, dst_rect)))
     {
+        swapchain_present_profile_stamp(profile, PRESENT_PROFILE_PREPARE);
         swapchain_blit_gdi(swapchain, context, src_rect, dst_rect);
+        swapchain_present_profile_stamp(profile, PRESENT_PROFILE_GDI);
     }
     else
     {
         gl_info = context_gl->gl_info;
 
         swapchain_gl_set_swap_interval(swapchain, context_gl, swap_interval);
+        swapchain_present_profile_stamp(profile, PRESENT_PROFILE_PREPARE);
 
         wined3d_texture_load_location(back_buffer, 0, context, back_buffer->resource.draw_binding);
+        swapchain_present_profile_stamp(profile, PRESENT_PROFILE_LOAD);
 
         swapchain_blit(swapchain, context, src_rect, dst_rect);
+        swapchain_present_profile_stamp(profile, PRESENT_PROFILE_BLIT);
 
         if (swapchain->device->context_count > 1)
         {
             WARN_(d3d_perf)("Multiple contexts, calling glFinish() to enforce ordering.\n");
             gl_info->gl_ops.gl.p_glFinish();
+            swapchain_present_profile_stamp(profile, PRESENT_PROFILE_FINISH);
         }
 
         /* call wglSwapBuffers through the gl table to avoid confusing the Steam overlay */
         gl_info->gl_ops.wgl.p_wglSwapBuffers(context_gl->dc);
+        swapchain_present_profile_stamp(profile, PRESENT_PROFILE_SWAP);
     }
 
     if (context->d3d_info->fences)
@@ -668,6 +743,8 @@ static void swapchain_gl_present(struct wined3d_swapchain *swapchain,
     wined3d_texture_invalidate_location(swapchain->front_buffer, 0, ~WINED3D_LOCATION_DRAWABLE);
 
     context_release(context);
+    swapchain_present_profile_stamp(profile, PRESENT_PROFILE_TAIL);
+    swapchain_present_profile_report(swapchain, swap_interval);
 }
 
 static void swapchain_frontbuffer_updated(struct wined3d_swapchain *swapchain)
@@ -1749,8 +1826,19 @@ HRESULT wined3d_swapchain_gl_init(struct wined3d_swapchain_gl *swapchain_gl, str
         const struct wined3d_swapchain_desc *desc, struct wined3d_swapchain_state_parent *state_parent,
         void *parent, const struct wined3d_parent_ops *parent_ops)
 {
+    struct wined3d_present_profile *profile = &swapchain_gl->present_profile;
+
     TRACE("swapchain_gl %p, device %p, desc %p, state_parent %p, parent %p, parent_ops %p.\n",
             swapchain_gl, device, desc, state_parent, parent, parent_ops);
+
+    /* This capability is restricted to the exact 32-bit SacredReborn.exe
+     * wrapped-Zink path. Preserve that gate and both previous workarounds. */
+    if (device->adapter->d3d_info.staged_streaming_uploads
+            && QueryPerformanceFrequency(&profile->frequency) && profile->frequency.QuadPart)
+    {
+        profile->enabled = true;
+        MESSAGE("PRESENT_PROFILE enabled: CPU-side presentation phases; 5-second windows, at most 60 reports.\n");
+    }
 
     return wined3d_swapchain_init(&swapchain_gl->s, device, desc, state_parent, parent,
             parent_ops, &swapchain_gl_ops);
