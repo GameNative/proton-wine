@@ -949,7 +949,7 @@ static void release_key_flush_mutex( HANDLE mutex )
 /* save registry branch to Wine regsitry storage file */
 static NTSTATUS save_registry_branch( char **data )
 {
-    static const char temp_fn[] = "savereg.tmp";
+    static const char temp_fn[] = "savereg-XXXXXX";
     char *file_name, *path = NULL, *tmp = NULL;
     int file_name_len, path_len, fd;
     struct stat st;
@@ -977,7 +977,7 @@ static NTSTATUS save_registry_branch( char **data )
         close( fd );
     }
 
-    /* create a temp file in the same directory */
+    /* Use a unique name so an interrupted flush cannot block later saves. */
     if (!(tmp = malloc( strlen( config_dir ) + 1 + strlen( temp_fn ) + 1 )))
     {
         ret = STATUS_NO_MEMORY;
@@ -985,7 +985,7 @@ static NTSTATUS save_registry_branch( char **data )
     }
     sprintf( tmp, "%s/%s", config_dir, temp_fn );
 
-    if ((fd = open( tmp, O_CREAT | O_EXCL | O_WRONLY, 0666 )) == -1)
+    if ((fd = mkstemp( tmp )) == -1)
     {
         ret = errno_to_status( errno );
         goto done;
