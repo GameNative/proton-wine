@@ -149,6 +149,9 @@ static ULONG remove_vectored_handler( LIST_ENTRY *handler_list, VECTORED_HANDLER
  */
 static LONG call_vectored_handlers( EXCEPTION_RECORD *rec, CONTEXT *context )
 {
+#ifdef __arm64ec__
+    static LONG diagnostic_count;
+#endif
     LONG ret = EXCEPTION_CONTINUE_SEARCH;
     EXCEPTION_POINTERS except_ptrs;
     PVECTORED_EXCEPTION_HANDLER func;
@@ -164,6 +167,11 @@ static LONG call_vectored_handlers( EXCEPTION_RECORD *rec, CONTEXT *context )
     entry = mark->Flink;
     while (entry != mark)
     {
+#ifdef __arm64ec__
+        BOOL diagnostic = (rec->ExceptionCode == STATUS_ACCESS_VIOLATION ||
+                           rec->ExceptionCode == STATUS_INVALID_DISPOSITION) &&
+                          InterlockedIncrement( &diagnostic_count ) <= 16;
+#endif
         handler = CONTAINING_RECORD( entry, VECTORED_HANDLER, entry );
         ++*handler->count;
         func = RtlDecodePointer( handler->func );
@@ -173,7 +181,13 @@ static LONG call_vectored_handlers( EXCEPTION_RECORD *rec, CONTEXT *context )
 
         TRACE( "calling handler at %p code=%lx flags=%lx\n",
                func, rec->ExceptionCode, rec->ExceptionFlags );
+#ifdef __arm64ec__
+        if (diagnostic) WARN( "seh-diagnostic: calling vectored handler=%p code=%lx\n", func, rec->ExceptionCode );
+#endif
         ret = func( &except_ptrs );
+#ifdef __arm64ec__
+        if (diagnostic) WARN( "seh-diagnostic: vectored handler=%p returned=%lx\n", func, ret );
+#endif
         TRACE( "handler at %p returned %lx\n", func, ret );
 
         RtlEnterCriticalSection( &vectored_handlers_section );
@@ -198,6 +212,23 @@ NTSTATUS WINAPI dispatch_exception( EXCEPTION_RECORD *rec, CONTEXT *context )
 {
     NTSTATUS status;
     DWORD i;
+
+#ifdef __arm64ec__
+    /* Preserve the first faults even when the packaged build has no SEH trace output. */
+    static LONG diagnostic_count;
+    BOOL diagnostic = (rec->ExceptionCode == STATUS_ACCESS_VIOLATION ||
+                       rec->ExceptionCode == STATUS_INVALID_DISPOSITION) &&
+                      InterlockedIncrement( &diagnostic_count ) <= 8;
+
+    if (diagnostic)
+    {
+        WARN( "seh-diagnostic: code=%lx flags=%lx addr=%p rip=%I64x rsp=%I64x\n",
+              rec->ExceptionCode, rec->ExceptionFlags, rec->ExceptionAddress,
+              context->Rip, context->Rsp );
+        for (i = 0; i < min( EXCEPTION_MAXIMUM_PARAMETERS, rec->NumberParameters ); i++)
+            WARN( "seh-diagnostic: info[%lu]=%p\n", i, (void *)rec->ExceptionInformation[i] );
+    }
+#endif
 
     if (need_backtrace(rec->ExceptionCode))
     {
@@ -268,7 +299,11 @@ NTSTATUS WINAPI dispatch_exception( EXCEPTION_RECORD *rec, CONTEXT *context )
     if (call_vectored_handlers( rec, context ) == EXCEPTION_CONTINUE_EXECUTION)
         NtContinue( context, FALSE );
 
-    if ((status = call_seh_handlers( rec, context )) == STATUS_SUCCESS)
+    status = call_seh_handlers( rec, context );
+#ifdef __arm64ec__
+    if (diagnostic) WARN( "seh-diagnostic: code=%lx dispatch status=%lx\n", rec->ExceptionCode, status );
+#endif
+    if (status == STATUS_SUCCESS)
         NtContinue( context, FALSE );
 
     if (status != STATUS_UNHANDLED_EXCEPTION) RtlRaiseStatus( status );
