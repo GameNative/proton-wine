@@ -150,6 +150,124 @@ DWORD WINAPI RtlRunOnceComplete( RTL_RUN_ONCE *once, ULONG flags, void *context 
 
 static void *no_debug_info_marker = (void *)(ULONG_PTR)-1;
 
+enum crit_section_atomic_op
+{
+    CRIT_SECTION_CMPXCHG,
+    CRIT_SECTION_ADD,
+    CRIT_SECTION_EXCHANGE
+};
+
+/* Packed Steam critical sections can reach native ARM64EC code with a
+ * halfword-aligned LockCount. On affected hosts an unaligned atomic updates
+ * only part of the counter (-1 -> 0xffff0000 instead of 0), losing wakeups.
+ * Use a naturally aligned CAS covering the field, preserving adjacent bytes.
+ * Do not handle fields crossing an eight-byte boundary here.
+ */
+static BOOL packed_crit_section_atomic( LONG *dest, LONG value, LONG compare,
+                                       enum crit_section_atomic_op op, LONG *result )
+{
+#ifdef __arm64ec__
+    ULONG_PTR offset = (ULONG_PTR)dest & 7;
+    const WCHAR *image, *name;
+    LONGLONG *aligned;
+    ULONGLONG old, next, observed, mask;
+    ULONG previous, replacement, shift;
+
+    if (!(offset & 3) || offset > 4) return FALSE;
+    image = NtCurrentTeb()->Peb->ProcessParameters->ImagePathName.Buffer;
+    name = wcsrchr( image, '\\' );
+    if (wcsicmp( name ? name + 1 : image, L"TronGame-Win64-Shipping.exe" )) return FALSE;
+
+    aligned = (LONGLONG *)((ULONG_PTR)dest & ~(ULONG_PTR)7);
+    shift = offset * 8;
+    mask = (ULONGLONG)0xffffffff << shift;
+    old = InterlockedCompareExchange64( aligned, 0, 0 );
+    for (;;)
+    {
+        previous = (old >> shift) & 0xffffffff;
+        if (op == CRIT_SECTION_CMPXCHG && previous != (ULONG)compare) break;
+        replacement = op == CRIT_SECTION_ADD ? previous + (ULONG)value : (ULONG)value;
+        next = (old & ~mask) | ((ULONGLONG)replacement << shift);
+        observed = InterlockedCompareExchange64( aligned, next, old );
+        if (observed == old) break;
+        old = observed;
+    }
+    *result = previous;
+    return TRUE;
+#else
+    return FALSE;
+#endif
+}
+
+static LONG crit_section_cmpxchg( LONG *dest, LONG value, LONG compare )
+{
+    LONG previous;
+    if (packed_crit_section_atomic( dest, value, compare, CRIT_SECTION_CMPXCHG, &previous ))
+        return previous;
+    return InterlockedCompareExchange( dest, value, compare );
+}
+
+static LONG crit_section_add( LONG *dest, LONG value )
+{
+    LONG previous;
+    if (!packed_crit_section_atomic( dest, value, 0, CRIT_SECTION_ADD, &previous ))
+        previous = InterlockedExchangeAdd( dest, value );
+    return (ULONG)previous + (ULONG)value;
+}
+
+static void crit_section_exchange( LONG *dest, LONG value )
+{
+    LONG previous;
+    if (!packed_crit_section_atomic( dest, value, 0, CRIT_SECTION_EXCHANGE, &previous ))
+        InterlockedExchange( dest, value );
+}
+
+/* Follow the first operations on packed critical sections, before a timeout
+ * loses the transition that produced the bad counter. Never repair the state. */
+static void trace_tron_unaligned_cs( RTL_CRITICAL_SECTION *crit, const char *operation, LONG result )
+{
+    static LONG active, captures;
+    const WCHAR *image, *name;
+    MEMORY_BASIC_INFORMATION info;
+    void *frames[8];
+    ULONG count, i;
+
+    if (!((ULONG_PTR)crit & (sizeof(LONG) - 1))) return;
+    image = NtCurrentTeb()->Peb->ProcessParameters->ImagePathName.Buffer;
+    name = wcsrchr( image, '\\' );
+    if (wcsicmp( name ? name + 1 : image, L"TronGame-Win64-Shipping.exe" )) return;
+    if (InterlockedCompareExchange( &active, 1, 0 )) return;
+    if (captures < 64)
+    {
+        ++captures;
+        __TRY
+        {
+            ERR( "TRON_LOCK_STEP sample %ld op %s section %p result %ld debug %p count %ld recursion %ld owner %p semaphore %p spin %#Ix\n",
+                 captures, operation, crit, result, crit->DebugInfo, crit->LockCount,
+                 crit->RecursionCount, crit->OwningThread, crit->LockSemaphore, crit->SpinCount );
+            if (captures <= 16)
+            {
+                count = RtlCaptureStackBackTrace( 0, ARRAY_SIZE(frames), frames, NULL );
+                for (i = 0; i < count; ++i)
+                {
+                    if (!NtQueryVirtualMemory( NtCurrentProcess(), frames[i], MemoryBasicInformation,
+                                               &info, sizeof(info), NULL ))
+                        ERR( "TRON_LOCK_STEP sample %ld frame %lu pc %p allocation %p offset %#Ix\n",
+                             captures, i, frames[i], info.AllocationBase,
+                             (ULONG_PTR)frames[i] - (ULONG_PTR)info.AllocationBase );
+                }
+            }
+        }
+        __EXCEPT_ALL
+        {
+            ERR( "TRON_LOCK_STEP sample %ld op %s capture unavailable\n", captures, operation );
+        }
+        __ENDTRY
+        if (captures == 64) ERR( "TRON_LOCK_STEP capture limit reached; further operations are not logged\n" );
+    }
+    InterlockedExchange( &active, 0 );
+}
+
 static BOOL crit_section_has_debuginfo( const RTL_CRITICAL_SECTION *crit )
 {
     return crit->DebugInfo != NULL && crit->DebugInfo != no_debug_info_marker;
@@ -177,7 +295,7 @@ static inline NTSTATUS wait_semaphore( RTL_CRITICAL_SECTION *crit, int timeout )
     else
     {
         LONG *lock = (LONG *)&crit->LockSemaphore;
-        while (!InterlockedCompareExchange( lock, 0, 1 ))
+        while (!crit_section_cmpxchg( lock, 0, 1 ))
         {
             static const LONG zero;
             /* this may wait longer than specified in case of multiple wake-ups */
@@ -250,6 +368,7 @@ NTSTATUS WINAPI RtlInitializeCriticalSectionEx( RTL_CRITICAL_SECTION *crit, ULON
     crit->LockSemaphore  = 0;
     if (NtCurrentTeb()->Peb->NumberOfProcessors <= 1) spincount = 0;
     crit->SpinCount = spincount & ~0x80000000;
+    trace_tron_unaligned_cs( crit, "initialized", STATUS_SUCCESS );
     return STATUS_SUCCESS;
 }
 
@@ -273,6 +392,7 @@ NTSTATUS WINAPI RtlDeleteCriticalSection( RTL_CRITICAL_SECTION *crit )
 {
     HANDLE sem;
 
+    trace_tron_unaligned_cs( crit, "delete", 0 );
     crit->LockCount      = -1;
     crit->RecursionCount = 0;
     crit->OwningThread   = 0;
@@ -292,6 +412,48 @@ NTSTATUS WINAPI RtlDeleteCriticalSection( RTL_CRITICAL_SECTION *crit )
     return STATUS_SUCCESS;
 }
 
+
+/* Diagnostic only: do not acquire the loader lock to resolve these frames.
+ * The existing loaddll trace supplies module names for the allocation bases. */
+static void trace_tron_critical_section_timeout( RTL_CRITICAL_SECTION *crit )
+{
+    static LONG active, captures;
+    const WCHAR *image = NtCurrentTeb()->Peb->ProcessParameters->ImagePathName.Buffer;
+    const WCHAR *name = wcsrchr( image, '\\' );
+    MEMORY_BASIC_INFORMATION info;
+    void *frames[16];
+    ULONG count, i;
+
+    if (wcsicmp( name ? name + 1 : image, L"TronGame-Win64-Shipping.exe" )) return;
+    if (InterlockedCompareExchange( &active, 1, 0 )) return;
+    if (captures++ < 8)
+    {
+        ERR( "TRON_LOCK_DIAG section %p lock_count %ld recursion %ld owner %p semaphore %p spin %#Ix alignment %Iu\n",
+             crit, crit->LockCount, crit->RecursionCount, crit->OwningThread,
+             crit->LockSemaphore, crit->SpinCount, (ULONG_PTR)crit % sizeof(void *) );
+        __TRY
+        {
+            count = RtlCaptureStackBackTrace( 0, ARRAY_SIZE(frames), frames, NULL );
+            ERR( "TRON_LOCK_DIAG section %p frames %lu\n", crit, count );
+            for (i = 0; i < count; ++i)
+            {
+                if (!NtQueryVirtualMemory( NtCurrentProcess(), frames[i], MemoryBasicInformation,
+                                           &info, sizeof(info), NULL ))
+                    ERR( "TRON_LOCK_DIAG section %p frame %lu pc %p allocation %p offset %#Ix type %#lx\n",
+                         crit, i, frames[i], info.AllocationBase,
+                         (ULONG_PTR)frames[i] - (ULONG_PTR)info.AllocationBase, info.Type );
+                else
+                    ERR( "TRON_LOCK_DIAG section %p frame %lu pc %p mapping unavailable\n", crit, i, frames[i] );
+            }
+        }
+        __EXCEPT_ALL
+        {
+            ERR( "TRON_LOCK_DIAG section %p stack capture unavailable\n", crit );
+        }
+        __ENDTRY
+    }
+    InterlockedExchange( &active, 0 );
+}
 
 /******************************************************************************
  *      RtlpWaitForCriticalSection   (NTDLL.@)
@@ -319,6 +481,7 @@ NTSTATUS WINAPI RtlpWaitForCriticalSection( RTL_CRITICAL_SECTION *crit )
 
         ERR( "section %p %s wait timed out in thread %04lx, blocked by %04lx, retrying (%u sec)\n",
              crit, debugstr_a(crit_section_get_name(crit)), GetCurrentThreadId(), HandleToULong(crit->OwningThread), timeout );
+        trace_tron_critical_section_timeout( crit );
     }
     if (crit_section_has_debuginfo( crit )) crit->DebugInfo->ContentionCount++;
     return STATUS_SUCCESS;
@@ -337,7 +500,7 @@ NTSTATUS WINAPI RtlpUnWaitCriticalSection( RTL_CRITICAL_SECTION *crit )
     else
     {
         LONG *lock = (LONG *)&crit->LockSemaphore;
-        InterlockedExchange( lock, 1 );
+        crit_section_exchange( lock, 1 );
         RtlWakeAddressSingle( lock );
         ret = STATUS_SUCCESS;
     }
@@ -351,6 +514,9 @@ NTSTATUS WINAPI RtlpUnWaitCriticalSection( RTL_CRITICAL_SECTION *crit )
  */
 NTSTATUS WINAPI RtlEnterCriticalSection( RTL_CRITICAL_SECTION *crit )
 {
+    LONG count_after;
+
+    trace_tron_unaligned_cs( crit, "enter-before", 0 );
     if (crit->SpinCount)
     {
         ULONG count;
@@ -361,13 +527,15 @@ NTSTATUS WINAPI RtlEnterCriticalSection( RTL_CRITICAL_SECTION *crit )
             if (crit->LockCount > 0) break;  /* more than one waiter, don't bother spinning */
             if (crit->LockCount == -1)       /* try again */
             {
-                if (InterlockedCompareExchange( &crit->LockCount, 0, -1 ) == -1) goto done;
+                if (crit_section_cmpxchg( &crit->LockCount, 0, -1 ) == -1) goto done;
             }
             YieldProcessor();
         }
     }
 
-    if (InterlockedIncrement( &crit->LockCount ))
+    count_after = crit_section_add( &crit->LockCount, 1 );
+    trace_tron_unaligned_cs( crit, "enter-increment", count_after );
+    if (count_after)
     {
         NTSTATUS status;
 
@@ -393,7 +561,12 @@ done:
 BOOL WINAPI RtlTryEnterCriticalSection( RTL_CRITICAL_SECTION *crit )
 {
     BOOL ret = FALSE;
-    if (InterlockedCompareExchange( &crit->LockCount, 0, -1 ) == -1)
+    LONG previous;
+
+    trace_tron_unaligned_cs( crit, "try-before", 0 );
+    previous = crit_section_cmpxchg( &crit->LockCount, 0, -1 );
+    trace_tron_unaligned_cs( crit, "try-compare-exchange", previous );
+    if (previous == -1)
     {
         crit->OwningThread   = ULongToHandle(GetCurrentThreadId());
         crit->RecursionCount = 1;
@@ -401,7 +574,7 @@ BOOL WINAPI RtlTryEnterCriticalSection( RTL_CRITICAL_SECTION *crit )
     }
     else if (crit->OwningThread == ULongToHandle(GetCurrentThreadId()))
     {
-        InterlockedIncrement( &crit->LockCount );
+        crit_section_add( &crit->LockCount, 1 );
         crit->RecursionCount++;
         ret = TRUE;
     }
@@ -433,20 +606,22 @@ BOOL WINAPI RtlIsCriticalSectionLockedByThread( RTL_CRITICAL_SECTION *crit )
  */
 NTSTATUS WINAPI RtlLeaveCriticalSection( RTL_CRITICAL_SECTION *crit )
 {
+    trace_tron_unaligned_cs( crit, "leave-before", 0 );
     if (--crit->RecursionCount)
     {
-        if (crit->RecursionCount > 0) InterlockedDecrement( &crit->LockCount );
+        if (crit->RecursionCount > 0) crit_section_add( &crit->LockCount, -1 );
         else ERR( "section %p %s is not acquired\n", crit, debugstr_a( crit_section_get_name( crit )));
     }
     else
     {
         crit->OwningThread = 0;
-        if (InterlockedDecrement( &crit->LockCount ) >= 0)
+        if (crit_section_add( &crit->LockCount, -1 ) >= 0)
         {
             /* someone is waiting */
             RtlpUnWaitCriticalSection( crit );
         }
     }
+    trace_tron_unaligned_cs( crit, "leave-after", 0 );
     return STATUS_SUCCESS;
 }
 
