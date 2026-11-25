@@ -122,6 +122,7 @@ static HMODULE xinput_instance;
 static HANDLE start_event;
 static HANDLE update_event;
 static HANDLE steam_overlay_event;
+static BOOL disable_haptics;
 
 static void check_value_caps(struct xinput_controller *controller, USHORT usage, HIDP_VALUE_CAPS *caps)
 {
@@ -277,6 +278,8 @@ static DWORD HID_set_state(struct xinput_controller *controller, XINPUT_VIBRATIO
     update_buzz = (controller->vibration.wRightMotorSpeed != state->wRightMotorSpeed);
     controller->vibration.wRightMotorSpeed = state->wRightMotorSpeed;
 
+    /* Avoid blocking all controller input on synchronous rumble output. */
+    if (disable_haptics) return ERROR_SUCCESS;
     if (!controller->enabled) return ERROR_SUCCESS;
     if (!update_rumble && !update_buzz) return ERROR_SUCCESS;
 
@@ -740,8 +743,19 @@ static DWORD WINAPI hid_update_thread_proc(void *param)
 
 static BOOL WINAPI start_update_thread_once( INIT_ONCE *once, void *param, void **context )
 {
+    WCHAR path[MAX_PATH], *name, *separator;
+    DWORD len;
     HANDLE thread;
     HMODULE module;
+
+    if ((len = GetModuleFileNameW(NULL, path, ARRAY_SIZE(path))) && len < ARRAY_SIZE(path))
+    {
+        name = path;
+        if ((separator = wcsrchr(name, '/'))) name = separator + 1;
+        if ((separator = wcsrchr(name, '\\'))) name = separator + 1;
+        disable_haptics = !wcsicmp(name, L"MCC-Win64-Shipping.exe");
+        if (disable_haptics) WARN("Disabling synchronous rumble output for MCC controller-lock workaround.\n");
+    }
 
     if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (void*)hid_update_thread_proc, &module))
         WARN("Failed to increase module's reference count, error: %lu\n", GetLastError());
