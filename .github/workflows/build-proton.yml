@@ -334,6 +334,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.generate_tag.outputs.tag_name }}
+          target_commitish: ${{ github.sha }}
           name: Proton Wine 11.0-3 (${{ steps.generate_tag.outputs.tag_name }})
           files: release/*
           draft: false

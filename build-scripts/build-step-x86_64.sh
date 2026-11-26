@@ -210,6 +210,7 @@ do
       # ntsync (userspace ntsync via libntsync_android)
       "common/dlls_ntdll_makefile_in.patch"
       "common/dlls_ntdll_unix_sync_c.patch"
+      "common/dlls_ntdll_unix_thread_c_ntsync_alert.patch"
       "common/server_makefile_in.patch"
       "common/server_inproc_sync_c.patch"
       "common/server_thread_c.patch"

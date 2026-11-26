@@ -1,0 +1,27 @@
+diff --git a/dlls/ntdll/unix/thread.c b/dlls/ntdll/unix/thread.c
+--- a/dlls/ntdll/unix/thread.c
++++ b/dlls/ntdll/unix/thread.c
+@@ -68,6 +68,9 @@
+ #ifdef __FreeBSD__
+ #include <sys/thr.h>
+ #endif
++#ifdef __ANDROID__
++#include "../../../android/ntsync_android/ntsync_user.h"
++#endif
+ 
+ #include "ntstatus.h"
+ #define WIN32_NO_STATUS
+@@ -1118,6 +1121,13 @@
+  */
+ static DECLSPEC_NORETURN void pthread_exit_wrapper( int status )
+ {
++#ifdef __ANDROID__
++    /* the userspace ntsync alert handle is an shm object handle, not an fd:
++     * drop this process's holder entry instead of closing it */
++    if (ntsync_userspace && ntdll_get_thread_data()->alert_fd >= 0)
++        ntsync_release( ntdll_get_thread_data()->alert_fd );
++    else
++#endif
+     close( ntdll_get_thread_data()->alert_fd );
+     close( ntdll_get_thread_data()->wait_fd[0] );
+     close( ntdll_get_thread_data()->wait_fd[1] );

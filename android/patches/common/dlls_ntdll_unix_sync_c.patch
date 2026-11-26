@@ -348,15 +348,21 @@ index 67ab945cef8..713d3657bb7 100644
              sync->access = reply->access;
              sync->type = reply->type;
              sync->closed = 0;
-@@ -908,6 +1142,12 @@ int get_inproc_alert_fd(void)
+@@ -908,6 +1142,18 @@ int get_inproc_alert_fd(void)
              if (!server_call_unlocked( req ))
              {
                  if (do_fsync()) fd = reply->fsync_shm_idx;
 +#ifdef __ANDROID__
-+                /* userspace ntsync alert event: an shm object handle valid in
-+                 * every process and not an fd, so it is not cached in the
-+                 * thread data (pthread_exit_wrapper() closes alert_fd) */
-+                else if (ntsync_userspace) fd = reply->fsync_shm_idx;
++                /* userspace ntsync alert event: an shm object handle, not an fd,
++                 * so it stays out of the fd cache path in pthread_exit_wrapper()
++                 * but is still cached here and retained, because this process
++                 * receives an object the server created and the userspace sweep
++                 * reaps an object once its creator is gone */
++                else if (ntsync_userspace)
++                {
++                    data->alert_fd = fd = reply->fsync_shm_idx;
++                    ntsync_retain( fd );
++                }
 +#endif
                  else
                  {
