@@ -1934,6 +1934,18 @@ static void query_tags(struct wg_parser_stream *stream)
     gst_object_unref(peer);
 }
 
+static void reblade_element_added_cb(GstBin *bin, GstBin *sub_bin, GstElement *element, gpointer user)
+{
+    GstElementFactory *factory = gst_element_get_factory(element);
+
+    /* Copy the visible picture instead of forwarding libav's padded decode surface. */
+    if (factory && !strcmp(GST_OBJECT_NAME(factory), "avdec_h264"))
+    {
+        g_object_set(element, "direct-rendering", FALSE, NULL);
+        GST_INFO_OBJECT(element, "Using copied H.264 output for ReBlade.");
+    }
+}
+
 static NTSTATUS wg_parser_connect(void *args)
 {
     GstStaticPadTemplate src_template = GST_STATIC_PAD_TEMPLATE("quartz_src",
@@ -1965,6 +1977,9 @@ static NTSTATUS wg_parser_connect(void *args)
     }
 
     parser->container = gst_bin_new(NULL);
+    if (!g_strcmp0(g_getenv("SteamGameId"), "4513800"))
+        g_signal_connect(parser->container, "deep-element-added", G_CALLBACK(reblade_element_added_cb), NULL);
+
     gst_element_set_bus(parser->container, parser->bus);
     if (parser->context)
         gst_element_set_context(parser->container, parser->context);
