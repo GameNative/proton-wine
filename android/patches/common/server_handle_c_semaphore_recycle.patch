@@ -1,0 +1,79 @@
+server: run a duplication of another process's semaphore in that process
+
+ntdll recycles a private unnamed semaphore after the application closed it and stops when
+the handle is duplicated by its own process. dup_handle for a semaphore of another,
+initialized process, with in-process sync and without fsync, answers
+STATUS_MORE_PROCESSING_REQUIRED; the caller's ntdll then runs the duplication in the source
+process as APC_DUP_HANDLE, as it already does for DUPLICATE_CLOSE_SOURCE. Other object
+types and duplications within the caller's own process keep the direct path.
+
+See dlls_ntdll_unix_sync_c_semaphore_recycle.patch.
+
+diff --git a/server/handle.c b/server/handle.c
+index a88f94a..6c24941 100644
+--- a/server/handle.c
++++ b/server/handle.c
+@@ -38,6 +38,7 @@
+ #include "thread.h"
+ #include "security.h"
+ #include "request.h"
++#include "fsync.h"
+ 
+ struct handle_entry
+ {
+@@ -680,6 +681,29 @@ DECL_HANDLER(set_handle_info)
+     reply->old_flags = set_handle_flags( current->process, req->handle, req->mask, req->flags );
+ }
+ 
++/* With in-process sync, ntdll recycles a private unnamed semaphore after the
++ * application closed it, and stops doing so when the handle is duplicated by
++ * its own process. A new handle to a semaphore of another process is therefore
++ * made in that process (APC_DUP_HANDLE, as for DUPLICATE_CLOSE_SOURCE): this
++ * returns 1 for a semaphore of an initialized process other than the caller's. */
++int dup_needs_source_process( struct process *src, obj_handle_t handle )
++{
++    unsigned int error = get_error();
++    struct object *obj;
++    int ret;
++
++    if (src == current->process || !is_process_init_done( src )) return 0;
++    if (get_inproc_device_fd() < 0 || do_fsync()) return 0;
++    if (!(obj = get_handle_obj( src, handle, 0, NULL )))
++    {
++        set_error( error );  /* not a semaphore; the caller reports its own errors */
++        return 0;
++    }
++    ret = obj->ops->type == &semaphore_type;
++    release_object( obj );
++    return ret;
++}
++
+ /* duplicate a handle */
+ DECL_HANDLER(dup_handle)
+ {
+@@ -688,6 +712,13 @@ DECL_HANDLER(dup_handle)
+     reply->handle = 0;
+     if ((src = get_process_from_handle( req->src_process, PROCESS_DUP_HANDLE )))
+     {
++        if (dup_needs_source_process( src, req->src_handle ))
++        {
++            /* the client runs it in the source process */
++            set_error( STATUS_MORE_PROCESSING_REQUIRED );
++            release_object( src );
++            return;
++        }
+         if (req->options & DUPLICATE_MAKE_GLOBAL)
+         {
+             reply->handle = duplicate_handle( src, req->src_handle, NULL,
+diff --git a/server/handle.h b/server/handle.h
+index a2b06ac..b2b8a8d 100644
+--- a/server/handle.h
++++ b/server/handle.h
+@@ -44,6 +44,7 @@ extern struct object *get_handle_obj( struct process *process, obj_handle_t hand
+ extern unsigned int get_handle_access( struct process *process, obj_handle_t handle );
+ extern obj_handle_t duplicate_handle( struct process *src, obj_handle_t src_handle, struct process *dst,
+                                       unsigned int access, unsigned int attr, unsigned int options );
++extern int dup_needs_source_process( struct process *src, obj_handle_t handle );
+ extern obj_handle_t open_object( struct process *process, obj_handle_t parent, unsigned int access,
+                                  const struct object_ops *ops, const struct unicode_str *name,
+                                  unsigned int attr );

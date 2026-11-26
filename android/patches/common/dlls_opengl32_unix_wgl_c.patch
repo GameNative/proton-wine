@@ -1,0 +1,14 @@
+diff --git a/dlls/opengl32/unix_wgl.c b/dlls/opengl32/unix_wgl.c
+index 28152c5..9531476 100644
+--- a/dlls/opengl32/unix_wgl.c
++++ b/dlls/opengl32/unix_wgl.c
+@@ -310,6 +310,9 @@ static int compare_context_attributes( const void *v1, const void *v2 )
+ {
+     const struct context_attribute_desc *a1 = v1, *a2 = v2;
+ 
++#ifdef __ANDROID__
++    if (v1 == v2) return 0;
++#endif
+     assert( a1->name != a2->name );
+     return (int)a1->name - (int)a2->name;
+ };

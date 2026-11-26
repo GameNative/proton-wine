@@ -1,0 +1,22 @@
+diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
+index d5b93415c2a..50a2c7883ca 100644
+--- a/dlls/ntdll/unix/virtual.c
++++ b/dlls/ntdll/unix/virtual.c
+@@ -5461,6 +5461,17 @@ static NTSTATUS allocate_virtual_memory( void **ret, SIZE_T *size_ptr, ULONG typ
+         size = ROUND_SIZE( 0, size, page_mask );
+     }
+ 
++    /* A fixed address that Windows would accept but the host cannot map (39-bit kernels) would
++     * have succeeded on Windows, so hand out a block elsewhere rather than fail the request. */
++    if (base && !is_dos_memory && (type & MEM_RESERVE) && !(type & MEM_REPLACE_PLACEHOLDER) &&
++        is_beyond_limit( base, size, host_addr_space_limit ))
++    {
++        WARN( "relocating fixed allocation %p-%p beyond host limit %p\n",
++              base, (char *)base + size, host_addr_space_limit );
++        base = NULL;
++        size = ROUND_SIZE( 0, *size_ptr, page_mask );
++    }
++
+     /* Compute the alloc type flags */
+ 
+     if (!(type & (MEM_COMMIT | MEM_RESERVE | MEM_RESET))

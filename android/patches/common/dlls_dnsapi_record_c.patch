@@ -1,0 +1,13 @@
+diff --git a/dlls/dnsapi/record.c b/dlls/dnsapi/record.c
+index 1b4cbfe..29b6533 100644
+--- a/dlls/dnsapi/record.c
++++ b/dlls/dnsapi/record.c
+@@ -1144,7 +1144,7 @@ static DNS_STATUS extract_message_records( const DNS_MESSAGE_BUFFER *buffer, WOR
+     const BYTE *ptr = (const BYTE *)buffer->MessageBody;
+     unsigned int num;
+ 
+-    if (hdr->IsResponse && !hdr->AnswerCount) return DNS_ERROR_BAD_PACKET;
++    if (hdr->IsResponse && !hdr->AnswerCount) ret = DNS_INFO_NO_RECORDS;
+ 
+     for (num = 0; num < hdr->QuestionCount; num++)
+         if (!(ptr = skip_record( ptr, end, DnsSectionQuestion ))) return DNS_ERROR_BAD_PACKET;

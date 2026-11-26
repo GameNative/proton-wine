@@ -1,0 +1,77 @@
+diff --git a/dlls/ntdll/unix/loader.c b/dlls/ntdll/unix/loader.c
+index f8aa468..291bf9b 100644
+--- a/dlls/ntdll/unix/loader.c
++++ b/dlls/ntdll/unix/loader.c
+@@ -340,7 +340,11 @@ static const char *get_pe_dir( WORD machine )
+     switch(machine)
+     {
+     case IMAGE_FILE_MACHINE_I386:  return "/i386-windows";
+-    case IMAGE_FILE_MACHINE_AMD64: return "/x86_64-windows";
++#ifdef __aarch64__
++        case IMAGE_FILE_MACHINE_AMD64: return "/aarch64-windows";
++#else
++        case IMAGE_FILE_MACHINE_AMD64: return "/x86_64-windows";
++#endif
+     case IMAGE_FILE_MACHINE_ARMNT: return "/arm-windows";
+     case IMAGE_FILE_MACHINE_ARM64: return "/aarch64-windows";
+     default: return "";
+@@ -362,6 +366,7 @@ static WORD get_alt_machine( WORD machine )
+ static void set_dll_path(void)
+ {
+     char *p, *path = getenv( "WINEDLLPATH" ), *be_runtime = getenv( "PROTON_BATTLEYE_RUNTIME" ), *eac_runtime = getenv( "PROTON_EAC_RUNTIME" );
++    char *prefix = getenv( "PREFIX" );
+     int i, count = 0;
+ 
+     if (path) for (p = path, count = 1; *p; p++) if (*p == ':') count++;
+@@ -372,6 +377,9 @@ static void set_dll_path(void)
+     if (eac_runtime)
+         count += 2;
+ 
++    if (prefix && *prefix)
++        count += 1;
++
+     dll_paths = malloc( (count + 2) * sizeof(*dll_paths) );
+     count = 0;
+ 
+@@ -420,6 +428,20 @@ static void set_dll_path(void)
+         dll_paths[count++] = p;
+     }
+ 
++    /* Winlator-bionic containers set PREFIX to the imagefs mount; components
++     * (e.g. a FEX-unix companion) drop their unixlibs under $PREFIX/lib/wine.
++     * Add it as the lowest-priority search dir so the builtin's own dir wins. */
++    if (prefix && *prefix)
++    {
++        const char suffix[] = "/lib/wine";
++
++        p = malloc( strlen(prefix) + strlen(suffix) + 1 );
++        strcpy(p, prefix);
++        strcat(p, suffix);
++
++        dll_paths[count++] = p;
++    }
++
+     for (i = 0; i < count; i++) dll_path_maxlen = max( dll_path_maxlen, strlen(dll_paths[i]) );
+     dll_paths[count] = NULL;
+ }
+@@ -2451,7 +2548,9 @@ static void start_main_thread(void)
+     set_thread_teb( teb );
+ #endif
+ 
++#ifndef __ANDROID__
+     mallopt( M_PERTURB, 0xff );
++#endif
+     init_startup_info();
+     *(ULONG_PTR *)&peb->CloudFileFlags = get_image_address();
+     set_load_order_app_name( main_wargv[0] );
+@@ -2460,7 +2559,9 @@ static void start_main_thread(void)
+     load_ntdll();
+     load_wow64_ntdll( main_image_info.Machine );
+     load_apiset_dll();
++#ifndef __ANDROID__
+     mallopt( M_PERTURB, 0 );
++#endif
+     server_init_process_done();
+ }
+ 
+

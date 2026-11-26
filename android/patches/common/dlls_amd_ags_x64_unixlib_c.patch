@@ -1,0 +1,35 @@
+diff --git a/dlls/amd_ags_x64/unixlib.c b/dlls/amd_ags_x64/unixlib.c
+index d34a162..89b3a55 100644
+--- a/dlls/amd_ags_x64/unixlib.c
++++ b/dlls/amd_ags_x64/unixlib.c
+@@ -30,11 +30,11 @@
+ #include <unistd.h>
+ #include <fcntl.h>
+ #include <errno.h>
+-
++#ifndef __ANDROID__
+ #include <xf86drm.h>
+ #include <amdgpu_drm.h>
+ #include <amdgpu.h>
+-
++#endif
+ #include "ntstatus.h"
+ #define WIN32_NO_STATUS
+ #include "windef.h"
+@@ -46,6 +46,8 @@
+ 
+ WINE_DEFAULT_DEBUG_CHANNEL(amd_ags);
+ 
++#ifndef __ANDROID__
++
+ #define MAX_DEVICE_COUNT 64
+ 
+ static unsigned int device_count;
+@@ -281,3 +283,6 @@ const unixlib_entry_t __wine_unix_call_funcs[] =
+     init,
+     get_device_info,
+ };
++#else
++const unixlib_entry_t __wine_unix_call_funcs[] = {};
++#endif
+\ No newline at end of file

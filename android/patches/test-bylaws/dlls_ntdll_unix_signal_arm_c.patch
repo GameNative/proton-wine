@@ -1,0 +1,13 @@
+diff --git a/dlls/ntdll/unix/signal_arm.c b/dlls/ntdll/unix/signal_arm.c
+index a5de319a6d5..64aac17e915 100644
+--- a/dlls/ntdll/unix/signal_arm.c
++++ b/dlls/ntdll/unix/signal_arm.c
+@@ -775,6 +775,8 @@ static BOOL handle_syscall_fault( ucontext_t *context, EXCEPTION_RECORD *rec )
+ 
+     if (!is_inside_syscall( SP_sig(context) )) return FALSE;
+ 
++    __wine_dbg_notify_syscall_fault();
++
+     TRACE( "code=%x flags=%x addr=%p pc=%08x\n",
+            rec->ExceptionCode, rec->ExceptionFlags, rec->ExceptionAddress, (DWORD)PC_sig(context) );
+     for (i = 0; i < rec->NumberParameters; i++)

@@ -1,0 +1,59 @@
+Credit: this ARM64 copied-syscall fix (dispatcher at TEB+0x2f8) comes from the WoW Forever RP6
+community bundle (Proton 11 ARM64EC based on The412Banner/proton-wine), distributed in
+jaredgei/wow-forever-android and wyattabuntjer/AYN-Thor-WoW-Launcher. Reimplemented from their
+binary. Problem analysed by arusiasotto in Droid-Deck/DroidDeck-Proton issue #2.
+
+diff --git a/dlls/ntdll/unix/signal_arm64.c b/dlls/ntdll/unix/signal_arm64.c
+index b37d220..7d1fc19 100644
+--- a/dlls/ntdll/unix/signal_arm64.c
++++ b/dlls/ntdll/unix/signal_arm64.c
+@@ -67,10 +67,13 @@ WINE_DEFAULT_DEBUG_CHANNEL(seh);
+ 
+ struct arm64_thread_data
+ {
+-    BOOL suspend_pending;
++    BOOL  suspend_pending;
++    void *syscall_dispatcher;  /* 02f8 read by the syscall thunks, see __ASM_SYSCALL_FUNC */
+ };
+ 
+ C_ASSERT( sizeof(struct arm64_thread_data) <= sizeof(((struct ntdll_thread_data *)0)->cpu_data) );
++C_ASSERT( offsetof( TEB, GdiTebBatch ) + offsetof( struct ntdll_thread_data, cpu_data ) +
++          offsetof( struct arm64_thread_data, syscall_dispatcher ) == 0x2f8 );
+ 
+ static inline struct arm64_thread_data *arm64_thread_data(void)
+ {
+@@ -1467,6 +1470,16 @@ void signal_init_threading(void)
+  */
+ NTSTATUS signal_alloc_thread( TEB *teb )
+ {
++    struct ntdll_thread_data *thread_data = (struct ntdll_thread_data *)&teb->GdiTebBatch;
++
++    /* the syscall thunks load the dispatcher from the TEB rather than PC-relative, so that
++     * copies of them made by applications (e.g. World of Warcraft's protector, which copies
++     * the thunks like Windows' position-independent "svc #n; ret" stubs) still work.
++     * Credit: this "ARM64 copied-syscall fix" (dispatcher at TEB+0x2f8) comes from the
++     * WoW Forever RP6 community bundle's Proton 11 ARM64EC build (based on
++     * The412Banner/proton-wine), distributed in jaredgei/wow-forever-android and used by
++     * wyattabuntjer/AYN-Thor-WoW-Launcher; reimplemented here from their binary. */
++    ((struct arm64_thread_data *)thread_data->cpu_data)->syscall_dispatcher = __wine_syscall_dispatcher;
+     return STATUS_SUCCESS;
+ }
+ 
+diff --git a/include/wine/asm.h b/include/wine/asm.h
+index 172d7c8..69ad6ca 100644
+--- a/include/wine/asm.h
++++ b/include/wine/asm.h
+@@ -249,11 +249,9 @@
+                        ".seh_endprologue\n\t" \
+                        "mov x8, #(" #id ")\n\t" \
+                        "mov x9, x30\n\t" \
+-                       "ldr x16, 1f\n\t" \
+-                       "ldr x16, [x16]\n\t" \
++                       "ldr x16, [x18, #0x2f8]\n\t" /* TEB: arm64_thread_data.syscall_dispatcher */ \
+                        "blr x16\n\t" \
+-                       "ret\n" \
+-                       "1:\t.quad " __ASM_NAME("__wine_syscall_dispatcher") )
++                       "ret" )
+ #elif defined __arm64ec__
+ # define __ASM_SYSCALL_FUNC(id,name) \
+     asm( ".seh_proc \"#" #name "$hp_target\"\n\t" \

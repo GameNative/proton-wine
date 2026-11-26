@@ -1,0 +1,86 @@
+Credit: gap found and described by arusiasotto in Droid-Deck/DroidDeck-Proton issue #2
+(WoW Forever ARM64: four ntdll gaps).
+
+diff --git a/dlls/ntdll/unix/env.c b/dlls/ntdll/unix/env.c
+index 050d183..719c712 100644
+--- a/dlls/ntdll/unix/env.c
++++ b/dlls/ntdll/unix/env.c
+@@ -148,6 +148,39 @@ static void *read_nls_file( const char *name )
+     return ret;
+ }
+ 
++/* Fallback when an NLS file cannot be mapped as a section: read it into private, read-only
++ * memory of the current process (World of Warcraft ARM64 aborts in its locale init otherwise).
++ * Gap found and described by arusiasotto (Droid-Deck/DroidDeck-Proton issue #2). */
++static void *read_nls_file_private( const char *path, SIZE_T *ret_size )
++{
++    struct stat st;
++    void *addr = NULL;
++    SIZE_T size;
++    ULONG old;
++    int fd;
++
++    if ((fd = open( path, O_RDONLY )) == -1) return NULL;
++    if (fstat( fd, &st ) == -1 || st.st_size <= 0) goto failed;
++    size = st.st_size;
++    if (NtAllocateVirtualMemory( GetCurrentProcess(), &addr, user_space_wow_limit, &size,
++                                 MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE )) goto failed;
++    if (read( fd, addr, st.st_size ) != st.st_size)
++    {
++        size = 0;
++        NtFreeVirtualMemory( GetCurrentProcess(), &addr, &size, MEM_RELEASE );
++        goto failed;
++    }
++    close( fd );
++    NtProtectVirtualMemory( GetCurrentProcess(), &addr, &size, PAGE_READONLY, &old );
++    if (ret_size) *ret_size = st.st_size;
++    WARN( "using a private copy of %s\n", path );
++    return addr;
++
++failed:
++    close( fd );
++    return NULL;
++}
++
+ static NTSTATUS open_nls_data_file( const char *path, const WCHAR *sysdir, HANDLE *file )
+ {
+     NTSTATUS status;
+@@ -2280,6 +2313,19 @@ NTSTATUS WINAPI NtGetNlsSectionPtr( ULONG type, ULONG id, void *unknown, void **
+         status = map_section( handle, ptr, size, PAGE_READONLY );
+         NtClose( handle );
+     }
++    if (status && status != STATUS_OBJECT_NAME_NOT_FOUND)
++    {
++        char *path = get_nls_file_path( type, id );
++        void *data = path ? read_nls_file_private( path, size ) : NULL;
++
++        free( path );
++        if (data)
++        {
++            WARN( "section map failed (%#x), using fallback for type %u id %u\n", (int)status, (int)type, (int)id );
++            *ptr = data;
++            status = STATUS_SUCCESS;
++        }
++    }
+     return status;
+ }
+ 
+@@ -2308,6 +2354,18 @@ NTSTATUS WINAPI NtInitializeNlsFiles( void **ptr, LCID *lcid, LARGE_INTEGER *siz
+         status = map_section( handle, ptr, &mapsize, PAGE_READONLY );
+         NtClose( handle );
+     }
++    if (status && asprintf( &path, "%s/nls/locale.nls", dir ) != -1)
++    {
++        void *data = read_nls_file_private( path, &mapsize );
++
++        free( path );
++        if (data)
++        {
++            WARN( "locale.nls section map failed (%#x), using fallback\n", (int)status );
++            *ptr = data;
++            status = STATUS_SUCCESS;
++        }
++    }
+     *lcid = system_lcid;
+     return status;
+ }

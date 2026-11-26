@@ -1,0 +1,23 @@
+diff --git a/server/fsync.c b/server/fsync.c
+index 7d3ec646f9e..72058528328 100644
+--- a/server/fsync.c
++++ b/server/fsync.c
+@@ -44,6 +44,9 @@
+ #include "handle.h"
+ #include "request.h"
+ #include "fsync.h"
++#ifdef __ANDROID__
++#include "../android/shm_utils/shm_utils.h"
++#endif
+ 
+ #include "pshpack4.h"
+ #include "poppack.h"
+@@ -56,7 +59,7 @@ int do_fsync_cached = -1;
+ 
+ int fsync_check_support(void)
+ {
+-#ifdef __linux__
++#if defined(__linux__) && !defined(__ANDROID__)
+     syscall( __NR_futex_waitv, 0, 0, 0, 0, 0 );
+     return getenv( "WINEFSYNC" ) && atoi(getenv( "WINEFSYNC" )) && errno != ENOSYS && errno != EPERM;
+ #else

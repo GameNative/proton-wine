@@ -1,0 +1,154 @@
+diff --git a/dlls/ntdll/loader.c b/dlls/ntdll/loader.c
+index 113310a3075..06594e7ff9c 100644
+--- a/dlls/ntdll/loader.c
++++ b/dlls/ntdll/loader.c
+@@ -108,6 +108,9 @@ struct dll_dir_entry
+ 
+ static struct list dll_dir_list = LIST_INIT( dll_dir_list );  /* extra dirs from LdrAddDllDirectory */
+ 
++#define IS_OPTION_TRUE(ch) ((ch) == 'y' || (ch) == 'Y' || (ch) == 't' || (ch) == 'T' || (ch) == '1')
++static BOOL hide_wine_exports = FALSE;  /* hide the wine_get_* ntdll exports from applications */
++
+ struct ldr_notification
+ {
+     struct list                    entry;
+@@ -2143,6 +2146,130 @@ NTSTATUS WINAPI LdrUnlockLoaderLock( ULONG flags, ULONG_PTR magic )
+ }
+ 
+ 
++/***********************************************************************
++ *           hidden_exports_init
++ *
++ * Reads HKCU\Software\Wine[\AppDefaults\app.exe] HideWineExports (wine-staging) or the
++ * WINE_HIDE_EXPORTS environment variable. Some anti-tamper and anti-cheat code looks
++ * for wine_get_version and quits the game when it finds it.
++ */
++static void hidden_exports_init( const WCHAR *appname )
++{
++    static const WCHAR configW[] = L"Software\\Wine";
++    static const WCHAR appdefaultsW[] = L"AppDefaults\\";
++    static const WCHAR hideWineExportsW[] = L"HideWineExports";
++    static const WCHAR envW[] = L"WINE_HIDE_EXPORTS";
++    OBJECT_ATTRIBUTES attr;
++    UNICODE_STRING nameW, valueW;
++    HANDLE root, config_key, hkey;
++    BOOL got_value = FALSE;
++    WCHAR env[8];
++    char tmp[80];
++    DWORD dummy;
++
++    RtlInitUnicodeString( &nameW, envW );
++    valueW.Buffer = env;
++    valueW.Length = 0;
++    valueW.MaximumLength = sizeof(env);
++    if (!RtlQueryEnvironmentVariable_U( NULL, &nameW, &valueW ) && valueW.Length)
++    {
++        hide_wine_exports = IS_OPTION_TRUE( env[0] );
++        return;
++    }
++
++    RtlOpenCurrentUser( KEY_ALL_ACCESS, &root );
++    attr.Length = sizeof(attr);
++    attr.RootDirectory = root;
++    attr.ObjectName = &nameW;
++    attr.Attributes = OBJ_CASE_INSENSITIVE;
++    attr.SecurityDescriptor = NULL;
++    attr.SecurityQualityOfService = NULL;
++    RtlInitUnicodeString( &nameW, configW );
++
++    /* @@ Wine registry key: HKCU\Software\Wine */
++    if (NtOpenKey( &config_key, KEY_QUERY_VALUE, &attr )) config_key = 0;
++    NtClose( root );
++    if (!config_key) return;
++
++    if (appname && *appname)
++    {
++        const WCHAR *p;
++        WCHAR appversion[MAX_PATH+20];
++
++        if ((p = wcsrchr( appname, '/' ))) appname = p + 1;
++        if ((p = wcsrchr( appname, '\\' ))) appname = p + 1;
++
++        wcscpy( appversion, appdefaultsW );
++        wcscat( appversion, appname );
++        RtlInitUnicodeString( &nameW, appversion );
++        attr.RootDirectory = config_key;
++
++        /* @@ Wine registry key: HKCU\Software\Wine\AppDefaults\app.exe */
++        if (!NtOpenKey( &hkey, KEY_QUERY_VALUE, &attr ))
++        {
++            RtlInitUnicodeString( &nameW, hideWineExportsW );
++            if (!NtQueryValueKey( hkey, &nameW, KeyValuePartialInformation, tmp, sizeof(tmp), &dummy ))
++            {
++                WCHAR *str = (WCHAR *)((KEY_VALUE_PARTIAL_INFORMATION *)tmp)->Data;
++                hide_wine_exports = IS_OPTION_TRUE( str[0] );
++                got_value = TRUE;
++            }
++            NtClose( hkey );
++        }
++    }
++
++    if (!got_value)
++    {
++        RtlInitUnicodeString( &nameW, hideWineExportsW );
++        if (!NtQueryValueKey( config_key, &nameW, KeyValuePartialInformation, tmp, sizeof(tmp), &dummy ))
++        {
++            WCHAR *str = (WCHAR *)((KEY_VALUE_PARTIAL_INFORMATION *)tmp)->Data;
++            hide_wine_exports = IS_OPTION_TRUE( str[0] );
++        }
++    }
++
++    NtClose( config_key );
++}
++
++
++/***********************************************************************
++ *           hide_wine_exports_in_table
++ *
++ * Rename wine_get_version, wine_get_build_id and wine_get_host_version in
++ * ntdll's export name table (wine_get_ -> wine_gxt_: same length and the same
++ * place in the sorted table). Anti-cheat code walks the table itself, so
++ * filtering LdrGetProcedureAddress is not enough.
++ */
++static void hide_wine_exports_in_table( HMODULE module )
++{
++    static const char * const hidden[] = { "version", "build_id", "host_version" };
++    const IMAGE_EXPORT_DIRECTORY *exports;
++    const DWORD *names;
++    DWORD i, j, exp_size;
++
++    if (!hide_wine_exports) return;
++    if (!(exports = RtlImageDirectoryEntryToData( module, TRUE, IMAGE_DIRECTORY_ENTRY_EXPORT, &exp_size ))) return;
++    names = get_rva( module, exports->AddressOfNames );
++    for (i = 0; i < exports->NumberOfNames; i++)
++    {
++        char *name = get_rva( module, names[i] );
++        void *addr;
++        SIZE_T size = 1;
++        ULONG old_prot;
++
++        if (*name == '#') name++;
++        if (strncmp( name, "wine_get_", 9 )) continue;
++        for (j = 0; j < ARRAY_SIZE(hidden); j++) if (!strcmp( name + 9, hidden[j] )) break;
++        if (j == ARRAY_SIZE(hidden)) continue;
++        addr = name + 6;
++        if (NtProtectVirtualMemory( NtCurrentProcess(), &addr, &size, PAGE_READWRITE, &old_prot )) continue;
++        name[6] = 'x';
++        NtProtectVirtualMemory( NtCurrentProcess(), &addr, &size, old_prot, &old_prot );
++        TRACE( "hid export %s\n", name );
++    }
++}
++
++
+ /******************************************************************
+  *		LdrGetProcedureAddress  (NTDLL.@)
+  */
+@@ -2491,6 +2618,8 @@ static void build_ntdll_module(void)
+     node_ntdll = wm->ldr.DdagNode;
+     if (TRACE_ON(relay)) RELAY_SetupDLL( module );
+     TRACE_(loaddll)( "Loaded %s at %p: builtin\n", debugstr_w(wm->ldr.FullDllName.Buffer), module);
++    hidden_exports_init( wm->ldr.FullDllName.Buffer );
++    hide_wine_exports_in_table( module );
+ }
+ 
+ 

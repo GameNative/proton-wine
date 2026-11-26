@@ -1,0 +1,51 @@
+diff --git a/dlls/ntdll/signal_arm64ec.c b/dlls/ntdll/signal_arm64ec.c
+index 8790f07..8e886a7 100644
+--- a/dlls/ntdll/signal_arm64ec.c
++++ b/dlls/ntdll/signal_arm64ec.c
+@@ -52,6 +52,7 @@ static void     (WINAPI *pBTCpu64NotifyReadFile)(HANDLE,void*,SIZE_T,BOOL,NTSTAT
+ static void     (WINAPI *pBeginSimulation)(void);
+ static void     (WINAPI *pFlushInstructionCacheHeavy)(const void*,SIZE_T);
+ static NTSTATUS (WINAPI *pNotifyMapViewOfSection)(void*,void*,void*,SIZE_T,ULONG,ULONG);
++static ULONG    *pBTCpu64NotifyNonImageViews;
+ static void     (WINAPI *pNotifyMemoryAlloc)(void*,SIZE_T,ULONG,ULONG,BOOL,NTSTATUS);
+ static void     (WINAPI *pNotifyMemoryFree)(void*,SIZE_T,ULONG,BOOL,NTSTATUS);
+ static void     (WINAPI *pNotifyMemoryProtect)(void*,SIZE_T,ULONG,BOOL,NTSTATUS);
+@@ -221,6 +222,7 @@ NTSTATUS arm64ec_process_init( HMODULE module )
+     GET_PTR( ThreadTerm );
+     GET_PTR( UpdateProcessorInformation );
+ #undef GET_PTR
++    pBTCpu64NotifyNonImageViews = RtlFindExportedRoutineByName( module, "BTCpu64NotifyNonImageViews" );
+ 
+     RtlGetCurrentPeb()->ChpeV2ProcessInfo = info;
+     info->NativeMachineType = IMAGE_FILE_MACHINE_ARM64;
+@@ -732,8 +734,18 @@ static void notify_map_view_of_section( HANDLE handle, void *addr, SIZE_T size,
+     NTSTATUS status;
+ 
+     if (!pNotifyMapViewOfSection) return;
+-    if (!NtCurrentTeb()->Tib.ArbitraryUserPointer) return;
+-    if (NtQuerySection( handle, SectionImageInformation, &info, sizeof(info), NULL )) return;
++
++    /* Image sections are only reported for loads performed by the loader. Views of non-image
++     * sections are reported when the emulator says it can track them (protectors that double-map
++     * one pagefile-backed section, executable at one address and writable at another, depend on
++     * that); an emulator without the flag expects a PE header and must not be told about them. */
++    status = NtQuerySection( handle, SectionImageInformation, &info, sizeof(info), NULL );
++    if (status == STATUS_SECTION_NOT_IMAGE)
++    {
++        if (!pBTCpu64NotifyNonImageViews || !*pBTCpu64NotifyNonImageViews) return;
++    }
++    else if (status) return;
++    else if (!NtCurrentTeb()->Tib.ArbitraryUserPointer) return;
+     status = pNotifyMapViewOfSection( NULL, addr, NULL, size, alloc, protect );
+     if (NT_SUCCESS(status)) return;
+     NtUnmapViewOfSection( GetCurrentProcess(), addr );
+@@ -1901,6 +1913,9 @@ NTSTATUS __attribute__((naked)) __wine_unix_call_arm64ec( unixlib_handle_t handl
+ 
+ NTSTATUS (WINAPI *__wine_unix_call_dispatcher_arm64ec)( unixlib_handle_t, unsigned int, void * ) = __wine_unix_call_arm64ec;
+ 
++/* Tells the emulator that EFlags PF/AF survive context conversion in cpsr bits 26/27 (see eflags_to_cpsr) */
++ULONG __wine_arm64ec_extended_eflags = 1;
++
+ static void __attribute__((naked)) arm64x_check_call_early(void)
+ {
+     asm( "mov x11, x9\n\t"

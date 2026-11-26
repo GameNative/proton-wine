@@ -1,0 +1,149 @@
+winebuild: Use x86_64 assembly for arm64ec targets.
+
+Backport of upstream wine ae2433e6. The arm64ec spec object becomes x64 code,
+so lld places it in an x64 code range; the -import thunks in
+tools_winebuild_spec32_c_import_thunks.patch depend on it. The winegcc hunk
+is adapted because upstream f0fde619 (pass the target CPU to build_tool_name)
+is not in this tree.
+
+Wine-Bug: https://bugs.winehq.org/show_bug.cgi?id=60463
+
+diff --git a/tools/winebuild/build.h b/tools/winebuild/build.h
+index 3acf987aab2..3cb5659e1ea 100644
+--- a/tools/winebuild/build.h
++++ b/tools/winebuild/build.h
+@@ -274,7 +274,6 @@ extern int sort_func_list( ORDDEF **list, int count, int (*compare)(const void *
+ extern unsigned int get_section_alignment(void);
+ extern unsigned int get_args_size( const ORDDEF *odp );
+ extern const char *asm_name( const char *func );
+-extern const char *arm64_name( const char *func );
+ extern const char *asm_globl( const char *func );
+ extern const char *get_asm_ptr_keyword(void);
+ extern const char *get_asm_string_keyword(void);
+diff --git a/tools/winebuild/import.c b/tools/winebuild/import.c
+index 2d7caa0883e..e66e056cf86 100644
+--- a/tools/winebuild/import.c
++++ b/tools/winebuild/import.c
+@@ -1087,6 +1087,7 @@ void output_stubs( DLLSPEC *spec )
+             output_cfi( ".cfi_endproc" );
+             break;
+         case CPU_x86_64:
++        case CPU_ARM64EC:
+             output_cfi( ".cfi_startproc" );
+             output_seh( ".seh_proc %s", asm_name(name) );
+             output( "\tsubq $0x28,%%rsp\n" );
+@@ -1117,8 +1118,7 @@ void output_stubs( DLLSPEC *spec )
+             output( "\t.seh_endproc\n" );
+             break;
+         case CPU_ARM64:
+-        case CPU_ARM64EC:
+-            output( "\t.seh_proc %s\n", arm64_name(name) );
++            output( "\t.seh_proc %s\n", asm_name(name) );
+             output( "\t.seh_endprologue\n" );
+             output( "\tadrp x0, .L__wine_spec_file_name\n" );
+             output( "\tadd x0, x0, #:lo12:.L__wine_spec_file_name\n" );
+@@ -1129,7 +1129,7 @@ void output_stubs( DLLSPEC *spec )
+             }
+             else
+                 output( "\tmov x1, %u\n", odp->ordinal );
+-            output( "\tb %s\n", arm64_name("__wine_spec_unimplemented_stub") );
++            output( "\tb %s\n", asm_name("__wine_spec_unimplemented_stub") );
+             output( "\t.seh_endproc\n" );
+             break;
+         }
+diff --git a/tools/winebuild/utils.c b/tools/winebuild/utils.c
+index 1f0cde60bf9..7ff40efb446 100644
+--- a/tools/winebuild/utils.c
++++ b/tools/winebuild/utils.c
+@@ -268,19 +268,29 @@ struct strarray get_as_command(void)
+     {
+         strarray_addall( &args, as_command );
+     }
+-    else if ((file = find_binary( target_alias, "as" )) || (file = find_binary( target_alias, "gas ")))
+-    {
+-        strarray_add( &args, file );
+-    }
+-    else if ((file = find_binary( NULL, "clang" )))
++    else
+     {
+-        strarray_add( &args, file );
+-        if (target_alias)
++        const char *as_target = target_alias;
++        if (target.cpu == CPU_ARM64EC)
+         {
+-            strarray_add( &args, "-target" );
+-            strarray_add( &args, target_alias );
++            const char *suffix = strchr( target_alias, '-' );
++            if (!suffix) suffix = "";
++            as_target = strmake( "x86_64%s", suffix );
++        }
++        if ((file = find_binary( as_target, "as" )) || (file = find_binary( as_target, "gas ")))
++        {
++            strarray_add( &args, file );
++        }
++        else if ((file = find_binary( NULL, "clang" )))
++        {
++            strarray_add( &args, file );
++            if (as_target)
++            {
++                strarray_add( &args, "-target" );
++                strarray_add( &args, as_target );
++            }
++            using_cc = 1;
+         }
+-        using_cc = 1;
+     }
+ 
+     if (using_cc)
+@@ -754,17 +764,10 @@ const char *asm_name( const char *sym )
+     }
+ }
+ 
+-/* return the assembly name for an ARM64/ARM64EC function */
+-const char *arm64_name( const char *sym )
+-{
+-    if (target.cpu == CPU_ARM64EC) return strmake( "\"#%s\"", sym );
+-    return asm_name( sym );
+-}
+-
+ /* return an assembly function declaration for a C function name */
+ void output_function_header( const char *func, int global )
+ {
+-    const char *name = arm64_name( func );
++    const char *name = asm_name( func );
+ 
+     output( "\t.text\n" );
+ 
+@@ -775,7 +778,6 @@ void output_function_header( const char *func, int global )
+         break;
+     case PLATFORM_MINGW:
+     case PLATFORM_WINDOWS:
+-        if (target.cpu == CPU_ARM64EC) output( ".section .text,\"xr\",discard,%s\n\t", name );
+         output( "\t.def %s\n\t.scl 2\n\t.type 32\n\t.endef\n", name );
+         if (global) output( "\t.globl %s\n", name );
+         break;
+diff --git a/tools/winegcc/winegcc.c b/tools/winegcc/winegcc.c
+index f8651804fa2..4734648223b 100644
+--- a/tools/winegcc/winegcc.c
++++ b/tools/winegcc/winegcc.c
+@@ -1092,12 +1092,18 @@ static void build_spec_obj( const char *spec_file, const char *output_file,
+ {
+     struct strarray spec_args = get_winebuild_args( target_name );
+     struct strarray tool;
+-    const char *spec_o_name, *output_name;
++    const char *spec_o_name, *output_name, *cc_target = target_name;
+ 
+     /* get the filename from the path */
+     output_name = get_basename( output_file );
+ 
+-    tool = build_tool_name( target_name, tool_cc );
++    if (target_name && get_cpu_from_name( target_name ) == CPU_ARM64EC)
++    {
++        const char *suffix = strchr( target_name, '-' );
++        cc_target = strmake( "x86_64%s", suffix ? suffix : "" );
++    }
++
++    tool = build_tool_name( cc_target, tool_cc );
+     strarray_add( &spec_args, strmake( "--cc-cmd=%s", strarray_tostring( tool, " " )));
+     if (!is_pe)
+     {

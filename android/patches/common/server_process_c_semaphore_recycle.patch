@@ -1,0 +1,30 @@
+server: do not pass another parent's semaphore as a console or standard handle
+
+A process created with a parent process other than the caller (PS_ATTRIBUTE_PARENT_PROCESS)
+gets its console and standard handles duplicated out of that parent by the server, without
+the parent's ntdll taking part; a semaphore there is not passed on (the handle is 0), so a
+recycled semaphore of the parent is never shared. See server_handle_c_semaphore_recycle.patch.
+
+diff --git a/server/process.c b/server/process.c
+index 0aa6b0c..8893566 100644
+--- a/server/process.c
++++ b/server/process.c
+@@ -1379,6 +1379,18 @@ DECL_HANDLER(new_process)
+     /* connect to the window station */
+     connect_process_winstation( process, &desktop_path, parent_thread, parent );
+ 
++    /* A third process naming this parent (PROC_THREAD_ATTRIBUTE_PARENT_PROCESS)
++     * passes handle values of the parent; the parent's ntdll would not see a
++     * semaphore duplicated from there (see dup_needs_source_process), so it is
++     * not passed on. */
++    if (dup_needs_source_process( parent, info->data->console )) info->data->console = 0;
++    if (!(req->flags & PROCESS_CREATE_FLAGS_INHERIT_HANDLES))
++    {
++        if (dup_needs_source_process( parent, info->data->hstdin )) info->data->hstdin = 0;
++        if (dup_needs_source_process( parent, info->data->hstdout )) info->data->hstdout = 0;
++        if (dup_needs_source_process( parent, info->data->hstderr )) info->data->hstderr = 0;
++    }
++
+     /* inherit the process console, but keep pseudo handles (< 0), and 0 (= not attached to a console) as is */
+     if ((int)info->data->console > 0)
+         info->data->console = duplicate_handle( parent, info->data->console, process,

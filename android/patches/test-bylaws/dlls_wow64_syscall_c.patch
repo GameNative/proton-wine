@@ -1,0 +1,47 @@
+diff --git a/dlls/wow64/syscall.c b/dlls/wow64/syscall.c
+index 0508f4aab36..519fe74841f 100644
+--- a/dlls/wow64/syscall.c
++++ b/dlls/wow64/syscall.c
+@@ -742,6 +742,29 @@ static HMODULE load_64bit_module( const WCHAR *name )
+     return module;
+ }
+ 
++/**********************************************************************
++ *           wow64GetEnvironmentVariableW
++ */
++static DWORD wow64GetEnvironmentVariableW( LPCWSTR name, LPWSTR val, DWORD size )
++{
++    UNICODE_STRING us_name, us_value;
++    NTSTATUS status;
++    DWORD len;
++
++    RtlInitUnicodeString( &us_name, name );
++    us_value.Length = 0;
++    us_value.MaximumLength = (size ? size - 1 : 0) * sizeof(WCHAR);
++    us_value.Buffer = val;
++
++    status = RtlQueryEnvironmentVariable_U( NULL, &us_name, &us_value );
++    len = us_value.Length / sizeof(WCHAR);
++    if (status == STATUS_BUFFER_TOO_SMALL) return len + 1;
++    if (status) return 0;
++    if (!size) return len + 1;
++    val[len] = 0;
++    return len;
++}
++
+ 
+ /**********************************************************************
+  *           get_cpu_dll_name
+@@ -756,6 +779,12 @@ static const WCHAR *get_cpu_dll_name(void)
+     HANDLE key;
+     ULONG size;
+ 
++    WCHAR *cpu_dll = (WCHAR*)buffer;
++    UINT res;
++    if ((res = wow64GetEnvironmentVariableW( L"HODLL", cpu_dll, ARRAY_SIZE(buffer))) &&
++        res < ARRAY_SIZE(buffer))
++        return cpu_dll;
++
+     switch (current_machine)
+     {
+     case IMAGE_FILE_MACHINE_I386:

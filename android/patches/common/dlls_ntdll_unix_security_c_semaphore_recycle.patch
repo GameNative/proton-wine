@@ -1,0 +1,31 @@
+ntdll: recycle private unnamed semaphores (security.c part)
+
+NtSetSecurityObject stops recycling the handle; NtQuerySecurityObject closes a parked handle
+for real first, so the server reports it as invalid.
+
+See dlls_ntdll_unix_sync_c_semaphore_recycle.patch.
+
+diff --git a/dlls/ntdll/unix/security.c b/dlls/ntdll/unix/security.c
+index 99312397e1f..95f6291d9c9 100644
+--- a/dlls/ntdll/unix/security.c
++++ b/dlls/ntdll/unix/security.c
+@@ -1019,6 +1019,9 @@ NTSTATUS WINAPI NtQuerySecurityObject( HANDLE handle, SECURITY_INFORMATION info,
+ 
+     TRACE( "(%p,0x%08x,%p,0x%08x,%p)\n", handle, info, descr, length, retlen );
+ 
++    /* a parked semaphore was closed by the application; let the server say so */
++    close_parked_inproc_semaphore( handle );
++
+     for (;;)
+     {
+         if (!(buffer = malloc( buffer_size ))) return STATUS_NO_MEMORY;
+@@ -1081,6 +1084,9 @@ NTSTATUS WINAPI NtSetSecurityObject( HANDLE handle, SECURITY_INFORMATION info, P
+ 
+     if (!descr) return STATUS_ACCESS_VIOLATION;
+ 
++    /* a recycled semaphore must not carry a changed security descriptor */
++    if ((status = make_inproc_sync_public( handle ))) return status;
++
+     /* reuse the object attribute SD marshalling */
+     InitializeObjectAttributes( &attr, NULL, 0, 0, descr );
+     if ((status = alloc_object_attributes( &attr, &objattr, &len ))) return status;
