@@ -320,6 +320,10 @@ do
       # resume x64 code from NtContinue without a syscall
       "arm64ec/dlls_ntdll_signal_arm64ec_c_fast_continue.patch"
 
+      # RtlIsEcCode answers FALSE past the end of the EC bitmap instead of faulting,
+      # so an exception unwind through garbage frames does not recurse until the stack overflows
+      "arm64ec/dlls_ntdll_signal_arm64ec_c_ec_bitmap_range.patch"
+
       # ignore attempts to set reserved CPSR bits, so a host-only bit (SSBS)
       # never reaches user context (Wine MR !12262, Wine bug 60405)
       "arm64ec/dlls_ntdll_cpsr_reserved_bits.patch"

@@ -1,0 +1,25 @@
+diff --git a/dlls/ntdll/signal_arm64ec.c b/dlls/ntdll/signal_arm64ec.c
+--- a/dlls/ntdll/signal_arm64ec.c
++++ b/dlls/ntdll/signal_arm64ec.c
+@@ -1448,8 +1448,21 @@
+  */
+ BOOLEAN WINAPI RtlIsEcCode( ULONG_PTR ptr )
+ {
++    static SIZE_T map_size;
+     const UINT64 *map = (const UINT64 *)NtCurrentTeb()->Peb->EcCodeBitMap;
+     ULONG_PTR page = ptr / page_size;
++
++    /* the bitmap only covers the host address space; an unwind through garbage
++     * frames can ask about any pointer, and reading past the map faults again */
++    if (!map_size)
++    {
++        MEMORY_REGION_INFORMATION info;
++
++        if (NtQueryVirtualMemory( GetCurrentProcess(), map, MemoryRegionInformation,
++                                  &info, sizeof(info), NULL )) return FALSE;
++        map_size = info.RegionSize;
++    }
++    if (page / 64 >= map_size / sizeof(*map)) return FALSE;
+     return (map[page / 64] >> (page & 63)) & 1;
+ }
+ 
