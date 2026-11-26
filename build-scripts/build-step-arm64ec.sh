@@ -320,6 +320,11 @@ do
       # resume x64 code from NtContinue without a syscall
       "arm64ec/dlls_ntdll_signal_arm64ec_c_fast_continue.patch"
 
+      # a syscall instruction in x64 code (not an ntdll thunk) leaves the caller's stack
+      # untouched and returns rcx/r11 like hardware; trace the number and return address (+seh)
+      "arm64ec/dlls_ntdll_signal_x86_64_c_direct_syscall_stack.patch"
+      "arm64ec/dlls_ntdll_signal_arm64ec_c_syscall_trace.patch"
+
       # ignore attempts to set reserved CPSR bits, so a host-only bit (SSBS)
       # never reaches user context (Wine MR !12262, Wine bug 60405)
       "arm64ec/dlls_ntdll_cpsr_reserved_bits.patch"
