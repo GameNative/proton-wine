@@ -1,0 +1,51 @@
+diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
+index 6ec12ef..4a868ee 100644
+--- a/dlls/ntdll/unix/virtual.c
++++ b/dlls/ntdll/unix/virtual.c
+@@ -40,6 +40,9 @@
+ #ifdef HAVE_SYS_SYSINFO_H
+ # include <sys/sysinfo.h>
+ #endif
++#ifdef HAVE_SYS_STATVFS_H
++# include <sys/statvfs.h>
++#endif
+ #ifdef HAVE_SYS_SYSCALL_H
+ # include <sys/syscall.h>
+ #endif
+@@ -3307,9 +3310,18 @@ static NTSTATUS map_image_into_view( struct file_view *view, const UNICODE_STRIN
+     SIZE_T header_size, header_map_size, total_size = view->size;
+     SIZE_T align_mask = max( image_info->alignment - 1, page_mask );
+     INT_PTR delta;
++    BOOL noexec = FALSE;
++#if defined(HAVE_SYS_STATVFS_H) && defined(ST_NOEXEC)
++    struct statvfs vfs;
++#endif
+ 
+     TRACE_(module)( "mapping PE file %s at %p-%p\n", debugstr_us(nt_name), ptr, ptr + total_size );
+ 
++#if defined(HAVE_SYS_STATVFS_H) && defined(ST_NOEXEC)
++    /* a file mapping from a noexec file system cannot be made executable, so code is read instead */
++    noexec = !fstatvfs( fd, &vfs ) && (vfs.f_flag & ST_NOEXEC);
++#endif
++
+     /* map the header */
+ 
+     fstat( fd, &st );
+@@ -3345,7 +3357,7 @@ static NTSTATUS map_image_into_view( struct file_view *view, const UNICODE_STRIN
+ 
+         total_size = min( total_size, ROUND_SIZE( 0, st.st_size, page_mask ));
+         if (map_file_into_view( view, fd, 0, total_size, 0, VPROT_COMMITTED | VPROT_READ | VPROT_WRITECOPY,
+-                                removable ) != STATUS_SUCCESS) goto done;
++                                removable || noexec ) != STATUS_SUCCESS) goto done;
+ 
+         /* check that all sections are loaded at the right offset */
+         if (nt->OptionalHeader.FileAlignment != nt->OptionalHeader.SectionAlignment) goto done;
+@@ -3436,7 +3448,7 @@ static NTSTATUS map_image_into_view( struct file_view *view, const UNICODE_STRIN
+             end < file_start ||
+             map_file_into_view( view, fd, sec[i].VirtualAddress, file_size, file_start,
+                                 VPROT_COMMITTED | VPROT_READ | VPROT_WRITECOPY,
+-                                removable ) != STATUS_SUCCESS)
++                                removable || (noexec && (sec[i].Characteristics & IMAGE_SCN_MEM_EXECUTE)) ) != STATUS_SUCCESS)
+         {
+             ERR_(module)( "Could not map %s section %.8s, file probably truncated\n",
+                           debugstr_us(nt_name), sec[i].Name );

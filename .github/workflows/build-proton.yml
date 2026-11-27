@@ -176,6 +176,11 @@ jobs:
             bash build-scripts/build-step-arm64ec.sh --configure
           fi
 
+      - name: Print the server protocol for ${{ matrix.arch }}
+        run: |
+          grep 'define SERVER_PROTOCOL_VERSION' include/wine/server_protocol.h
+          sha256sum server/protocol.def
+
       - name: Build Proton for ${{ matrix.arch }}
         run: |
           if [ "${{ matrix.arch }}" == "x86_64" ]; then
@@ -302,6 +307,84 @@ jobs:
         with:
           name: proton-wine-${{ env.ARCH_NAME }}
           path: ${{ env.WINE_WCP }}
+          retention-days: 30
+
+  # x86-64 Linux (glibc) Wine that joins an ARM64EC prefix as a client of its wineserver.
+  # Built from the same commit as the ARM64EC package because the two share the server protocol.
+  build-linux-x86_64:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Resolve the package name
+        run: |
+          PR_PART=""
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            PR_PART="-${{ github.event.pull_request.number }}"
+          fi
+          echo "PACKAGE_NAME=proton-11.0-3-x86_64-linux$PR_PART.tar.zst" >> $GITHUB_ENV
+
+      - name: Set up build environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential git wget flex bison gettext autoconf automake libtool pkg-config ccache zstd \
+            libx11-dev libxext-dev libxcursor-dev libxi-dev libxrandr-dev libxrender-dev libxfixes-dev \
+            libxcomposite-dev libxinerama-dev libxxf86vm-dev libgl-dev \
+            libfreetype-dev libfontconfig-dev libgnutls28-dev libpulse-dev libdbus-1-dev libudev-dev \
+            libvulkan-dev libunwind-dev
+
+      - name: Cache LLVM MinGW toolchain
+        id: cache-llvm-mingw
+        uses: actions/cache@v4
+        with:
+          path: ~/toolchains/llvm-mingw-20250920-ucrt-ubuntu-22.04-x86_64
+          key: bylaws-llvm-mingw-20250920
+
+      - name: Set up LLVM MinGW toolchain
+        if: steps.cache-llvm-mingw.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p $HOME/toolchains
+          cd $HOME/toolchains
+          wget https://github.com/bylaws/llvm-mingw/releases/download/20250920/llvm-mingw-20250920-ucrt-ubuntu-22.04-x86_64.tar.xz
+          tar -xf llvm-mingw-20250920-ucrt-ubuntu-22.04-x86_64.tar.xz
+
+      - name: Cache ccache (x86_64-linux)
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-p11-x86_64-linux-${{ github.sha }}
+          restore-keys: |
+            ccache-p11-x86_64-linux-
+
+      - name: Run autogen.sh
+        run: bash autogen.sh
+
+      - name: Configure
+        run: bash build-scripts/build-step-x86_64-linux.sh --configure
+
+      - name: Build
+        run: bash build-scripts/build-step-x86_64-linux.sh --build
+
+      - name: ccache stats
+        if: always()
+        run: ccache -s || true
+
+      - name: Install
+        run: bash build-scripts/build-step-x86_64-linux.sh --install
+
+      - name: Package
+        run: bash build-scripts/build-step-x86_64-linux.sh --package
+
+      - name: Upload the x86-64 Linux package
+        uses: actions/upload-artifact@v4
+        with:
+          name: proton-x86_64-linux
+          path: ${{ env.PACKAGE_NAME }}
           retention-days: 30
 
   release:

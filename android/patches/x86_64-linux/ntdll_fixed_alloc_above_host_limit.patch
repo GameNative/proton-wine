@@ -1,0 +1,33 @@
+diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
+index 1cf3efc..73e2632 100644
+--- a/dlls/ntdll/unix/virtual.c
++++ b/dlls/ntdll/unix/virtual.c
+@@ -2549,8 +2549,16 @@ static NTSTATUS map_view( struct file_view **view_ret, void *base, size_t size,
+         if (is_beyond_limit( base, size, address_space_limit )) return STATUS_WORKING_SET_LIMIT_RANGE;
+         if (limit_low && base < (void *)limit_low) return STATUS_CONFLICTING_ADDRESSES;
+         if (limit_high && is_beyond_limit( base, size, (void *)limit_high )) return STATUS_CONFLICTING_ADDRESSES;
+-        if (is_beyond_limit( base, size, host_addr_space_limit )) return STATUS_CONFLICTING_ADDRESSES;
+-        if ((status = map_fixed_area( base, size, unix_prot ))) return status;
++        if (is_beyond_limit( base, size, host_addr_space_limit ))
++        {
++            /* Private memory wholly above the probed host limit, which is below the Windows limit on hosts with
++             * a smaller address space: let the host (or an emulator) decide, and report a refusal as before. */
++            if (base < host_addr_space_limit || (vprot & (SEC_FILE | SEC_IMAGE | SEC_COMMIT | SEC_RESERVE)) ||
++                ((UINT_PTR)base & host_page_mask) || find_view_range( base, size ) ||
++                anon_mmap_tryfixed( base, ROUND_SIZE( 0, size, host_page_mask ), unix_prot, 0 ) == MAP_FAILED)
++                return STATUS_CONFLICTING_ADDRESSES;
++        }
++        else if ((status = map_fixed_area( base, size, unix_prot ))) return status;
+         if (is_beyond_limit( base, size, working_set_limit )) working_set_limit = address_space_limit;
+         ptr = base;
+     }
+@@ -3953,7 +3961,8 @@ void virtual_init(void)
+ 
+     /* try to find space in a reserved area for the views and pages protection table */
+ #ifdef _WIN64
+-    pages_vprot_size = ((size_t)host_addr_space_limit >> page_shift >> pages_vprot_shift) + 1;
++    /* views may be placed up to address_space_limit even when the host limit is lower (see map_view) */
++    pages_vprot_size = ((size_t)max( host_addr_space_limit, address_space_limit ) >> page_shift >> pages_vprot_shift) + 1;
+     size = 2 * view_block_size + pages_vprot_size * sizeof(*pages_vprot);
+ #else
+     size = 2 * view_block_size + (1U << (32 - page_shift));

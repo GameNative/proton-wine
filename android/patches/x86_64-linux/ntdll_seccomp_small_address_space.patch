@@ -1,0 +1,141 @@
+diff --git a/dlls/ntdll/unix/signal_x86_64.c b/dlls/ntdll/unix/signal_x86_64.c
+index f1da0de..032d43b 100644
+--- a/dlls/ntdll/unix/signal_x86_64.c
++++ b/dlls/ntdll/unix/signal_x86_64.c
+@@ -2137,6 +2137,11 @@ static void install_bpf(struct sigaction *sig_act)
+         /* Native libs are loaded at high addresses. */
+         BPF_JUMP(BPF_JMP | BPF_JGT | BPF_K, NATIVE_SYSCALL_ADDRESS_START >> 32, 0, 1),
+         BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
++        /* On hosts with a smaller address space, they are loaded in the upper half of it (see
++         * init_native_area in virtual.c). Both values are set below, and are 0 otherwise. */
++        BPF_JUMP(BPF_JMP | BPF_JGE | BPF_K, 0 /* end of the native area >> 32 */, 2, 0),
++        BPF_JUMP(BPF_JMP | BPF_JGE | BPF_K, 0 /* start of the native area >> 32 */, 0, 1),
++        BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+         /* Allow i386. */
+         BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, arch)),
+         BPF_JUMP (BPF_JMP | BPF_JEQ | BPF_K, AUDIT_ARCH_X86_64, 1, 0),
+@@ -2150,11 +2155,20 @@ static void install_bpf(struct sigaction *sig_act)
+         BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+     };
+     long (*test_syscall)(long sc_number);
++    void *native_start, *native_end;
+     struct sock_fprog prog;
+     NTSTATUS status;
+ 
+-    if ((ULONG_PTR)sc_seccomp < NATIVE_SYSCALL_ADDRESS_START
++    virtual_get_native_area( &native_start, &native_end );
++    if (native_start)
++    {
++        filter[3].k = (ULONG_PTR)native_end >> 32;
++        filter[4].k = (ULONG_PTR)native_start >> 32;
++    }
++
++    if (((ULONG_PTR)sc_seccomp < NATIVE_SYSCALL_ADDRESS_START
+             || (ULONG_PTR)syscall < NATIVE_SYSCALL_ADDRESS_START)
++        && (!native_start || (void *)sc_seccomp < native_start || (void *)syscall < native_start))
+     {
+         ERR_(seh)("Native libs are being loaded in low addresses, sc_seccomp %p, syscall %p, not installing seccomp.\n",
+                 sc_seccomp, syscall);
+diff --git a/dlls/ntdll/unix/unix_private.h b/dlls/ntdll/unix/unix_private.h
+index 35fd170..fb18068 100644
+--- a/dlls/ntdll/unix/unix_private.h
++++ b/dlls/ntdll/unix/unix_private.h
+@@ -299,6 +299,7 @@ extern void *steamclient_handle_fault( LPCVOID addr, DWORD err );
+ extern void *anon_mmap_fixed( void *start, size_t size, int prot, int flags );
+ extern void *anon_mmap_alloc( size_t size, int prot );
+ extern void virtual_init(void);
++extern void virtual_get_native_area( void **start, void **end );
+ extern ULONG_PTR get_system_affinity_mask(void);
+ extern void virtual_get_system_info( SYSTEM_BASIC_INFORMATION *info, BOOL wow64 );
+ extern NTSTATUS virtual_map_builtin_module( HANDLE mapping, void **module, SIZE_T *size,
+diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
+index 73e2632..1aa0294 100644
+--- a/dlls/ntdll/unix/virtual.c
++++ b/dlls/ntdll/unix/virtual.c
+@@ -324,6 +324,8 @@ static void *working_set_limit   = (void *)0x7fff0000;
+ #endif
+ 
+ static void *host_addr_space_limit;  /* top of the host virtual address space */
++static void *native_area_start;      /* start of the part of a small host address space left to native code */
++static void *native_area_end;
+ 
+ static struct file_view *arm64ec_view;
+ static const ptrdiff_t max_try_map_step = 0x40000000;
+@@ -3905,6 +3907,55 @@ static void *alloc_virtual_heap( SIZE_T size )
+     return anon_mmap_alloc( size, PROT_READ | PROT_WRITE );
+ }
+ 
++#if defined(__x86_64__) && defined(__linux__)
++/***********************************************************************
++ *           init_native_area
++ *
++ * The seccomp filter that traps system calls made from Windows code tells native code apart by address
++ * (see install_bpf). When the host address space ends below 0x700000000000, native libraries are loaded
++ * below that limit too. Split the host address space instead: the upper half is left to the host, the
++ * lower half is reserved for Windows views, so that native code cannot be mapped there and Windows views
++ * are not placed above it. Nothing is changed if native code is already executable in the lower half.
++ */
++static void init_native_area(void)
++{
++    char *end = (char *)host_addr_space_limit + granularity_mask + 1;
++    char *start = (char *)((UINT_PTR)end / 2);
++    unsigned long map_start, map_end;
++    char line[512], perms[5];
++    FILE *f;
++
++    if ((UINT_PTR)end > 0x700000000000 || ((UINT_PTR)start & 0xffffffff)) return;
++    if (!(f = fopen( "/proc/self/maps", "r" ))) return;
++    while (fgets( line, sizeof(line), f ))
++    {
++        if (sscanf( line, "%lx-%lx %4s", &map_start, &map_end, perms ) != 3 || perms[2] != 'x') continue;
++        if (map_start >= (UINT_PTR)start) continue;
++        if (map_start >= 0x7d400000 && map_end <= 0x7d402000) continue;  /* the preloader, see install_bpf */
++        ERR( "native code at %lx-%lx, not splitting the address space at %p.\n", map_start, map_end, start );
++        fclose( f );
++        return;
++    }
++    fclose( f );
++    reserve_area( (void *)0x10000, start );
++    host_addr_space_limit = start;
++    native_area_start = start;
++    native_area_end = end;
++    TRACE( "native area %p-%p\n", start, end );
++}
++#endif
++
++/***********************************************************************
++ *           virtual_get_native_area
++ *
++ * Return the part of the host address space left to native code by init_native_area, if any.
++ */
++void virtual_get_native_area( void **start, void **end )
++{
++    *start = native_area_start;
++    *end = native_area_end;
++}
++
+ /***********************************************************************
+  *           virtual_init
+  */
+@@ -3959,6 +4010,10 @@ void virtual_init(void)
+         unsetenv( "WINEPRELOADRESERVE" );
+     }
+ 
++#if defined(__x86_64__) && defined(__linux__)
++    init_native_area();
++#endif
++
+     /* try to find space in a reserved area for the views and pages protection table */
+ #ifdef _WIN64
+     /* views may be placed up to address_space_limit even when the host limit is lower (see map_view) */
+@@ -5430,8 +5485,9 @@ void virtual_set_large_address_space(void)
+         {
+             address_space_start = (void *)0x10000;
+ #ifndef __APPLE__  /* don't free the zerofill section on macOS */
++            /* not when the lower half is kept for Windows views (see init_native_area) */
+             if ((main_image_info.DllCharacteristics & IMAGE_DLLCHARACTERISTICS_HIGH_ENTROPY_VA) &&
+-                (main_image_info.DllCharacteristics & IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE))
++                (main_image_info.DllCharacteristics & IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE) && !native_area_start)
+                 free_reserved_memory( 0, (char *)0x7ffe0000 );
+ #endif
+         }

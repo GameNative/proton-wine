@@ -1,0 +1,15 @@
+diff --git a/dlls/ntdll/unix/loader.c b/dlls/ntdll/unix/loader.c
+index 35bd1f5..979edd8 100644
+--- a/dlls/ntdll/unix/loader.c
++++ b/dlls/ntdll/unix/loader.c
+@@ -2917,7 +2917,9 @@ static void reexec_loader( int argc, char *argv[], char *extra_arg )
+     }
+ 
+     /* default to 32-bit loader to support 32-bit prefixes */
+-    if (machine == IMAGE_FILE_MACHINE_AMD64) machine = IMAGE_FILE_MACHINE_I386;
++    /* a hybrid prefix is 64-bit, and each x86-64 process in it starts here: keep the 64-bit preloader, as a
++     * process created by the wineserver gets */
++    if (machine == IMAGE_FILE_MACHINE_AMD64 && !getenv( "WINE_HYBRID_NATIVE_LOADER" )) machine = IMAGE_FILE_MACHINE_I386;
+ 
+     loader_exec( new_argv, machine );
+     fatal_error( "could not exec the wine loader\n" );

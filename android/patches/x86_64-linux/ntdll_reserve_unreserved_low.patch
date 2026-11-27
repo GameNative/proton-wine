@@ -1,0 +1,41 @@
+diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
+index 4a868ee..a366a6e 100644
+--- a/dlls/ntdll/unix/virtual.c
++++ b/dlls/ntdll/unix/virtual.c
+@@ -3935,6 +3935,9 @@ static void init_native_area(void)
+     char *start = (char *)((UINT_PTR)end / 2);
+     unsigned long map_start, map_end;
+     char line[512], perms[5];
++    char *gaps[16][2], *cur;
++    struct reserved_area *area;
++    unsigned int i, count = 0;
+     FILE *f;
+ 
+     if ((UINT_PTR)end > 0x700000000000 || ((UINT_PTR)start & 0xffffffff)) return;
+@@ -3949,7 +3952,25 @@ static void init_native_area(void)
+         return;
+     }
+     fclose( f );
+-    reserve_area( (void *)0x10000, start );
++    /* reserve only what is not reserved yet: a request across an existing reservation fails and is
++     * retried in halves down to single allocation units, thousands of calls for the preloader's ranges */
++    cur = (char *)0x10000;
++    LIST_FOR_EACH_ENTRY( area, &reserved_areas, struct reserved_area, entry )
++    {
++        if ((char *)area->base >= start) break;
++        if ((char *)area->base > cur && count < ARRAY_SIZE(gaps))
++        {
++            gaps[count][0] = cur;
++            gaps[count++][1] = area->base;
++        }
++        if ((char *)area->base + area->size > cur) cur = (char *)area->base + area->size;
++    }
++    if (cur < start && count < ARRAY_SIZE(gaps))
++    {
++        gaps[count][0] = cur;
++        gaps[count++][1] = start;
++    }
++    for (i = 0; i < count; i++) reserve_area( gaps[i][0], gaps[i][1] );
+     host_addr_space_limit = start;
+     native_area_start = start;
+     native_area_end = end;

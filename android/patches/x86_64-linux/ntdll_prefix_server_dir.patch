@@ -1,0 +1,28 @@
+diff --git a/dlls/ntdll/unix/server.c b/dlls/ntdll/unix/server.c
+index 57b944b..a5a55ae 100644
+--- a/dlls/ntdll/unix/server.c
++++ b/dlls/ntdll/unix/server.c
+@@ -1319,7 +1319,22 @@ static const char *init_server_dir( dev_t dev, ino_t ino )
+ #ifdef __ANDROID__  /* there's no /tmp dir on Android */
+     asprintf( &dir, "%s/.wineserver/server-%llx-%llx", config_dir, (unsigned long long)dev, (unsigned long long)ino );
+ #else
+-    asprintf( &dir, "/tmp/.wine-%u/server-%llx-%llx", getuid(), (unsigned long long)dev, (unsigned long long)ino );
++    char *prefix_dir = NULL;
++    struct stat st;
++    BOOL use_prefix = FALSE;
++
++    /* the prefix of a hybrid prefix belongs to a host Wine that keeps its server directory there
++     * (Android has no /tmp); a process started without a server socket must find that server too */
++    if (asprintf( &prefix_dir, "%s/.wineserver", config_dir ) != -1)
++    {
++        use_prefix = !stat( prefix_dir, &st ) && S_ISDIR( st.st_mode );
++        free( prefix_dir );
++    }
++
++    if (use_prefix)
++        asprintf( &dir, "%s/.wineserver/server-%llx-%llx", config_dir, (unsigned long long)dev, (unsigned long long)ino );
++    else
++        asprintf( &dir, "/tmp/.wine-%u/server-%llx-%llx", getuid(), (unsigned long long)dev, (unsigned long long)ino );
+ #endif
+     return dir;
+ }
