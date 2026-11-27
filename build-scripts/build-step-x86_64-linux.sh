@@ -89,6 +89,8 @@ for arg in "$@"; do
       --prefix="$OUTPUT_DIR" \
       --disable-tests \
       --disable-winemenubuilder \
+      --disable-lsteamclient \
+      --without-unwind \
       --with-x \
       --with-freetype \
       --with-fontconfig \
@@ -128,6 +130,18 @@ for arg in "$@"; do
     for f in lib/wine/x86_64-unix/wine64 lib/wine/x86_64-unix/wine64-preloader lib/wine/x86_64-unix/ntdll.so lib/wine/x86_64-windows/ntdll.dll; do
       [ -f "$f" ] || { echo "error: $f is missing from the build" >&2; exit 1; }
     done
+    # The device's x86-64 root file system holds a fixed set of libraries; a module that needs
+    # another one cannot load there.
+    missing=0
+    for f in lib/wine/x86_64-unix/*; do
+      for lib in $(readelf -d "$f" 2>/dev/null | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p'); do
+        [ -e "lib/wine/x86_64-unix/$lib" ] && continue
+        grep -qxF "$lib" "$PROJECT_ROOT/android/x86_64-linux-runtime-libs.txt" && continue
+        echo "error: $f needs $lib, which is not in android/x86_64-linux-runtime-libs.txt" >&2
+        missing=1
+      done
+    done
+    [ "$missing" -eq 0 ] || exit 1
     grep 'define SERVER_PROTOCOL_VERSION' "$PROJECT_ROOT/include/wine/server_protocol.h" | awk '{print $3}' > share/wine/server-protocol-version
     git -C "$PROJECT_ROOT" rev-parse HEAD > share/wine/build-commit
     tar -I 'zstd -T0 -19' -cf "$PROJECT_ROOT/$PACKAGE_NAME" lib/wine/x86_64-unix lib/wine/x86_64-windows share/wine
