@@ -276,6 +276,9 @@ jobs:
           echo "PROTON_WCP=$PROTON_WCP" >> $GITHUB_ENV
           echo "WINE_WCP=$WINE_WCP" >> $GITHUB_ENV
 
+          # The commit this package was built from; the x86-64 Linux package of the same run carries the same value.
+          git -C $GITHUB_WORKSPACE rev-parse HEAD > share/wine/build-commit
+
           cp $GITHUB_WORKSPACE/prefixPack.txz .
           cp $GITHUB_WORKSPACE/profile.json .
           tar -I 'zstd -T0 -19' -cf "$PROTON_WCP" bin lib share prefixPack.txz profile.json
