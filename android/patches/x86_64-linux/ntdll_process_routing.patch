@@ -1,0 +1,152 @@
+diff --git a/dlls/ntdll/unix/process.c b/dlls/ntdll/unix/process.c
+index ef1ab96..e91bca5 100644
+--- a/dlls/ntdll/unix/process.c
++++ b/dlls/ntdll/unix/process.c
+@@ -398,6 +398,131 @@ static BOOL is_unix_console_handle( HANDLE handle )
+ }
+ 
+ 
++
++/***********************************************************************
++ *           hybrid routing
++ *
++ * In a hybrid prefix one wineserver serves both the host's own Wine and an x86-64 Wine that runs
++ * under an emulator's Linux frontend. These variables decide which of them runs a new process:
++ *
++ *   WINE_HYBRID_X64_EXES      ';'-separated exe names ("game.exe") or Windows directory prefixes
++ *                             ("c:\games\foo\"), matched case-insensitively against the image path.
++ *                             An x86 image that matches runs in the x86-64 Wine.
++ *   WINE_HYBRID_X64_LOADER    space-separated command that runs the x86-64 Wine loader
++ *                             (e.g. "<ld.so> --library-path <lib> <emulator> <x86-64 wine>").
++ *   WINE_HYBRID_X64_ENV       ';'-separated NAME=VALUE changes for that command ("NAME=" unsets).
++ *   WINE_HYBRID_NATIVE_LOADER command that runs the host's Wine loader; set for x86-64 processes.
++ *   WINE_HYBRID_NATIVE_ENV    environment changes for that command.
++ *   WINE_HYBRID_NATIVE_EXES   exe names or directories an x86-64 process hands to the host's Wine
++ *                             even though it could run them itself (system processes).
++ *
++ * A child of an x86-64 process stays in the x86-64 Wine unless its image cannot run there
++ * (ARM64 or ARM64X) or it is listed in WINE_HYBRID_NATIVE_EXES.
++ */
++static BOOL hybrid_list_match( const char *list, const char *path )
++{
++    const char *name = strrchr( path, '\\' ), *p, *end;
++    size_t len;
++
++    name = name ? name + 1 : path;
++    for (p = list; p && *p; p = end + (*end == ';'))
++    {
++        if (!(end = strchr( p, ';' ))) end = p + strlen( p );
++        len = end - p;
++        if (!len) continue;
++        if (memchr( p, '\\', len ) || memchr( p, ':', len ))
++        {
++            if (!strncasecmp( path, p, len )) return TRUE;
++        }
++        else if (strlen( name ) == len && !strncasecmp( name, p, len )) return TRUE;
++    }
++    return FALSE;
++}
++
++static const char *hybrid_loader_for( const RTL_USER_PROCESS_PARAMETERS *params, const struct pe_image_info *pe_info )
++{
++    const char *x64_loader = getenv( "WINE_HYBRID_X64_LOADER" );
++    const char *native_loader = getenv( "WINE_HYBRID_NATIVE_LOADER" );
++    const char *x64_exes = getenv( "WINE_HYBRID_X64_EXES" );
++    const char *native_exes = getenv( "WINE_HYBRID_NATIVE_EXES" );
++    const UNICODE_STRING *image = &params->ImagePathName;
++    const char *ret = NULL;
++    char *path;
++    int len;
++
++    if (!x64_loader && !native_loader) return NULL;
++    if (!image->Length) return NULL;
++    if (!(path = malloc( image->Length * 3 + 1 ))) return NULL;
++    len = ntdll_wcstoumbs( image->Buffer, image->Length / sizeof(WCHAR), path, image->Length * 3, FALSE );
++    if (len < 0) len = 0;
++    path[len] = 0;
++
++#ifdef __x86_64__
++    if (native_loader && !(x64_exes && hybrid_list_match( x64_exes, path )) &&
++        (pe_info->machine == IMAGE_FILE_MACHINE_ARM64 || pe_info->is_hybrid ||
++         (native_exes && hybrid_list_match( native_exes, path ))))
++        ret = "WINE_HYBRID_NATIVE";
++#else
++    if (x64_loader && x64_exes && hybrid_list_match( x64_exes, path ) &&
++        (pe_info->machine == IMAGE_FILE_MACHINE_AMD64 || pe_info->machine == IMAGE_FILE_MACHINE_I386))
++        ret = "WINE_HYBRID_X64";
++#endif
++    TRACE( "%s machine %04x hybrid %u -> %s\n", debugstr_a(path), pe_info->machine, pe_info->is_hybrid,
++           ret ? ret : "this Wine" );
++    free( path );
++    return ret;
++}
++
++/* apply "NAME=VALUE;NAME=;..." to the environment */
++static void hybrid_apply_env( const char *list )
++{
++    char *copy, *p, *end, *eq;
++
++    if (!list || !(copy = strdup( list ))) return;
++    for (p = copy; *p; p = end)
++    {
++        if ((end = strchr( p, ';' ))) *end++ = 0;
++        else end = p + strlen( p );
++        if (!(eq = strchr( p, '=' )) || eq == p) continue;
++        *eq = 0;
++        if (eq[1]) setenv( p, eq + 1, 1 );
++        else unsetenv( p );
++    }
++    free( copy );
++}
++
++/* exec the other Wine of a hybrid prefix; argv[0] and argv[1] are reserved */
++static void hybrid_exec( const char *which, char **argv, int socketfd, const struct pe_image_info *pe_info )
++{
++    char name[64], *loader, *p, **new_argv, buf[64];
++    ULONGLONG res_start = pe_info->base, res_end = pe_info->base + pe_info->map_size;
++    int count = 0, i, words = 0;
++
++    snprintf( name, sizeof(name), "%s_LOADER", which );
++    if (!(loader = getenv( name )) || !(loader = strdup( loader ))) return;
++    for (p = loader; *p; p++) if (*p == ' ') words++;
++    words++;
++    while (argv[2 + count]) count++;
++    if (!(new_argv = malloc( (words + count + 1) * sizeof(char *) ))) return;
++    words = 0;
++    for (p = strtok( loader, " " ); p; p = strtok( NULL, " " )) new_argv[words++] = p;
++    for (i = 0; i <= count; i++) new_argv[words + i] = argv[2 + i];
++
++    if (pe_info->wine_fakedll) res_start = res_end = 0;
++    snprintf( buf, sizeof(buf), "%u", socketfd );
++    setenv( "WINESERVERSOCKET", buf, 1 );
++    snprintf( buf, sizeof(buf), "%x%08x-%x%08x", (UINT)(res_start >> 32), (UINT)res_start,
++              (UINT)(res_end >> 32), (UINT)res_end );
++    setenv( "WINEPRELOADRESERVE", buf, 1 );
++    unsetenv( "WINELOADERNOEXEC" );  /* the other loader starts through its own preloader */
++    unsetenv( "WINE_LD_PRELOAD" );
++    snprintf( name, sizeof(name), "%s_ENV", which );
++    hybrid_apply_env( getenv( name ) );
++    signal( SIGPIPE, SIG_DFL );
++    execv( new_argv[0], new_argv );
++    ERR( "failed to exec %s: %s\n", debugstr_a(new_argv[0]), strerror( errno ));
++}
++
+ /***********************************************************************
+  *           spawn_process
+  */
+@@ -408,6 +533,7 @@ static NTSTATUS spawn_process( const RTL_USER_PROCESS_PARAMETERS *params, int so
+     int stdin_fd = -1, stdout_fd = -1;
+     pid_t pid;
+     char **argv;
++    const char *hybrid = hybrid_loader_for( params, pe_info );
+ 
+     if (wine_server_handle_to_fd( params->hStdInput, FILE_READ_DATA, &stdin_fd, NULL ) &&
+         isatty(0) && is_unix_console_handle( params->hStdInput ))
+@@ -442,6 +568,7 @@ static NTSTATUS spawn_process( const RTL_USER_PROCESS_PARAMETERS *params, int so
+             }
+             argv = build_argv( &params->CommandLine, 2 );
+ 
++            if (hybrid) hybrid_exec( hybrid, argv, socketfd, pe_info );
+             exec_wineloader( argv, socketfd, pe_info );
+             _exit(1);
+         }

@@ -1,0 +1,42 @@
+diff --git a/dlls/ntdll/unix/env.c b/dlls/ntdll/unix/env.c
+index 9564a00..e30b3ea 100644
+--- a/dlls/ntdll/unix/env.c
++++ b/dlls/ntdll/unix/env.c
+@@ -1935,7 +1935,8 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params( void **module )
+     static const WCHAR pathW[] = {'P','A','T','H'};
+     RTL_USER_PROCESS_PARAMETERS *params = NULL;
+     SIZE_T size, env_pos, env_size;
+-    WCHAR *dst, *cmdline, *path, *bootstrap;
++    WCHAR *dst, *cmdline, *path, *bootstrap, *desktop = NULL;
++    const char *hybrid_desktop = getenv( "WINE_HYBRID_DESKTOP" );
+     WCHAR *env = get_initial_environment( &env_pos, &env_size );
+     WCHAR *curdir = get_initial_directory();
+     UNICODE_STRING nt_name;
+@@ -2005,8 +2006,18 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params( void **module )
+     TRACE( "image %s cmdline %s dir %s\n",
+            debugstr_w(main_wargv[0]), debugstr_w(cmdline), debugstr_w(curdir) );
+ 
++    /* a process started without a parent inside a hybrid session joins the session's desktop */
++    if (hybrid_desktop && hybrid_desktop[0])
++    {
++        DWORD len = strlen( hybrid_desktop ) + 1;
++        if ((desktop = malloc( len * sizeof(WCHAR) )))
++            desktop[ntdll_umbstowcs( hybrid_desktop, len - 1, desktop, len - 1 )] = 0;
++        TRACE( "desktop %s\n", debugstr_w(desktop) );
++    }
++
+     size = (sizeof(*params)
+             + MAX_PATH * sizeof(WCHAR)  /* curdir */
++            + (desktop ? (wcslen( desktop ) + 1) * sizeof(WCHAR) : 0)
+             + (wcslen( cmdline ) + 1) * sizeof(WCHAR)  /* command line */
+             + (wcslen( main_wargv[0] ) + 1) * sizeof(WCHAR) * 2 /* image path + window title */
+             + env_pos * sizeof(WCHAR));
+@@ -2030,6 +2041,8 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params( void **module )
+     put_unicode_string( main_wargv[0], &dst, &params->ImagePathName );
+     put_unicode_string( cmdline, &dst, &params->CommandLine );
+     put_unicode_string( main_wargv[0], &dst, &params->WindowTitle );
++    if (desktop) put_unicode_string( desktop, &dst, &params->Desktop );
++    free( desktop );
+     free( nt_name.Buffer );
+     free( cmdline );
+     free( curdir );

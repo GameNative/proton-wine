@@ -1,0 +1,172 @@
+diff --git a/dlls/ntdll/unix/loader.c b/dlls/ntdll/unix/loader.c
+index 2d5d8a3..35bd1f5 100644
+--- a/dlls/ntdll/unix/loader.c
++++ b/dlls/ntdll/unix/loader.c
+@@ -97,6 +97,7 @@
+ 
+ WINE_DEFAULT_DEBUG_CHANNEL(module);
+ WINE_DECLARE_DEBUG_CHANNEL(syscall);
++WINE_DECLARE_DEBUG_CHANNEL(loaddll);
+ 
+ #if defined __i386__ || defined __x86_64__
+ #define SO_DLLS_SUPPORTED
+@@ -1742,6 +1743,59 @@ done:
+ }
+ 
+ 
++#ifdef __x86_64__
++/***********************************************************************
++ *           load_hybrid_substitute
++ *
++ * A prefix shared with an ARM64 Wine can hold native ARM64/ARM64EC dlls (graphics and audio
++ * replacements installed for that Wine). This process cannot run them; WINE_HYBRID_X64_DLLDIR
++ * lists Unix directories (':'-separated) with x86-64 dlls of the same names to load instead.
++ */
++static NTSTATUS load_hybrid_substitute( UNICODE_STRING *nt_name, void **module, SIZE_T *size,
++                                        SECTION_IMAGE_INFORMATION *info, ULONG_PTR limit_low,
++                                        ULONG_PTR limit_high, USHORT machine, off_t offset )
++{
++    const char *dirs = getenv( "WINE_HYBRID_X64_DLLDIR" ), *end;
++    unsigned int i, len = nt_name->Length / sizeof(WCHAR), namepos = 0;
++    char name[64], *path;
++    OBJECT_ATTRIBUTES attr;
++    HANDLE mapping;
++    NTSTATUS status;
++
++    if (!dirs || !*dirs) return STATUS_DLL_NOT_FOUND;
++    for (i = 0; i < len; i++) if (nt_name->Buffer[i] == '\\' || nt_name->Buffer[i] == '/') namepos = i + 1;
++    if (len - namepos >= sizeof(name)) return STATUS_DLL_NOT_FOUND;
++    for (i = namepos; i < len; i++)
++    {
++        WCHAR ch = nt_name->Buffer[i];
++        if (ch >= 0x80) return STATUS_DLL_NOT_FOUND;
++        name[i - namepos] = (ch >= 'A' && ch <= 'Z') ? ch + 32 : ch;
++    }
++    name[len - namepos] = 0;
++
++    InitializeObjectAttributes( &attr, nt_name, 0, 0, NULL );
++    for (; *dirs; dirs = *end ? end + 1 : end)
++    {
++        if (!(end = strchr( dirs, ':' ))) end = dirs + strlen( dirs );
++        if (end == dirs) continue;
++        if (!(path = malloc( end - dirs + strlen( name ) + 2 ))) return STATUS_NO_MEMORY;
++        sprintf( path, "%.*s/%s", (int)(end - dirs), dirs, name );
++        status = open_dll_file( path, &attr, &mapping );
++        if (!status)
++        {
++            status = virtual_map_substitute_module( mapping, module, size, info, limit_low, limit_high,
++                                                    machine, offset );
++            NtClose( mapping );
++        }
++        if (NT_SUCCESS(status)) TRACE_(loaddll)( "%s: using x86-64 %s\n", debugstr_us(nt_name), debugstr_a(path) );
++        free( path );
++        if (status != STATUS_DLL_NOT_FOUND) return status;
++    }
++    return STATUS_DLL_NOT_FOUND;
++}
++#endif
++
++
+ /***********************************************************************
+  *           load_builtin
+  *
+@@ -1786,6 +1840,30 @@ NTSTATUS load_builtin( const struct pe_image_info *image_info, UNICODE_STRING *n
+     }
+ #endif
+ 
++#ifdef __x86_64__
++    /* the same for a native ARM64X/ARM64EC dll: use an x86-64 one of the same name, else the builtin */
++    if (!image_info->wine_builtin && !image_info->wine_fakedll && image_info->is_hybrid &&
++        loadorder != LO_BUILTIN)
++    {
++        status = STATUS_DLL_NOT_FOUND;
++        if (loadorder != LO_NATIVE_BUILTIN && loadorder != LO_NATIVE)
++            status = find_builtin_dll( nt_name, exp_name, module, size, info, limit_low, limit_high,
++                                       current_machine, machine, FALSE, offset );
++        if (status == STATUS_DLL_NOT_FOUND || status == STATUS_NOT_SUPPORTED)
++            status = load_hybrid_substitute( nt_name, module, size, info, limit_low, limit_high, machine, offset );
++        if (status != STATUS_DLL_NOT_FOUND) return status;
++        if (loadorder == LO_NATIVE)
++        {
++            ERR( "%s is a native %04x dll and has no x86-64 replacement\n", debugstr_us(nt_name), image_info->machine );
++            return STATUS_INVALID_IMAGE_FORMAT;
++        }
++        TRACE_(loaddll)( "%s: native %04x dll, no x86-64 replacement, using the builtin\n",
++                         debugstr_us(nt_name), image_info->machine );
++        search_machine = current_machine;
++        loadorder = LO_BUILTIN;
++    }
++#endif
++
+     switch (loadorder)
+     {
+     case LO_NATIVE:
+diff --git a/dlls/ntdll/unix/unix_private.h b/dlls/ntdll/unix/unix_private.h
+index fb18068..6b2f94e 100644
+--- a/dlls/ntdll/unix/unix_private.h
++++ b/dlls/ntdll/unix/unix_private.h
+@@ -305,6 +305,9 @@ extern void virtual_get_system_info( SYSTEM_BASIC_INFORMATION *info, BOOL wow64
+ extern NTSTATUS virtual_map_builtin_module( HANDLE mapping, void **module, SIZE_T *size,
+                                             SECTION_IMAGE_INFORMATION *info, ULONG_PTR limit_low,
+                                             ULONG_PTR limit_high, WORD machine, BOOL prefer_native, off_t offset );
++extern NTSTATUS virtual_map_substitute_module( HANDLE mapping, void **module, SIZE_T *size,
++                                               SECTION_IMAGE_INFORMATION *info, ULONG_PTR limit_low,
++                                               ULONG_PTR limit_high, WORD machine, off_t offset );
+ extern NTSTATUS virtual_map_module( HANDLE mapping, void **module, SIZE_T *size,
+                                     SECTION_IMAGE_INFORMATION *info, ULONG_PTR limit_low,
+                                     ULONG_PTR limit_high, USHORT machine );
+diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
+index 1aa0294..6ec12ef 100644
+--- a/dlls/ntdll/unix/virtual.c
++++ b/dlls/ntdll/unix/virtual.c
+@@ -4144,6 +4144,50 @@ NTSTATUS virtual_map_builtin_module( HANDLE mapping, void **module, SIZE_T *size
+ }
+ 
+ 
++/***********************************************************************
++ *           virtual_map_substitute_module
++ *
++ * Map a native x86-64 dll that replaces an ARM64/ARM64EC one (see load_builtin).
++ */
++NTSTATUS virtual_map_substitute_module( HANDLE mapping, void **module, SIZE_T *size,
++                                        SECTION_IMAGE_INFORMATION *info, ULONG_PTR limit_low,
++                                        ULONG_PTR limit_high, WORD machine, off_t offset )
++{
++    mem_size_t full_size;
++    unsigned int sec_flags;
++    HANDLE shared_file;
++    struct pe_image_info *image_info = NULL;
++    NTSTATUS status;
++    UNICODE_STRING nt_name;
++    ANSI_STRING exp_name;
++
++    if ((status = get_mapping_info( mapping, SECTION_MAP_READ, &sec_flags, &full_size, &shared_file,
++                                    &image_info, &nt_name, &exp_name )))
++        return status;
++
++    if (!image_info) return STATUS_INVALID_PARAMETER;
++
++    *module = NULL;
++    *size = 0;
++
++    if (image_info->machine != IMAGE_FILE_MACHINE_AMD64 || image_info->is_hybrid)
++    {
++        WARN_(module)( "%s is not an x86-64 dll, ignoring\n", debugstr_us(&nt_name) );
++        status = STATUS_DLL_NOT_FOUND;
++    }
++    else
++    {
++        status = virtual_map_image( mapping, module, size, shared_file, limit_low, limit_high, 0,
++                                    machine, image_info, &nt_name, image_info->wine_builtin, offset );
++        virtual_fill_image_information( image_info, info );
++    }
++
++    if (shared_file) NtClose( shared_file );
++    free( image_info );
++    return status;
++}
++
++
+ /***********************************************************************
+  *           virtual_map_module
+  */

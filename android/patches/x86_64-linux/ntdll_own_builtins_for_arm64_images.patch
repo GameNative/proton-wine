@@ -1,0 +1,38 @@
+diff --git a/dlls/ntdll/unix/env.c b/dlls/ntdll/unix/env.c
+index 10f7299..9564a00 100644
+--- a/dlls/ntdll/unix/env.c
++++ b/dlls/ntdll/unix/env.c
+@@ -2073,6 +2073,10 @@ void init_startup_info(void)
+         wine_server_set_reply( req, info, startup_info_size );
+         status = wine_server_call( req );
+         machine = reply->machine;
++#ifdef __x86_64__
++        /* the parent chose the machine of an ARM64/ARM64X builtin; this process loads its x86-64 builtin */
++        if (machine == IMAGE_FILE_MACHINE_ARM64) machine = 0;
++#endif
+         info_size = reply->info_size;
+         env_size = (wine_server_reply_size( reply ) - info_size) / sizeof(WCHAR);
+     }
+diff --git a/dlls/ntdll/unix/loader.c b/dlls/ntdll/unix/loader.c
+index fadeaa7..2d5d8a3 100644
+--- a/dlls/ntdll/unix/loader.c
++++ b/dlls/ntdll/unix/loader.c
+@@ -1774,6 +1774,18 @@ NTSTATUS load_builtin( const struct pe_image_info *image_info, UNICODE_STRING *n
+     if (is_arm64ec() && image_info->is_hybrid && search_machine == IMAGE_FILE_MACHINE_AMD64)
+         search_machine = current_machine;
+ 
++#ifdef __x86_64__
++    /* A prefix made by an ARM64 Wine holds ARM64/ARM64X builtins in system32. Their code cannot run in
++     * this process, so take the builtin of the same name from this installation instead. */
++    if ((image_info->wine_builtin || image_info->wine_fakedll) &&
++        (search_machine == IMAGE_FILE_MACHINE_ARM64 || image_info->is_hybrid))
++    {
++        TRACE( "%s is a builtin for %04x, using the %04x one\n", debugstr_us(nt_name), search_machine, current_machine );
++        search_machine = current_machine;
++        if (loadorder == LO_BUILTIN_NATIVE) loadorder = LO_BUILTIN;  /* the file we found cannot be used */
++    }
++#endif
++
+     switch (loadorder)
+     {
+     case LO_NATIVE:

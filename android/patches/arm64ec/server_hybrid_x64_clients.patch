@@ -1,0 +1,234 @@
+diff --git a/include/wine/server_protocol.h b/include/wine/server_protocol.h
+index 94cdf0c..bb2cabf 100644
+--- a/include/wine/server_protocol.h
++++ b/include/wine/server_protocol.h
+@@ -1192,7 +1192,9 @@ struct init_first_thread_request
+     int          debug_level;
+     int          reply_fd;
+     int          wait_fd;
++    unsigned short native_machine;
+     /* VARARG(cpu_override,cpu_topology_override); */
++    char __pad_34[6];
+ };
+ struct init_first_thread_reply
+ {
+@@ -7215,6 +7217,6 @@ union generic_reply
+     struct fsync_free_shm_idx_reply fsync_free_shm_idx_reply;
+ };
+ 
+-#define SERVER_PROTOCOL_VERSION 931
++#define SERVER_PROTOCOL_VERSION 932
+ 
+ #endif /* __WINE_WINE_SERVER_PROTOCOL_H */
+diff --git a/server/mapping.c b/server/mapping.c
+index 31e2dd1..095cb9f 100644
+--- a/server/mapping.c
++++ b/server/mapping.c
+@@ -1717,8 +1717,8 @@ DECL_HANDLER(map_image_view)
+         {
+             current->entry_point = view->base + req->entry;
+             if (view->image.image_flags & IMAGE_FLAGS_ComPlusNativeReady)
+-                current->process->machine = is_machine_64bit( native_machine )
+-                    ? IMAGE_FILE_MACHINE_AMD64 : native_machine;
++                current->process->machine = is_machine_64bit( current->process->native_machine )
++                    ? IMAGE_FILE_MACHINE_AMD64 : current->process->native_machine;
+             else
+                 current->process->machine = req->machine;
+         }
+@@ -1728,7 +1728,7 @@ DECL_HANDLER(map_image_view)
+         if (req->machine != current->process->machine)
+         {
+             /* on 32-bit, the native 64-bit machine is allowed */
+-            if (is_machine_64bit( current->process->machine ) || req->machine != native_machine)
++            if (is_machine_64bit( current->process->machine ) || req->machine != current->process->native_machine)
+                 set_error( STATUS_IMAGE_MACHINE_TYPE_MISMATCH );
+         }
+     }
+diff --git a/server/process.c b/server/process.c
+index 8893566..27b1902 100644
+--- a/server/process.c
++++ b/server/process.c
+@@ -682,6 +682,7 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
+     process->sigkill_timeout = NULL;
+     process->sigkill_delay   = TICKS_PER_SEC / 64;
+     process->machine         = native_machine;
++    process->native_machine  = native_machine;
+     process->unix_pid        = -1;
+     process->exit_code       = STILL_ACTIVE;
+     process->running_threads = 0;
+diff --git a/server/process.h b/server/process.h
+index 5d157d6..c18104b 100644
+--- a/server/process.h
++++ b/server/process.h
+@@ -50,6 +50,7 @@ struct process
+     struct timeout_user *sigkill_timeout; /* timeout for final SIGKILL */
+     timeout_t            sigkill_delay;   /* delay before final SIGKILL */
+     unsigned short       machine;         /* client machine type */
++    unsigned short       native_machine;  /* machine of the client's host code (an x86-64 process under an emulator) */
+     int                  unix_pid;        /* Unix pid for final SIGKILL */
+     int                  exit_code;       /* process exit code */
+     int                  running_threads; /* number of threads running in this process */
+@@ -150,7 +151,7 @@ static inline int is_process_init_done( struct process *process )
+ 
+ static inline int is_wow64_process( struct process *process )
+ {
+-    return is_machine_64bit( native_machine ) && !is_machine_64bit( process->machine );
++    return is_machine_64bit( process->native_machine ) && !is_machine_64bit( process->machine );
+ }
+ 
+ static const unsigned int default_session_id = 1;
+diff --git a/server/protocol.def b/server/protocol.def
+index fd985e7..f6898ba 100644
+--- a/server/protocol.def
++++ b/server/protocol.def
+@@ -1173,6 +1173,7 @@ struct cpu_topology_override
+     int          debug_level;  /* new debug level */
+     int          reply_fd;     /* fd for reply pipe */
+     int          wait_fd;      /* fd for blocking calls pipe */
++    unsigned short native_machine; /* machine of the client's host code, 0 for the server's own */
+     VARARG(cpu_override,cpu_topology_override); /* Overridden CPUs to host CPUs mapping. */
+ @REPLY
+     process_id_t pid;          /* process id of the new thread's process */
+diff --git a/server/request_handlers.h b/server/request_handlers.h
+index 69edeea..29db617 100644
+--- a/server/request_handlers.h
++++ b/server/request_handlers.h
+@@ -729,7 +729,8 @@ C_ASSERT( offsetof(struct init_first_thread_request, unix_tid) == 16 );
+ C_ASSERT( offsetof(struct init_first_thread_request, debug_level) == 20 );
+ C_ASSERT( offsetof(struct init_first_thread_request, reply_fd) == 24 );
+ C_ASSERT( offsetof(struct init_first_thread_request, wait_fd) == 28 );
+-C_ASSERT( sizeof(struct init_first_thread_request) == 32 );
++C_ASSERT( offsetof(struct init_first_thread_request, native_machine) == 32 );
++C_ASSERT( sizeof(struct init_first_thread_request) == 40 );
+ C_ASSERT( offsetof(struct init_first_thread_reply, pid) == 8 );
+ C_ASSERT( offsetof(struct init_first_thread_reply, tid) == 12 );
+ C_ASSERT( offsetof(struct init_first_thread_reply, server_start) == 16 );
+diff --git a/server/request_trace.h b/server/request_trace.h
+index b2ca17c..e9881d6 100644
+--- a/server/request_trace.h
++++ b/server/request_trace.h
+@@ -142,6 +142,7 @@ static void dump_init_first_thread_request( const struct init_first_thread_reque
+     fprintf( stderr, ", debug_level=%d", req->debug_level );
+     fprintf( stderr, ", reply_fd=%d", req->reply_fd );
+     fprintf( stderr, ", wait_fd=%d", req->wait_fd );
++    fprintf( stderr, ", native_machine=%04x", req->native_machine );
+     dump_varargs_cpu_topology_override( ", cpu_override=", cur_size );
+ }
+ 
+@@ -4597,6 +4598,7 @@ static const struct
+     { "KEY_DELETED",                 STATUS_KEY_DELETED },
+     { "MAPPED_FILE_SIZE_ZERO",       STATUS_MAPPED_FILE_SIZE_ZERO },
+     { "MORE_ENTRIES",                STATUS_MORE_ENTRIES },
++    { "MORE_PROCESSING_REQUIRED",    STATUS_MORE_PROCESSING_REQUIRED },
+     { "MUTANT_NOT_OWNED",            STATUS_MUTANT_NOT_OWNED },
+     { "NAME_TOO_LONG",               STATUS_NAME_TOO_LONG },
+     { "NETWORK_BUSY",                STATUS_NETWORK_BUSY },
+diff --git a/server/thread.c b/server/thread.c
+index 6f0ce0e..dd64030 100644
+--- a/server/thread.c
++++ b/server/thread.c
+@@ -149,6 +149,14 @@ struct context
+ /* flags for registers that always need to be set from the server side */
+ static const unsigned int system_flags = SERVER_CTX_DEBUG_REGISTERS;
+ 
++/* The server reads and writes debug registers of a thread with ptrace, which only works for threads
++ * whose code runs on the host CPU. A thread of a client that runs under an emulator (an x86-64 Wine
++ * on an ARM64 host) keeps them in its own context instead. */
++static inline int is_host_machine_thread( struct thread *thread )
++{
++    return thread->process->native_machine == native_machine;
++}
++
+ static void dump_context( struct object *obj, int verbose );
+ static struct object *context_get_sync( struct object *obj );
+ static void context_destroy( struct object *obj );
+@@ -498,7 +506,7 @@ static struct context *create_thread_context( struct thread *thread )
+     context->status      = STATUS_PENDING;
+     context->cooperative = 0;
+     memset( &context->regs, 0, sizeof(context->regs) );
+-    context->regs[CTX_NATIVE].machine = native_machine;
++    context->regs[CTX_NATIVE].machine = thread->process->native_machine;
+ 
+     if (!(context->sync = create_internal_sync( 1, 0 )))
+     {
+@@ -1835,8 +1843,16 @@ DECL_HANDLER(init_first_thread)
+     reply->session_id   = process->session_id;
+     reply->info_size    = get_process_startup_info_size( process );
+     reply->server_start = server_start_time;
+-    set_reply_data( supported_machines,
+-                    min( supported_machines_count * sizeof(unsigned short), get_reply_max_size() ));
++    if (req->native_machine && req->native_machine != native_machine &&
++        native_machine == IMAGE_FILE_MACHINE_ARM64 && req->native_machine == IMAGE_FILE_MACHINE_AMD64)
++    {
++        /* an x86-64 Wine running under an emulator: AMD64 is its native machine, i386 runs in its WoW64 */
++        static const unsigned short amd64_machines[] = { IMAGE_FILE_MACHINE_AMD64, IMAGE_FILE_MACHINE_I386 };
++        process->native_machine = req->native_machine;
++        set_reply_data( amd64_machines, min( sizeof(amd64_machines), get_reply_max_size() ));
++    }
++    else set_reply_data( supported_machines,
++                         min( supported_machines_count * sizeof(unsigned short), get_reply_max_size() ));
+ 
+     if (do_fsync())
+     {
+@@ -2043,14 +2059,14 @@ DECL_HANDLER(select)
+     ctx_size = get_req_data_size() - sizeof(*result) - req->size;
+     ctx_count = ctx_size / sizeof(struct context_data);
+     if (ctx_count * sizeof(struct context_data) != ctx_size) goto invalid_param;
+-    if (ctx_count > 1 + (current->process->machine != native_machine)) goto invalid_param;
++    if (ctx_count > 1 + (current->process->machine != current->process->native_machine)) goto invalid_param;
+ 
+     if (ctx_count)
+     {
+         const struct context_data *native_context = (const struct context_data *)((const char *)(result + 1) + req->size);
+         const struct context_data *wow_context = (ctx_count > 1) ? native_context + 1 : NULL;
+ 
+-        if (native_context->machine == native_machine)
++        if (native_context->machine == current->process->native_machine)
+         {
+             if (wow_context && wow_context->machine != current->process->machine) goto invalid_param;
+         }
+@@ -2314,7 +2330,7 @@ DECL_HANDLER(get_thread_context)
+     else
+     {
+         if (!(thread = get_thread_from_handle( req->handle, THREAD_GET_CONTEXT ))) return;
+-        if (req->machine != native_machine && req->machine != thread->process->machine)
++        if (req->machine != thread->process->native_machine && req->machine != thread->process->machine)
+             set_error( STATUS_INVALID_PARAMETER );
+         else if (thread->state != RUNNING)
+             set_error( STATUS_UNSUCCESSFUL );
+@@ -2325,7 +2341,8 @@ DECL_HANDLER(get_thread_context)
+             if (thread->context)
+             {
+                 /* make sure that system regs are valid in thread context */
+-                if (thread->unix_tid != -1 && (system_flags & ~thread->context->regs[CTX_NATIVE].flags))
++                if (thread->unix_tid != -1 && is_host_machine_thread( thread ) &&
++                    (system_flags & ~thread->context->regs[CTX_NATIVE].flags))
+                     get_thread_context( thread, &thread->context->regs[CTX_NATIVE], system_flags );
+                 if (!get_error()) thread_context = (struct context *)grab_object( thread->context );
+             }
+@@ -2333,8 +2350,8 @@ DECL_HANDLER(get_thread_context)
+             {
+                 assert( reply->self );
+                 memset( context, 0, sizeof(struct context_data) );
+-                context->machine = native_machine;
+-                if (system_flags) get_thread_context( thread, context, system_flags );
++                context->machine = thread->process->native_machine;
++                if (system_flags && is_host_machine_thread( thread )) get_thread_context( thread, context, system_flags );
+             }
+         }
+         release_object( thread );
+@@ -2395,12 +2412,12 @@ DECL_HANDLER(set_thread_context)
+     if (!(thread = get_thread_from_handle( req->handle, THREAD_SET_CONTEXT ))) return;
+     reply->self = (thread == current);
+ 
+-    if (contexts[CTX_NATIVE].machine != native_machine ||
++    if (contexts[CTX_NATIVE].machine != thread->process->native_machine ||
+         (ctx_count == 2 && contexts[CTX_WOW].machine != thread->process->machine))
+         set_error( STATUS_INVALID_PARAMETER );
+     else if (thread->state != TERMINATED)
+     {
+-        unsigned int flags = system_flags & contexts[CTX_NATIVE].flags;
++        unsigned int flags = is_host_machine_thread( thread ) ? system_flags & contexts[CTX_NATIVE].flags : 0;
+ 
+         if (thread != current) stop_thread( thread );
+         if (flags) set_thread_context( thread, &contexts[CTX_NATIVE], flags );

@@ -1,0 +1,77 @@
+diff --git a/dlls/advapi32/advapi.c b/dlls/advapi32/advapi.c
+index 127cec5..56386d2 100644
+--- a/dlls/advapi32/advapi.c
++++ b/dlls/advapi32/advapi.c
+@@ -32,6 +32,7 @@
+ #include "wincred.h"
+ #include "wct.h"
+ #include "perflib.h"
++#include "lmcons.h"
+ 
+ #include "wine/debug.h"
+ 
+@@ -39,19 +40,37 @@
+ 
+ WINE_DEFAULT_DEBUG_CHANNEL(advapi);
+ 
++/* The user name: the profile name Wine was started with (WINEUSERNAME, from the Unix user), else
++ * Proton's fixed "steamuser". In a hybrid prefix this matches the host Wine, whose profile the prefix holds. */
++static const WCHAR *user_name(void)
++{
++    static WCHAR name[UNLEN + 1];
++    DWORD len;
++
++    if (!name[0])
++    {
++        len = GetEnvironmentVariableW( L"WINEUSERNAME", name, ARRAY_SIZE(name) );
++        if (!len || len >= ARRAY_SIZE(name) || wcschr( name, '\\' ) || wcschr( name, '/' ))
++            lstrcpyW( name, L"steamuser" );
++    }
++    return name;
++}
++
+ /******************************************************************************
+  * GetUserNameA [ADVAPI32.@]
+  */
+ BOOL WINAPI GetUserNameA( LPSTR name, LPDWORD size )
+ {
+-    static const char steamuserA[] = {'s','t','e','a','m','u','s','e','r',0};
+-    if(*size < ARRAY_SIZE(steamuserA)){
++    DWORD len = WideCharToMultiByte( CP_ACP, 0, user_name(), -1, NULL, 0, NULL, NULL );
++
++    if (*size < len)
++    {
+         SetLastError( ERROR_INSUFFICIENT_BUFFER );
+-        *size = ARRAY_SIZE(steamuserA);
++        *size = len;
+         return FALSE;
+     }
+-    memcpy(name, steamuserA, sizeof(steamuserA));
+-    *size = ARRAY_SIZE(steamuserA);
++    WideCharToMultiByte( CP_ACP, 0, user_name(), -1, name, len, NULL, NULL );
++    *size = len;
+     return TRUE;
+ }
+ 
+@@ -60,14 +79,16 @@ BOOL WINAPI GetUserNameA( LPSTR name, LPDWORD size )
+  */
+ BOOL WINAPI GetUserNameW( LPWSTR name, LPDWORD size )
+ {
+-    static const WCHAR steamuserW[] = {'s','t','e','a','m','u','s','e','r',0};
+-    if(*size < ARRAY_SIZE(steamuserW)){
++    DWORD len = lstrlenW( user_name() ) + 1;
++
++    if (*size < len)
++    {
+         SetLastError( ERROR_INSUFFICIENT_BUFFER );
+-        *size = ARRAY_SIZE(steamuserW);
++        *size = len;
+         return FALSE;
+     }
+-    memcpy(name, steamuserW, sizeof(steamuserW));
+-    *size = ARRAY_SIZE(steamuserW);
++    memcpy( name, user_name(), len * sizeof(WCHAR) );
++    *size = len;
+     return TRUE;
+ }
+ 

@@ -1,0 +1,46 @@
+diff --git a/dlls/ntdll/unix/process.c b/dlls/ntdll/unix/process.c
+index e91bca5..118c5bc 100644
+--- a/dlls/ntdll/unix/process.c
++++ b/dlls/ntdll/unix/process.c
+@@ -407,7 +407,8 @@ static BOOL is_unix_console_handle( HANDLE handle )
+  *
+  *   WINE_HYBRID_X64_EXES      ';'-separated exe names ("game.exe") or Windows directory prefixes
+  *                             ("c:\games\foo\"), matched case-insensitively against the image path.
+- *                             An x86 image that matches runs in the x86-64 Wine.
++ *                             An AMD64 image (not ARM64EC) that matches runs in the x86-64 Wine;
++ *                             i386 images always run in the host's Wine, under its WoW64.
+  *   WINE_HYBRID_X64_LOADER    space-separated command that runs the x86-64 Wine loader
+  *                             (e.g. "<ld.so> --library-path <lib> <emulator> <x86-64 wine>").
+  *   WINE_HYBRID_X64_ENV       ';'-separated NAME=VALUE changes for that command ("NAME=" unsets).
+@@ -416,8 +417,8 @@ static BOOL is_unix_console_handle( HANDLE handle )
+  *   WINE_HYBRID_NATIVE_EXES   exe names or directories an x86-64 process hands to the host's Wine
+  *                             even though it could run them itself (system processes).
+  *
+- * A child of an x86-64 process stays in the x86-64 Wine unless its image cannot run there
+- * (ARM64 or ARM64X) or it is listed in WINE_HYBRID_NATIVE_EXES.
++ * A child of an x86-64 process stays in the x86-64 Wine unless its image is i386, cannot run
++ * there (ARM64 or ARM64X) or is listed in WINE_HYBRID_NATIVE_EXES.
+  */
+ static BOOL hybrid_list_match( const char *list, const char *path )
+ {
+@@ -458,13 +459,15 @@ static const char *hybrid_loader_for( const RTL_USER_PROCESS_PARAMETERS *params,
+     path[len] = 0;
+ 
+ #ifdef __x86_64__
+-    if (native_loader && !(x64_exes && hybrid_list_match( x64_exes, path )) &&
+-        (pe_info->machine == IMAGE_FILE_MACHINE_ARM64 || pe_info->is_hybrid ||
+-         (native_exes && hybrid_list_match( native_exes, path ))))
++    if (native_loader &&
++        (pe_info->machine == IMAGE_FILE_MACHINE_I386 ||
++         (!(x64_exes && hybrid_list_match( x64_exes, path )) &&
++          (pe_info->machine == IMAGE_FILE_MACHINE_ARM64 || pe_info->is_hybrid ||
++           (native_exes && hybrid_list_match( native_exes, path ))))))
+         ret = "WINE_HYBRID_NATIVE";
+ #else
+-    if (x64_loader && x64_exes && hybrid_list_match( x64_exes, path ) &&
+-        (pe_info->machine == IMAGE_FILE_MACHINE_AMD64 || pe_info->machine == IMAGE_FILE_MACHINE_I386))
++    if (x64_loader && x64_exes && pe_info->machine == IMAGE_FILE_MACHINE_AMD64 && !pe_info->is_hybrid &&
++        hybrid_list_match( x64_exes, path ))
+         ret = "WINE_HYBRID_X64";
+ #endif
+     TRACE( "%s machine %04x hybrid %u -> %s\n", debugstr_a(path), pe_info->machine, pe_info->is_hybrid,
