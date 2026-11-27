@@ -129,6 +129,7 @@ for arg in "$@"; do
       [ -f "$f" ] || { echo "error: $f is missing from the build" >&2; exit 1; }
     done
     grep 'define SERVER_PROTOCOL_VERSION' "$PROJECT_ROOT/include/wine/server_protocol.h" | awk '{print $3}' > share/wine/server-protocol-version
+    git -C "$PROJECT_ROOT" rev-parse HEAD > share/wine/build-commit
     tar -I 'zstd -T0 -19' -cf "$PROJECT_ROOT/$PACKAGE_NAME" lib/wine/x86_64-unix lib/wine/x86_64-windows share/wine
     ls -la "$PROJECT_ROOT/$PACKAGE_NAME"
     ;;
