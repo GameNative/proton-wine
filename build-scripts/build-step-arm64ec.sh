@@ -358,6 +358,12 @@ do
       "common/dlls_ntdll_unix_process_c_semaphore_recycle.patch"
       "common/server_handle_c_semaphore_recycle.patch"
       "common/server_process_c_semaphore_recycle.patch"
+
+      # x86-64 Wine processes running under a Linux emulator can join this prefix as clients
+      # of this wineserver, and selected executables start in that Wine; nothing changes
+      # unless the WINE_HYBRID_X64_* variables are set
+      "arm64ec/server_hybrid_x64_clients.patch"
+      "arm64ec/dlls_ntdll_unix_process_c_hybrid_spawn.patch"
     )
 
     for patch in "${PATCHES[@]}"; do
