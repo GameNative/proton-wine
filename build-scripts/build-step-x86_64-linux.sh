@@ -107,7 +107,6 @@ for arg in "$@"; do
       --without-pcap \
       --without-pcsclite \
       --without-sane \
-      --without-sdl \
       --without-usb \
       --without-v4l2 \
       --without-wayland
